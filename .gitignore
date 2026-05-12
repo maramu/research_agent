@@ -1,0 +1,25 @@
+cat > /Volumes/Disco/proyectos/research_agent/.gitignore << 'EOF'
+# Entorno Python
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+
+# Variables de entorno
+config/.env
+*.env
+
+# Base de datos vectorial
+db/
+
+# Logs
+logs/
+
+# macOS
+.DS_Store
+
+# Editores
+.vscode/
+.idea/
+*.swp
+EOF
