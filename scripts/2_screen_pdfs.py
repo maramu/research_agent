@@ -44,6 +44,9 @@ LOG_FILE = LOG_DIR / "2_screen_pdfs.log"
 
 DEFAULT_OUTPUT_CSV = Path("/Volumes/research/metadatos/cribado_inicial.csv")
 DEFAULT_DEST_BASE = Path("/Volumes/research")
+FALLIDOS_DIR = Path("/Volumes/research/fallidos")
+
+LOW_CONFIDENCE_THRESHOLD = 0.6
 
 VALID_CATEGORIES = {
     "biological_gas_odor_treatment",
@@ -412,12 +415,33 @@ def save_csv(rows: list[dict], csv_path: Path) -> None:
 # MOVIMIENTO DE ARCHIVOS (modo --apply)
 # ============================================================
 
+def _move_file(src: Path, dest_dir: Path, logger: logging.Logger) -> Optional[Path]:
+    """Mueve src a dest_dir, añadiendo sufijo numérico si hay colisión. Devuelve destino o None."""
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest = dest_dir / src.name
+    counter = 2
+    while dest.exists():
+        dest = dest_dir / f"{src.stem}_{counter}{src.suffix}"
+        counter += 1
+    try:
+        shutil.move(str(src), str(dest))
+        return dest
+    except Exception as e:
+        logger.error(f"Error moviendo {src.name}: {e}")
+        return None
+
+
 def apply_moves(
     rows: list[dict],
     dest_base: Path,
+    fallidos_dir: Path,
     logger: logging.Logger,
 ) -> dict[str, int]:
-    """Mueve los PDFs clasificados (excepto irrelevante y duplicados) a dest_base/<categoria>/pdfs/."""
+    """Mueve los PDFs clasificados según resultado:
+    - clasificacion válida y confianza >= 0.6 → dest_base/<categoria>/pdfs/
+    - clasificacion == 'irrelevante' o confianza < 0.6 → fallidos_dir/
+    - DUPLICADO / ERROR_* → se omiten (no se mueven)
+    """
     moved: dict[str, int] = {}
     for row in rows:
         estado = row["estado"]
@@ -425,29 +449,27 @@ def apply_moves(
 
         if estado in ("DUPLICADO", "ERROR_LECTURA_PDF", "ERROR_CLASIFICACION"):
             continue
-        if clasificacion in ("irrelevante", ""):
-            continue
 
         src = Path(row["ruta_original"])
         if not src.exists():
             logger.warning(f"Archivo no encontrado para mover: {src}")
             continue
 
-        dest_dir = dest_base / clasificacion / "pdfs"
-        dest_dir.mkdir(parents=True, exist_ok=True)
-        dest = dest_dir / src.name
-
-        counter = 2
-        while dest.exists():
-            dest = dest_dir / f"{src.stem}_{counter}{src.suffix}"
-            counter += 1
-
         try:
-            shutil.move(str(src), str(dest))
-            logger.info(f"Movido: {src.name} → {dest}")
-            moved[clasificacion] = moved.get(clasificacion, 0) + 1
-        except Exception as e:
-            logger.error(f"Error moviendo {src.name}: {e}")
+            confianza = float(row["confianza"]) if row["confianza"] else 0.0
+        except ValueError:
+            confianza = 0.0
+
+        if clasificacion == "irrelevante" or confianza < LOW_CONFIDENCE_THRESHOLD:
+            dest = _move_file(src, fallidos_dir, logger)
+            if dest:
+                logger.info(f"Fallido: {src.name} → {dest}  (cat={clasificacion}, conf={confianza:.2f})")
+                moved["fallidos"] = moved.get("fallidos", 0) + 1
+        elif clasificacion:
+            dest = _move_file(src, dest_base / clasificacion / "pdfs", logger)
+            if dest:
+                logger.info(f"Movido: {src.name} → {dest}")
+                moved[clasificacion] = moved.get(clasificacion, 0) + 1
 
     return moved
 
@@ -536,7 +558,7 @@ def main() -> int:
     moved_counts: dict[str, int] = {}
     if apply_mode:
         print("\nMoviendo archivos clasificados...")
-        moved_counts = apply_moves(rows, DEFAULT_DEST_BASE, logger)
+        moved_counts = apply_moves(rows, DEFAULT_DEST_BASE, FALLIDOS_DIR, logger)
 
     # Resumen
     ok_rows = [r for r in rows if r["estado"] == "OK"]
@@ -563,6 +585,8 @@ def main() -> int:
         n = cat_counts.get(cat, 0)
         suffix = f"  → {moved_counts.get(cat, 0)} movidos" if apply_mode and cat != "irrelevante" else ""
         print(f"  {cat:<28} {n}{suffix}")
+    if apply_mode:
+        print(f"  {'→ fallidos (irrel. / conf<0.6)':<28}   {moved_counts.get('fallidos', 0)} movidos  [{FALLIDOS_DIR}]")
     print(f"Duplicados:           {duplicates}")
     print(f"Errores:              {errors}")
     print(f"Método keywords:      {kw_count}")
