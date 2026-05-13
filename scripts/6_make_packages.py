@@ -69,18 +69,20 @@ def load_json(path: Path):
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def phase_from_path(p: Path) -> str:
+def phase_from_path(p: Path, default_phase: str = "unknown") -> str:
     parts = p.parts
     if "md_clean" in parts:
         idx = parts.index("md_clean")
-        if idx + 1 < len(parts):
+        # idx+1 es la subcarpeta de fase, idx+2 sería el fichero
+        if idx + 2 < len(parts):
             return parts[idx + 1]
+        # fichero directamente en md_clean/ → usar el nombre del proyecto
+        return default_phase
 
-    name = p.name
-    m = re.match(r"^(phase[^_]+)_", name)
+    m = re.match(r"^(phase[^_]+)_", p.name)
     if m:
         return m.group(1)
-    return "unknown"
+    return default_phase
 
 
 def read_existing_packaged_ids(pkgs_dir: Path, phase_filter: str) -> Set[str]:
@@ -105,13 +107,16 @@ def discover_papers(project_dir: Path, phase_filter: str) -> List[Paper]:
     md_clean_dir = project_dir / "md_clean"
     meta_dir     = project_dir / "metadata" / "per_paper"
 
-    md_files = sorted(md_clean_dir.rglob("*.clean.md"))
+    # Busca tanto en md_clean/ directamente como en subdirectorios de fase
+    md_files = sorted(
+        set(md_clean_dir.glob("*.clean.md")) | set(md_clean_dir.rglob("*.clean.md"))
+    )
     if not md_files:
         raise SystemExit(f"No encuentro md_clean en: {md_clean_dir}")
 
     papers: List[Paper] = []
     for md in md_files:
-        phase = phase_from_path(md)
+        phase = phase_from_path(md, default_phase=project_dir.name)
 
         # Filtrar por fase
         if phase_filter != "all" and phase != phase_filter:
