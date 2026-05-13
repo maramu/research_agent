@@ -6,15 +6,15 @@
 Genera MASTER_INDEX.md con resumen por fase y detalle por paquete/paper.
 
 Lee:
-  /Volumes/research/<project>/notebooklm_packages/pkg_XXX/PKG_XXX_manifest.json
-  /Volumes/research/<project>/metadata/per_paper/<paper_id>.metadata.json
+  /Volumes/research/categorias/<project>/notebooklm_packages/pkg_XXX/PKG_XXX_manifest.json
+  /Volumes/research/categorias/<project>/metadata/per_paper/<paper_id>.metadata.json
 
 Salida:
-  /Volumes/research/<project>/notebooklm_packages/MASTER_INDEX.md
+  /Volumes/research/categorias/<project>/notebooklm_packages/MASTER_INDEX.md
 
 Uso:
   python3 7_make_master_index.py --project bioleaching_critical_materials
-  python3 7_make_master_index.py --project microalgae --base /Volumes/research
+  python3 7_make_master_index.py --project microalgae --base /Volumes/research/categorias
 
 Variables de entorno (config/.env):
     OLLAMA_HOST → URL del servidor Ollama (defecto: http://pciq22.uca.es:11434)
@@ -36,7 +36,7 @@ if _ENV_FILE.exists():
 else:
     load_dotenv()
 
-DEFAULT_BASE = "/Volumes/research"
+DEFAULT_BASE = "/Volumes/research/categorias"
 
 
 def load_json(p: Path):

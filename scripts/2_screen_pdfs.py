@@ -43,7 +43,7 @@ LOG_DIR = PROJECT_ROOT / "logs"
 LOG_FILE = LOG_DIR / "2_screen_pdfs.log"
 
 DEFAULT_OUTPUT_CSV = Path("/Volumes/research/metadatos/cribado_inicial.csv")
-DEFAULT_DEST_BASE = Path("/Volumes/research")
+DEFAULT_DEST_BASE = Path("/Volumes/research/categorias")
 FALLIDOS_DIR = Path("/Volumes/research/fallidos")
 
 LOW_CONFIDENCE_THRESHOLD = 0.6

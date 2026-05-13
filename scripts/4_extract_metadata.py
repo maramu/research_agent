@@ -9,10 +9,10 @@ Extrae de GROBID TEI:
 - phase (detectada desde la ruta del TEI)
 
 Busca recursivamente todos los .tei.xml y .xml bajo:
-  /Volumes/research/<project>/tei/
+  /Volumes/research/categorias/<project>/tei/
 
 Salida:
-  /Volumes/research/<project>/metadata/
+  /Volumes/research/categorias/<project>/metadata/
     papers_metadata.jsonl
     references.jsonl
     per_paper/
@@ -21,7 +21,7 @@ Salida:
 
 Uso:
   python3 4_extract_metadata.py --project bioleaching_critical_materials
-  python3 4_extract_metadata.py --project microalgae --base /Volumes/research
+  python3 4_extract_metadata.py --project microalgae --base /Volumes/research/categorias
 
 Variables de entorno (config/.env):
     OLLAMA_HOST → URL del servidor Ollama (defecto: http://pciq22.uca.es:11434)
@@ -45,7 +45,7 @@ if _ENV_FILE.exists():
 else:
     load_dotenv()
 
-DEFAULT_BASE = "/Volumes/research"
+DEFAULT_BASE = "/Volumes/research/categorias"
 
 def sha1_short(s: str, n: int = 10) -> str:
     return hashlib.sha1(s.encode("utf-8", errors="ignore")).hexdigest()[:n]

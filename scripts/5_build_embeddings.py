@@ -7,12 +7,12 @@ Genera embeddings FAISS desde chunks JSONL del proyecto usando Ollama
 (modelo nomic-embed-text).
 
 Lee chunks recursivamente desde:
-  /Volumes/research/<project>/chunks/**/*.jsonl
+  /Volumes/research/categorias/<project>/chunks/**/*.jsonl
 
 Filtra por fase si se indica --phase.
 
 Salida:
-  /Volumes/research/<project>/embeddings/<phase>/
+  /Volumes/research/categorias/<project>/embeddings/<phase>/
     index.faiss
     metadata.jsonl
     config.json
@@ -42,7 +42,7 @@ if _ENV_FILE.exists():
 else:
     load_dotenv()
 
-DEFAULT_BASE       = "/Volumes/research"
+DEFAULT_BASE       = "/Volumes/research/categorias"
 DEFAULT_MODEL      = "nomic-embed-text"
 DEFAULT_BATCH_SIZE = 64
 

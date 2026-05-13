@@ -10,12 +10,12 @@ Crea paquetes para NotebookLM en modo append-only:
   PKG_XXX_manifest.json
 
 Lee:
-  /Volumes/research/<project>/md_clean/**/*.clean.md
-  /Volumes/research/<project>/metadata/per_paper/<id>.metadata.json
-  /Volumes/research/<project>/metadata/per_paper/<id>.references.json
+  /Volumes/research/categorias/<project>/md_clean/**/*.clean.md
+  /Volumes/research/categorias/<project>/metadata/per_paper/<id>.metadata.json
+  /Volumes/research/categorias/<project>/metadata/per_paper/<id>.references.json
 
 Salida:
-  /Volumes/research/<project>/notebooklm_packages/pkg_XXX/
+  /Volumes/research/categorias/<project>/notebooklm_packages/pkg_XXX/
 
 Uso:
   python3 6_make_packages.py --project bioleaching_critical_materials --phase bioleaching_critical_materials
@@ -42,7 +42,7 @@ if _ENV_FILE.exists():
 else:
     load_dotenv()
 
-DEFAULT_BASE = "/Volumes/research"
+DEFAULT_BASE = "/Volumes/research/categorias"
 
 @dataclass
 class Paper:

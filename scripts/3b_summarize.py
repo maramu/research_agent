@@ -6,13 +6,13 @@
 Genera resúmenes estructurados de artículos científicos usando Ollama.
 
 Lee los Markdown limpios desde:
-    /Volumes/research/<phase>/md_clean/*.clean.md
+    /Volumes/research/categorias/<phase>/md_clean/*.clean.md
 
 Escribe los resúmenes en:
-    /Volumes/research/<phase>/summaries/<paper_id>.summary.md
+    /Volumes/research/categorias/<phase>/summaries/<paper_id>.summary.md
 
 Informe:
-    /Volumes/research/<phase>/logs/3b_summarize_report.csv
+    /Volumes/research/categorias/<phase>/logs/3b_summarize_report.csv
 
 Uso:
     python3 3b_summarize.py --phase bioleaching_critical_materials
@@ -48,7 +48,7 @@ if _ENV_FILE.exists():
 else:
     load_dotenv()
 
-DEFAULT_BASE  = "/Volumes/research"
+DEFAULT_BASE  = "/Volumes/research/categorias"
 OLLAMA_HOST   = os.getenv("OLLAMA_HOST", "http://pciq22.uca.es:11434")
 DEFAULT_MODEL = "qwen3:14b"
 
@@ -65,22 +65,21 @@ VALID_PHASES = [
 
 SYSTEM_PROMPT = (
     "You are a scientific paper summarizer. "
-    "Respond ONLY with the structured summary in the exact format requested. "
-    "Do not ask questions. Do not add commentary. "
-    "Do not include any text outside the summary sections."
+    "Respond ONLY with the structured summary. "
+    "Do not ask questions. Do not add commentary."
 )
 
 SUMMARIZE_PROMPT = """\
-Given the following research paper in markdown format, provide a detailed structured summary in English (500-800 words) with these sections:
+Provide a detailed structured summary (800-1000 words) in English with these sections:
 
-- **Main objective**: What problem does this paper address and why is it relevant?
-- **Methodology**: Experimental setup, key techniques, operating conditions, scale (lab/pilot/full), bioreactor types, parameters used
-- **Main results**: Most important findings with specific quantitative data (efficiencies, rates, concentrations, yields)
-- **Discussion**: Key interpretations, comparisons with literature, limitations mentioned
-- **Conclusions**: Main takeaways and practical implications
+- **Main objective**: What problem does this paper address, why is it relevant, and what gap in knowledge does it fill?
+- **Methodology**: Detailed experimental setup, reactor types and dimensions, operating conditions (temperature, pH, HRT, OLR, gas flow rates), scale (lab/pilot/full), analytical techniques used, and duration of experiments
+- **Main results**: All important findings with specific quantitative data (efficiencies, rates, concentrations, yields, percentages). Include data from tables and figures when available
+- **Discussion**: Key interpretations, comparisons with previous literature, explanations of mechanisms, limitations acknowledged by authors
+- **Conclusions**: Main takeaways, practical implications, and future research directions suggested
 - **Keywords**: 8-10 relevant technical terms
 
-Be precise and include specific numerical values when available. /no_think
+Be precise and exhaustive with numerical values. /no_think
 
 Paper:
 {contenido_md}

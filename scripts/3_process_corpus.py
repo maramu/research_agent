@@ -16,12 +16,12 @@ Fases disponibles:
     microalgae                    | single_cell_protein
     advanced_oxidation_processes  | bioleaching_critical_materials
 
-Carpeta de PDFs por defecto:  /Volumes/research/<phase>/pdfs/
+Carpeta de PDFs por defecto:  /Volumes/research/categorias/<phase>/pdfs/
 Salidas:
-    /Volumes/research/<phase>/tei/
-    /Volumes/research/<phase>/md_clean/
-    /Volumes/research/<phase>/chunks/
-    /Volumes/research/<phase>/logs/
+    /Volumes/research/categorias/<phase>/tei/
+    /Volumes/research/categorias/<phase>/md_clean/
+    /Volumes/research/categorias/<phase>/chunks/
+    /Volumes/research/categorias/<phase>/logs/
 
 Variables de entorno (config/.env):
     GROBID_URL  → URL del servidor GROBID  (defecto: http://pciq22.uca.es:8070)
@@ -54,7 +54,7 @@ else:
 
 TEI_NS = {"tei": "http://www.tei-c.org/ns/1.0"}
 
-DEFAULT_BASE   = "/Volumes/research"
+DEFAULT_BASE   = "/Volumes/research/categorias"
 DEFAULT_GROBID = os.getenv("GROBID_URL", "http://pciq22.uca.es:8070")
 OLLAMA_HOST    = os.getenv("OLLAMA_HOST", "http://pciq22.uca.es:11434")
 

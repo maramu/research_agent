@@ -6,7 +6,7 @@
 Consulta el índice FAISS de embeddings usando Ollama nomic-embed-text.
 
 Lee embeddings desde:
-  /Volumes/research/<project>/embeddings/<phase>/
+  /Volumes/research/categorias/<project>/embeddings/<phase>/
 
 Uso:
   python3 8_query_rag.py "PLA PBAT anaerobic digestion methane" \
@@ -40,7 +40,7 @@ if _ENV_FILE.exists():
 else:
     load_dotenv()
 
-DEFAULT_BASE  = "/Volumes/research"
+DEFAULT_BASE  = "/Volumes/research/categorias"
 DEFAULT_MODEL = "nomic-embed-text"
 DEFAULT_K     = 8
 
