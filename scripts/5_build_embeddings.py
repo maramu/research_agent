@@ -76,10 +76,10 @@ def iter_chunks(chunks_dir: Path, phase_filter: str):
                 yield rec
 
 
-def embed_texts(texts: list, model: str) -> list:
+def embed_texts(client: ollama.Client, texts: list, model: str) -> list:
     """Embedding de una lista de textos usando Ollama (uno a uno)."""
     return [
-        np.array(ollama.embeddings(model=model, prompt=text)["embedding"], dtype="float32")
+        np.array(client.embeddings(model=model, prompt=text)["embedding"], dtype="float32")
         for text in texts
     ]
 
@@ -106,6 +106,7 @@ def main():
     out_dir.mkdir(parents=True, exist_ok=True)
 
     ollama_host = os.getenv("OLLAMA_HOST", "http://pciq22.uca.es:11434")
+    client      = ollama.Client(host=ollama_host)
     print(f"Project    : {args.project}")
     print(f"Phase      : {args.phase}")
     print(f"Model      : {args.model}")
@@ -125,13 +126,13 @@ def main():
 
         if len(buf_texts) >= args.batch_size:
             print(f"  Embeddiendo {len(buf_texts)} chunks  (total procesados: {len(all_meta) + len(buf_texts)})…")
-            all_vectors.extend(embed_texts(buf_texts, args.model))
+            all_vectors.extend(embed_texts(client, buf_texts, args.model))
             all_meta.extend(buf_meta)
             buf_texts, buf_meta = [], []
 
     if buf_texts:
         print(f"  Embeddiendo último lote de {len(buf_texts)} chunks…")
-        all_vectors.extend(embed_texts(buf_texts, args.model))
+        all_vectors.extend(embed_texts(client, buf_texts, args.model))
         all_meta.extend(buf_meta)
 
     if not all_vectors:

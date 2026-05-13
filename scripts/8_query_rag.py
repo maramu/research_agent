@@ -24,6 +24,7 @@ Variables de entorno (config/.env):
 
 import argparse
 import json
+import os
 from pathlib import Path
 from typing import List, Dict
 
@@ -57,8 +58,8 @@ def load_metadata(emb_dir: Path) -> List[Dict]:
     return out
 
 
-def embed_query(q: str, model: str) -> np.ndarray:
-    resp = ollama.embeddings(model=model, prompt=q)
+def embed_query(client: ollama.Client, q: str, model: str) -> np.ndarray:
+    resp = client.embeddings(model=model, prompt=q)
     return np.array(resp["embedding"], dtype="float32")
 
 
@@ -94,10 +95,13 @@ def main():
     if not index_path.exists():
         raise SystemExit(f"No existe index.faiss en: {emb_dir}")
 
+    ollama_host = os.getenv("OLLAMA_HOST", "http://pciq22.uca.es:11434")
+    client      = ollama.Client(host=ollama_host)
+
     index = faiss.read_index(str(index_path))
     meta  = load_metadata(emb_dir)
 
-    qv       = embed_query(args.query, model).reshape(1, -1)
+    qv       = embed_query(client, args.query, model).reshape(1, -1)
     D, I     = index.search(qv, args.k * 5)
 
     results = []
