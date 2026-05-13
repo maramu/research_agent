@@ -260,12 +260,17 @@ def update_renamed_in_excel(
     """Actualiza el Excel cuando un PDF se renombra con éxito.
 
     Para cada entrada {"original": str, "nuevo": str, "doi": str}:
-    - Si nombre_original existe en col A → reemplaza por nombre_nuevo (mantiene DOI).
+    - Si nombre_original existe en col A → reemplaza por nombre_nuevo (y rellena DOI si vacío).
     - Si ninguno existe → añade fila nueva con (nombre_nuevo, doi).
     - Si nombre_nuevo ya existe → no hace nada (evita duplicados).
     Devuelve el número de filas modificadas o añadidas.
     """
-    if not renamed or not xlsx_path.exists():
+    print(f"[DEBUG update_excel] xlsx={xlsx_path} | exists={xlsx_path.exists()} | entries={len(renamed) if renamed else 0}")
+    if not renamed:
+        print("[DEBUG update_excel] lista vacía, nada que hacer")
+        return 0
+    if not xlsx_path.exists():
+        print(f"[DEBUG update_excel] el fichero no existe: {xlsx_path}")
         return 0
     import openpyxl
     try:
@@ -279,32 +284,40 @@ def update_renamed_in_excel(
                 val = ws.cell(row=row_idx, column=1).value
                 if val is not None:
                     name_to_row[str(val).strip()] = row_idx
+        print(f"[DEBUG update_excel] filas existentes en col A: {list(name_to_row.keys())}")
 
         changed = 0
         for entry in renamed:
             original = entry["original"]
             nuevo = entry["nuevo"]
             doi = entry["doi"]
+            print(f"[DEBUG update_excel] procesando: original='{original}' | nuevo='{nuevo}' | doi='{doi}'")
 
             if nuevo in name_to_row:
-                # nombre nuevo ya presente: nada que hacer
+                print(f"[DEBUG update_excel]   → '{nuevo}' ya existe en fila {name_to_row[nuevo]}, omitido")
                 continue
             elif original in name_to_row:
-                # actualizar nombre en su fila existente
-                ws.cell(row=name_to_row[original], column=1).value = nuevo
+                row_idx = name_to_row[original]
+                print(f"[DEBUG update_excel]   → original en fila {row_idx}, actualizando nombre")
+                ws.cell(row=row_idx, column=1).value = nuevo
+                if doi and not ws.cell(row=row_idx, column=2).value:
+                    ws.cell(row=row_idx, column=2).value = doi
+                    print(f"[DEBUG update_excel]   → DOI rellenado en col B")
                 name_to_row[nuevo] = name_to_row.pop(original)
                 changed += 1
             else:
-                # ninguno existe: añadir fila nueva
+                print(f"[DEBUG update_excel]   → ninguno existe, añadiendo fila nueva")
                 ws.append([nuevo, doi])
                 name_to_row[nuevo] = ws.max_row
                 changed += 1
 
+        print(f"[DEBUG update_excel] changed={changed}")
         if changed:
             wb.save(xlsx_path)
+            print(f"[DEBUG update_excel] guardado OK → {xlsx_path}")
         return changed
     except Exception as e:
-        print(f"Advertencia: no se pudo actualizar {xlsx_path} tras renombrado: {e}")
+        print(f"[DEBUG update_excel] excepción: {type(e).__name__}: {e}")
         return 0
 
 
@@ -649,16 +662,18 @@ def main() -> int:
     if added:
         print(f"Excel DOI manual: {added} fila(s) nueva(s) añadida(s) → {xlsx_path}")
 
-    renamed_entries = [
-        {"original": r["archivo_original"], "nuevo": r["archivo_resultado"], "doi": r["doi"]}
-        for r in rows
-        if r["estado"] == "RENOMBRADO"
-    ]
-    changed = update_renamed_in_excel(xlsx_path, renamed_entries)
-    if changed:
-        print(f"Excel DOI manual: {changed} entrada(s) actualizadas tras renombrado → {xlsx_path}")
+    if args.apply:
+        renamed_entries = [
+            {"original": r["archivo_original"], "nuevo": r["archivo_resultado"], "doi": r["doi"]}
+            for r in rows
+            if r["estado"] in {"RENOMBRADO", "DOI_MANUAL"}
+        ]
+        print(f"[DEBUG] renamed_entries para Excel ({len(renamed_entries)}): {renamed_entries}")
+        changed = update_renamed_in_excel(xlsx_path, renamed_entries)
+        if changed:
+            print(f"Excel DOI manual: {changed} entrada(s) actualizadas tras renombrado → {xlsx_path}")
 
-    ok = sum(1 for r in rows if r["estado"] in {"PREVIEW", "RENOMBRADO"})
+    ok = sum(1 for r in rows if r["estado"] in {"PREVIEW", "RENOMBRADO", "DOI_MANUAL"})
     moved = sum(1 for r in rows if "MOVIDO_A_FALLIDOS" in r["estado"])
     ignored = sum(1 for r in rows if r["estado"] == "IGNORADO_YA_RENOMBRADO")
     failed_count = len(rows) - ok - moved - ignored
