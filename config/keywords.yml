@@ -1,0 +1,94 @@
+biological_gas_odor_treatment:
+  - biofiltration
+  - biofilter
+  - biotrickling filter
+  - BTF
+  - volatile organic compounds
+  - VOCs
+  - odor removal
+  - hydrophobic compounds
+
+anoxic_biogas_biodesulfurization:
+  - anoxic desulfurization
+  - hydrogen sulfide
+  - H2S
+  - nitrate-reducing sulfur-oxidizing bacteria
+  - NR-SOB
+  - elemental sulfur
+  - biogas
+  - siloxane
+
+bioplastics_microplastics:
+  - microplastics
+  - biodegradable bioplastics
+  - PLA
+  - PBAT
+  - PHA
+  - PHB
+  - polyethylene
+  - polypropylene
+  - polystyrene
+  - PET
+  - anaerobic digestion
+  - bioaugmentation
+  - antibiotic vectors
+  - UV-aging
+
+biogas_upgrading_biomethanation:
+  - biogas upgrading
+  - biomethanation
+  - power-to-gas
+  - P2G
+  - hydrogenotrophic methanogens
+  - hollow-fiber membrane bioreactor
+  - HF-MBR
+  - bioelectrochemical systems
+  - BES
+
+microalgae:
+  - microalgae
+  - photobioreactor
+  - Nannochloropsis
+  - Chlorella
+  - Scenedesmus
+
+single_cell_protein:
+  - single cell protein
+  - SCP
+  - microbial protein
+  - methanotrophic bacteria
+  - MOB
+  - Methylococcus capsulatus
+  - methane oxidation
+  - nutrient recovery from digestate
+  - essential amino acids
+
+advanced_oxidation_processes:
+  - heterogeneous photocatalysis
+  - titanium dioxide
+  - TiO2
+  - zinc oxide
+  - ZnO
+  - advanced oxidation processes
+  - AOPs
+  - photo-Fenton
+  - honeycomb monolith
+  - monolithic 
+  - Zerium
+  - photocataysis
+  - coal honeycomb
+
+
+bioleaching_critical_materials:
+  - bioleaching
+  - platinum group metals
+  - PGMs
+  - spent automotive catalysts
+  - TWC
+  - copper biomachining
+  - Acidithiobacillus ferrooxidans
+  - biogenic thiosulfate
+  - metal recycling
+  - critical raw materials
+
+irrelevante: []
