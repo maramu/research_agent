@@ -1,0 +1,61 @@
+# scopus_queries.yml — Queries de búsqueda en Scopus por categoría
+#
+# Formato de query: sintaxis Scopus Search API
+#   TITLE-ABS-KEY(...)   → busca en título, abstract y palabras clave
+#   AND / OR / AND NOT   → operadores lógicos
+#   W/N                  → proximidad: "biogas W/3 upgrading"
+#   SRCTITLE(...)        → filtrar por revista
+#   DOCTYPE(ar)          → solo artículos originales (ar = article, re = review)
+#
+# Cada categoría puede tener MÚLTIPLES queries; los resultados se combinan y
+# se deduplicán por DOI antes de guardar el CSV.
+#
+# Referencia: https://dev.elsevier.com/sc_search_tips.html
+
+biological_gas_odor_treatment:
+  - TITLE-ABS-KEY(biofiltration OR "biotrickling filter" OR BTF) AND TITLE-ABS-KEY("odor removal" OR "VOC removal" OR "volatile organic compound")
+ # - TITLE-ABS-KEY("biofilter" AND ("hydrogen sulfide" OR "H2S" OR "ammonia" OR "toluene" OR "styrene"))
+ # - TITLE-ABS-KEY("biotrickling filter" AND ("desulfurization" OR "odor" OR "VOC"))
+
+anoxic_biogas_biodesulfurization:
+  - TITLE-ABS-KEY("anoxic desulfurization" OR "anoxic biodesulfurization") AND TITLE-ABS-KEY(biogas)
+ # - TITLE-ABS-KEY("NR-SOB" OR "nitrate-reducing sulfur-oxidizing") AND TITLE-ABS-KEY(biogas)
+ # - TITLE-ABS-KEY("hydrogen sulfide" AND "biogas" AND ("nitrate" OR "nitrite") AND ("bacteria" OR "biological"))
+ # - TITLE-ABS-KEY("elemental sulfur" AND "biogas desulfurization")
+
+bioplastics_microplastics:
+  - TITLE-ABS-KEY(microplastics AND ("anaerobic digestion" OR "biodegradation" OR "soil" OR "wastewater" OR "bioagumentation"))
+#  - TITLE-ABS-KEY(("PHA" OR "PHB" OR "PLA" OR "PBAT") AND ("biodegradable" OR "bioplastic" OR "production"))
+# - TITLE-ABS-KEY(microplastics AND ("antibiotic resistance" OR "ARG" OR "pathogen" OR "bioaugmentation"))
+#  - TITLE-ABS-KEY("UV-aging" AND microplastics)
+
+biogas_upgrading_biomethanation:
+  - TITLE-ABS-KEY("biogas upgrading" OR biomethanation) AND TITLE-ABS-KEY(("hydrogen" OR "H2") AND ("CO2" OR "carbon dioxide"))
+#  - TITLE-ABS-KEY("power-to-gas" OR "P2G") AND TITLE-ABS-KEY(biogas OR methane)
+#  - TITLE-ABS-KEY("hydrogenotrophic methanogen" OR "hollow-fiber membrane bioreactor" OR "HF-MBR") AND TITLE-ABS-KEY(biogas)
+#  - TITLE-ABS-KEY("bioelectrochemical" AND ("methane" OR "biogas" OR "biomethanation"))
+
+microalgae:
+  - TITLE-ABS-KEY(microalgae AND ("wastewater treatment" OR "nutrient removal" OR "CO2 fixation"))
+#  - TITLE-ABS-KEY(("Chlorella" OR "Scenedesmus" OR "Nannochloropsis") AND ("photobioreactor" OR "cultivation" OR "biomass"))
+#  - TITLE-ABS-KEY(microalgae AND ("biogas" OR "anaerobic digestion" OR "lipid" OR "biofuel"))
+#  - TITLE-ABS-KEY(photobioreactor AND ("scale-up" OR "productivity" OR "light") AND microalgae)
+
+single_cell_protein:
+  - TITLE-ABS-KEY("single cell protein" OR "microbial protein") AND TITLE-ABS-KEY("methane" OR "biogas" OR "methanotrophic")
+#  - TITLE-ABS-KEY("methanotrophic bacteria" OR "MOB" OR "Methylococcus capsulatus") AND TITLE-ABS-KEY(protein)
+#  - TITLE-ABS-KEY("nutrient recovery" AND "digestate" AND ("protein" OR "amino acid"))
+#  - TITLE-ABS-KEY("methane oxidation" AND ("biomass" OR "protein" OR "feed"))
+
+advanced_oxidation_processes:
+  - TITLE-ABS-KEY(("photocatalysis" OR "heterogeneous photocatalysis") AND ("TiO2" OR "titanium dioxide" OR "ZnO"))
+#  - TITLE-ABS-KEY("photo-Fenton" AND ("wastewater" OR "pollutant" OR "degradation"))
+#  - TITLE-ABS-KEY(("AOP" OR "advanced oxidation") AND ("micropollutant" OR "pharmaceutical" OR "emerging contaminant"))
+#  - TITLE-ABS-KEY(("monolith" OR "honeycomb") AND ("photocatalysis" OR "photocatalytic") AND ("reactor" OR "gas"))
+
+bioleaching_critical_materials:
+  - TITLE-ABS-KEY(bioleaching AND ("platinum group metals" OR "PGM" OR "palladium" OR "platinum" OR "rhodium"))
+#  - TITLE-ABS-KEY(bioleaching AND ("spent catalyst" OR "TWC" OR "autocatalyst" OR "critical raw material"))
+#  - TITLE-ABS-KEY(("Acidithiobacillus" OR "Chromobacterium violaceum") AND ("metal recovery" OR "leaching" OR "PGM"))
+#  - TITLE-ABS-KEY("biogenic thiosulfate" AND ("gold" OR "silver" OR "platinum"))
+#  - TITLE-ABS-KEY(bioleaching AND ("copper" OR "cobalt" OR "lithium") AND ("battery" OR "e-waste" OR "WEEE"))
