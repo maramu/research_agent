@@ -1,25 +1,24 @@
 # Notas pendientes — research_agent
 
-## Verificaciones pendientes
+## Verificaciones completadas
 
-### PDFs manuales en categorías
-Verificar el comportamiento cuando se añaden PDFs manualmente a `categorias/<cat>/pdfs/`:
+### ✅ PDFs manuales en categorías (verificado 2026-05-16)
 
-```bash
-# Caso de prueba
-cp ~/paper_prueba.pdf /Volumes/research/categorias/microalgae/pdfs/
-python scripts/3_process_corpus.py --phase microalgae
-# ¿Se procesa el PDF manual? Esperado: SÍ
+**Caso de prueba:** PDF manual `35. 2020-07 A. Algal reseach.pdf` en `microalgae/pdfs/`
 
-# Verificar skip logic
-python scripts/3_process_corpus.py --phase microalgae
-# ¿Se salta lo ya procesado? Esperado: SÍ
-```
+**Resultados:**
+- ✅ `3_process_corpus.py` procesa PDFs con nombres no-DOI (normaliza espacios a `_`)
+- ✅ Skip logic funciona: segunda ejecución salta el PDF ya procesado
+- ✅ Cadena completa OK: summarize → metadata → embeddings
+- ✅ RAG query recupera chunks del PDF manual correctamente
 
-**Comportamiento esperado:**
-- PDFs añadidos manualmente a cualquier `pdfs/` se procesan en la siguiente ejecución
-- Scripts saltan automáticamente lo que ya tienen salida en `md_clean/`, `summaries/`, etc.
+**Comportamiento confirmado:**
+- PDFs añadidos manualmente a cualquier `categorias/<cat>/pdfs/` se procesan en la siguiente ejecución
+- No requieren nombres DOI (aunque se normalizan)
+- Scripts saltan automáticamente lo ya procesado (check en `md_clean/`, `summaries/`, etc.)
 - Mezcla de PDFs manuales + Scopus en la misma categoría: ambos se procesan sin conflicto
+
+---
 
 ## Keywords y criterios de búsqueda
 
