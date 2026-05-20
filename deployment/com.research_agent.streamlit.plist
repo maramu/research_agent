@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.research_agent.streamlit</string>
+    <key>WorkingDirectory</key>
+    <string>/Volumes/Disco/proyectos/research_agent/scripts/streamlit_app</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/martinramirez/venvs/rag_papers/bin/python3.13</string>
+        <string>-m</string>
+        <string>streamlit</string>
+        <string>run</string>
+        <string>app.py</string>
+        <string>--server.address</string>
+        <string>0.0.0.0</string>
+        <string>--server.port</string>
+        <string>8501</string>
+        <string>--server.headless</string>
+        <string>true</string>
+        <string>--browser.gatherUsageStats</string>
+        <string>false</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/Users/martinramirez/Library/Logs/research_agent/streamlit.log</string>    
+    <key>StandardErrorPath</key>
+    <string>/Users/martinramirez/Library/Logs/research_agent/streamlit.err.log</string>
+</dict>
+</plist>
