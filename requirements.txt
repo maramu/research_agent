@@ -92,3 +92,5 @@ websocket-client==1.9.0
 websockets==16.0
 zipp==3.23.1
 streamlit>=1.32
+anthropic>=0.39
+openai>=1.50

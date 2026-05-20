@@ -84,6 +84,15 @@ def embed_texts(client: ollama.Client, texts: list, model: str) -> list:
     ]
 
 
+def _model_suffix(model: str) -> str:
+    """Sufijo para el directorio de salida según el modelo.
+    Mantiene compatibilidad: el modelo por defecto no añade sufijo."""
+    if model == DEFAULT_MODEL:
+        return ""
+    safe = model.replace(":", "_").replace("/", "_")
+    return f"__{safe}"
+
+
 def main():
     ap = argparse.ArgumentParser(description="Genera embeddings FAISS con Ollama nomic-embed-text")
     ap.add_argument("--project",    required=True, help="Nombre del proyecto (subcarpeta bajo --base)")
@@ -98,7 +107,7 @@ def main():
     base        = Path(args.base)
     project_dir = base / args.project
     chunks_dir  = project_dir / "chunks"
-    out_dir     = project_dir / "embeddings" / args.phase
+    out_dir     = project_dir / "embeddings" / f"{args.phase}{_model_suffix(args.model)}"
 
     if not chunks_dir.exists():
         raise SystemExit(f"No existe chunks dir: {chunks_dir}")

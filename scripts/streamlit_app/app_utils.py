@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-utils.py — Helpers compartidos para la app Streamlit de research_agent.
+app_utils.py — Helpers compartidos para la app Streamlit de research_agent.
 
 Centraliza:
   - Inserción de scripts/ en sys.path para importar pipeline.py
@@ -8,12 +8,15 @@ Centraliza:
   - Conteos por categoría (PDFs, MDs, summaries, embeddings…)
   - Carga/guardado de YAML
   - Constantes de paths
+  - Pricing de modelos LLM comerciales + tracking de uso mensual
 """
 
 from __future__ import annotations
 
+import json
 import os
 import sys
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -25,35 +28,27 @@ from dotenv import load_dotenv
 # sys.path — para que las pages puedan hacer `from pipeline import ...`
 # ---------------------------------------------------------------------------
 
-STREAMLIT_APP_DIR = Path(__file__).resolve().parent      # .../scripts/streamlit_app/
-SCRIPTS_DIR       = STREAMLIT_APP_DIR.parent              # .../scripts/
-PROJECT_ROOT      = SCRIPTS_DIR.parent                    # .../research_agent/
+STREAMLIT_APP_DIR = Path(__file__).resolve().parent
+SCRIPTS_DIR       = STREAMLIT_APP_DIR.parent
+PROJECT_ROOT      = SCRIPTS_DIR.parent
 CONFIG_DIR        = PROJECT_ROOT / "config"
 
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-# Cargar config/.env (mismo patrón que el resto de scripts)
 _ENV_FILE = CONFIG_DIR / ".env"
 if _ENV_FILE.exists():
     load_dotenv(_ENV_FILE)
 else:
     load_dotenv()
 
-# Reexports de pipeline (lazy, para no romper si scripts/ aún no tiene pipeline.py)
+# Reexports de pipeline
 try:
     from pipeline import (  # noqa: F401
-        run_scopus,
-        run_inbox,
-        run_adhoc,
-        process_category,
-        detect_affected_categories,
-        ensure_project_dirs,
+        run_scopus, run_inbox, run_adhoc,
+        process_category, detect_affected_categories, ensure_project_dirs,
         check_nas as _check_nas_pipeline,
-        NAS_ROOT,
-        CATEGORIAS_DIR,
-        INBOX_DIR,
-        INBOX_CSV_DIR,
+        NAS_ROOT, CATEGORIAS_DIR, INBOX_DIR, INBOX_CSV_DIR,
     )
     PIPELINE_AVAILABLE = True
     PIPELINE_IMPORT_ERROR = None
@@ -65,14 +60,20 @@ except Exception as e:
     INBOX_DIR      = NAS_ROOT / "inbox"
     INBOX_CSV_DIR  = NAS_ROOT / "inbox_csv"
 
-METADATOS_DIR = NAS_ROOT / "metadatos"
+METADATOS_DIR   = NAS_ROOT / "metadatos"
 DOI_MANUAL_XLSX = METADATOS_DIR / "doi_manual.xlsx"
+RAG_USAGE_DIR   = METADATOS_DIR / "rag_usage"  # uno por mes: rag_usage_YYYY-MM.jsonl
 
-# Endpoints (mismos defaults que el resto del proyecto)
-OLLAMA_HOST  = os.getenv("OLLAMA_HOST",  "http://pciq22.uca.es:11434")
-GROBID_URL   = os.getenv("GROBID_URL",   "http://pciq22.uca.es:8070")
+OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://pciq22.uca.es:11434")
+GROBID_URL  = os.getenv("GROBID_URL",  "http://pciq22.uca.es:8070")
 
-# Catálogo de categorías "oficiales" (las 8 del proyecto)
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
+OPENAI_API_KEY    = os.getenv("OPENAI_API_KEY", "")
+
+# ---------------------------------------------------------------------------
+# Categorías canónicas
+# ---------------------------------------------------------------------------
+
 CANONICAL_CATEGORIES = [
     "biological_gas_odor_treatment",
     "anoxic_biogas_biodesulfurization",
@@ -84,9 +85,178 @@ CANONICAL_CATEGORIES = [
     "bioleaching_critical_materials",
 ]
 
-# Modelos Ollama disponibles (según ESTADO.md)
-OLLAMA_MODELS_LLM = ["qwen3:14b", "qwen3:8b", "gemma3:4b"]
-OLLAMA_MODEL_EMBED = "nomic-embed-text"
+# ---------------------------------------------------------------------------
+# Modelos disponibles por provider
+# ---------------------------------------------------------------------------
+
+OLLAMA_MODELS_LLM     = ["qwen3:14b", "qwen3:8b", "gemma3:4b"]
+OLLAMA_EMBED_MODELS   = ["nomic-embed-text", "bge-m3", "snowflake-arctic-embed:l"]
+OLLAMA_MODEL_EMBED    = "nomic-embed-text"  # default histórico
+
+ANTHROPIC_MODELS = [
+    "claude-haiku-4-5",
+    "claude-sonnet-4-6",
+    "claude-opus-4-7",
+]
+
+OPENAI_MODELS = [
+    "gpt-4o-mini",
+    "gpt-4o",
+]
+
+# ---------------------------------------------------------------------------
+# Pricing — USD por 1M tokens (input / output)
+#
+# IMPORTANTE: estos precios son APROXIMADOS, verifica los actuales antes de
+# usar en serio:
+#   - Anthropic: https://docs.claude.com/en/docs/about-claude/pricing
+#   - OpenAI:    https://openai.com/api/pricing
+# ---------------------------------------------------------------------------
+
+LLM_PRICING: Dict[str, Dict[str, float]] = {
+    # Anthropic
+    "claude-haiku-4-5":  {"input": 1.00,  "output": 5.00},
+    "claude-sonnet-4-6": {"input": 3.00,  "output": 15.00},
+    "claude-opus-4-7":   {"input": 15.00, "output": 75.00},
+    # OpenAI
+    "gpt-4o-mini":       {"input": 0.15,  "output": 0.60},
+    "gpt-4o":            {"input": 2.50,  "output": 10.00},
+    # Ollama — local, sin coste
+    "qwen3:14b":         {"input": 0.0,   "output": 0.0},
+    "qwen3:8b":          {"input": 0.0,   "output": 0.0},
+    "gemma3:4b":         {"input": 0.0,   "output": 0.0},
+}
+
+
+def model_provider(model: str) -> str:
+    """Devuelve el provider de un model id."""
+    if model in ANTHROPIC_MODELS:
+        return "anthropic"
+    if model in OPENAI_MODELS:
+        return "openai"
+    return "ollama"
+
+
+def estimate_cost_usd(model: str, input_tokens: int, output_tokens: int) -> float:
+    """Calcula el coste en USD a partir de los tokens y el pricing del modelo."""
+    pricing = LLM_PRICING.get(model)
+    if not pricing:
+        return 0.0
+    return (input_tokens / 1_000_000) * pricing["input"] + (output_tokens / 1_000_000) * pricing["output"]
+
+
+def approx_tokens_from_chars(text: str) -> int:
+    """Aproximación grosera: 1 token ≈ 4 chars en inglés (mas en español)."""
+    return max(1, len(text) // 4)
+
+
+def estimate_cost_pre_query(
+    model: str,
+    prompt_text: str,
+    expected_output_tokens: int = 500,
+) -> Tuple[int, int, float]:
+    """Pre-estimación antes de lanzar la consulta. Devuelve (input_tk, output_tk, usd)."""
+    input_tk  = approx_tokens_from_chars(prompt_text)
+    output_tk = expected_output_tokens
+    cost      = estimate_cost_usd(model, input_tk, output_tk)
+    return input_tk, output_tk, cost
+
+
+# ---------------------------------------------------------------------------
+# Tracking de uso mensual (rag_usage_YYYY-MM.jsonl)
+# ---------------------------------------------------------------------------
+
+def _current_usage_file() -> Path:
+    """Devuelve la ruta del fichero de uso del mes actual."""
+    RAG_USAGE_DIR.mkdir(parents=True, exist_ok=True)
+    month = datetime.now().strftime("%Y-%m")
+    return RAG_USAGE_DIR / f"rag_usage_{month}.jsonl"
+
+
+def record_rag_query(
+    *,
+    provider: str,
+    model: str,
+    input_tokens: int,
+    output_tokens: int,
+    cost_usd: float,
+    query: str,
+    project: str,
+    is_estimated: bool = False,
+) -> None:
+    """Apenda un registro al jsonl del mes actual.
+
+    Si el NAS no está accesible, falla silenciosamente — no se quiere bloquear
+    la respuesta del RAG por no poder escribir el contador.
+    """
+    try:
+        usage_file = _current_usage_file()
+        rec = {
+            "ts": datetime.now().isoformat(timespec="seconds"),
+            "provider":      provider,
+            "model":         model,
+            "input_tokens":  input_tokens,
+            "output_tokens": output_tokens,
+            "cost_usd":      round(cost_usd, 6),
+            "is_estimated":  is_estimated,
+            "project":       project,
+            "query_preview": (query or "")[:120],
+        }
+        with usage_file.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+
+
+def get_monthly_usage(month: Optional[str] = None) -> Dict[str, Any]:
+    """Devuelve totales del mes pedido (defecto: actual).
+
+    Estructura:
+      {
+        "month": "2026-05",
+        "n_queries": int,
+        "total_cost_usd": float,
+        "by_provider": {"anthropic": {"queries": n, "cost_usd": x}, ...},
+        "by_model":    {model_id: {"queries": n, "cost_usd": x}, ...},
+      }
+    """
+    month_str = month or datetime.now().strftime("%Y-%m")
+    usage_file = RAG_USAGE_DIR / f"rag_usage_{month_str}.jsonl"
+
+    totals = {
+        "month":          month_str,
+        "n_queries":      0,
+        "total_cost_usd": 0.0,
+        "by_provider":    {},
+        "by_model":       {},
+    }
+    if not usage_file.exists():
+        return totals
+
+    try:
+        with usage_file.open(encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                rec = json.loads(line)
+                totals["n_queries"] += 1
+                cost = float(rec.get("cost_usd", 0.0))
+                totals["total_cost_usd"] += cost
+
+                prov = rec.get("provider", "?")
+                totals["by_provider"].setdefault(prov, {"queries": 0, "cost_usd": 0.0})
+                totals["by_provider"][prov]["queries"]  += 1
+                totals["by_provider"][prov]["cost_usd"] += cost
+
+                model = rec.get("model", "?")
+                totals["by_model"].setdefault(model, {"queries": 0, "cost_usd": 0.0})
+                totals["by_model"][model]["queries"]  += 1
+                totals["by_model"][model]["cost_usd"] += cost
+    except Exception:
+        pass
+
+    return totals
 
 
 # ---------------------------------------------------------------------------
@@ -94,19 +264,16 @@ OLLAMA_MODEL_EMBED = "nomic-embed-text"
 # ---------------------------------------------------------------------------
 
 def check_nas() -> Tuple[bool, str]:
-    """¿NAS montado? Devuelve (ok, mensaje)."""
     if NAS_ROOT.exists() and NAS_ROOT.is_dir():
         return True, f"Montado en {NAS_ROOT}"
     return False, f"No existe {NAS_ROOT}. Monta con: open smb://synology/research"
 
 
 def check_ollama(timeout: float = 2.0) -> Tuple[bool, str]:
-    """¿Ollama alcanzable? Devuelve (ok, mensaje)."""
     try:
         r = requests.get(f"{OLLAMA_HOST}/api/tags", timeout=timeout)
         if r.ok:
-            n_models = len(r.json().get("models", []))
-            return True, f"OK ({n_models} modelos disponibles)"
+            return True, f"OK ({len(r.json().get('models', []))} modelos disponibles)"
         return False, f"HTTP {r.status_code}"
     except requests.exceptions.ConnectionError:
         return False, "Conexión rechazada (¿VPN UCA activa?)"
@@ -117,7 +284,6 @@ def check_ollama(timeout: float = 2.0) -> Tuple[bool, str]:
 
 
 def check_grobid(timeout: float = 2.0) -> Tuple[bool, str]:
-    """¿GROBID alcanzable? Devuelve (ok, mensaje)."""
     try:
         r = requests.get(f"{GROBID_URL}/api/isalive", timeout=timeout)
         if r.ok and r.text.strip().lower() == "true":
@@ -131,22 +297,33 @@ def check_grobid(timeout: float = 2.0) -> Tuple[bool, str]:
         return False, f"Error: {e}"
 
 
+def check_anthropic_api() -> Tuple[bool, str]:
+    if not ANTHROPIC_API_KEY:
+        return False, "ANTHROPIC_API_KEY no configurada en config/.env"
+    if not ANTHROPIC_API_KEY.startswith("sk-ant-"):
+        return False, "API key con formato inesperado"
+    return True, "Configurada"
+
+
+def check_openai_api() -> Tuple[bool, str]:
+    if not OPENAI_API_KEY:
+        return False, "OPENAI_API_KEY no configurada en config/.env"
+    if not OPENAI_API_KEY.startswith("sk-"):
+        return False, "API key con formato inesperado"
+    return True, "Configurada"
+
+
 # ---------------------------------------------------------------------------
 # Stats por categoría
 # ---------------------------------------------------------------------------
 
 def list_existing_categories() -> List[str]:
-    """Lista categorías que existen físicamente en categorias/."""
     if not CATEGORIAS_DIR.exists():
         return []
     return sorted(d.name for d in CATEGORIAS_DIR.iterdir() if d.is_dir())
 
 
 def get_category_stats(category: str) -> Dict[str, Any]:
-    """Devuelve conteos de artefactos por etapa para una categoría.
-
-    Cada conteo es 0 si la subcarpeta no existe.
-    """
     cat_dir = CATEGORIAS_DIR / category
     if not cat_dir.exists():
         return {
@@ -164,14 +341,8 @@ def get_category_stats(category: str) -> Dict[str, Any]:
 
     n_pdfs = count("pdfs",     "*.pdf")
     n_md   = count("md_clean", "*.clean.md")
-
-    # Pendientes: PDFs sin su correspondiente MD. Tolerante a normalización
-    # de nombres entre PDF y .clean.md (los stems no siempre coinciden 1:1
-    # porque 3_process_corpus.py puede normalizar espacios a "_").
     pending = max(0, n_pdfs - n_md)
 
-    # Metadata: 4_extract_metadata.py guarda los ficheros per-paper en
-    # metadata/per_paper/<paper_id>.metadata.json
     metadata_per_paper_dir = cat_dir / "metadata" / "per_paper"
     n_metadata = (
         sum(1 for _ in metadata_per_paper_dir.glob("*.metadata.json"))
@@ -201,7 +372,11 @@ def get_category_stats(category: str) -> Dict[str, Any]:
 
 
 def list_embedding_phases(category: str) -> List[str]:
-    """Devuelve fases (subcarpetas de embeddings/) con índice FAISS construido."""
+    """Devuelve fases (subcarpetas de embeddings/) con índice FAISS construido.
+
+    Soporta múltiples modelos: subcarpetas pueden ser '<phase>' (default nomic) o
+    '<phase>__<modelo>' (sufijo de modelo para alternativas como mxbai).
+    """
     emb_dir = CATEGORIAS_DIR / category / "embeddings"
     if not emb_dir.exists():
         return []
@@ -211,21 +386,29 @@ def list_embedding_phases(category: str) -> List[str]:
     )
 
 
+def embedding_phase_model(category: str, phase: str) -> str:
+    """Devuelve el modelo de embedding declarado en config.json del índice."""
+    cfg_path = CATEGORIAS_DIR / category / "embeddings" / phase / "config.json"
+    if not cfg_path.exists():
+        return "?"
+    try:
+        return json.loads(cfg_path.read_text(encoding="utf-8")).get("model", "?")
+    except Exception:
+        return "?"
+
+
 # ---------------------------------------------------------------------------
 # YAML helpers
 # ---------------------------------------------------------------------------
 
 def load_yaml(path: Path) -> Dict[str, Any]:
-    """Carga YAML como dict. Devuelve {} si no existe."""
     if not path.exists():
         return {}
     with path.open(encoding="utf-8") as f:
-        data = yaml.safe_load(f) or {}
-    return data
+        return yaml.safe_load(f) or {}
 
 
 def save_yaml(path: Path, data: Dict[str, Any]) -> None:
-    """Guarda dict como YAML, con backup .bak previo si existe."""
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.exists():
         backup = path.with_suffix(path.suffix + ".bak")
@@ -233,10 +416,8 @@ def save_yaml(path: Path, data: Dict[str, Any]) -> None:
     with path.open("w", encoding="utf-8") as f:
         yaml.safe_dump(
             data, f,
-            allow_unicode=True,
-            sort_keys=False,
-            default_flow_style=False,
-            indent=2,
+            allow_unicode=True, sort_keys=False,
+            default_flow_style=False, indent=2,
         )
 
 
@@ -250,6 +431,15 @@ def human_status_icon(ok: bool) -> str:
 
 def short_path(p: Path, max_len: int = 60) -> str:
     s = str(p)
-    if len(s) <= max_len:
-        return s
-    return "…" + s[-max_len:]
+    return s if len(s) <= max_len else "…" + s[-max_len:]
+
+
+def fmt_cost(usd: float) -> str:
+    """Formato amigable: $0.0012 si es muy bajo, $0.05 si es razonable."""
+    if usd == 0:
+        return "gratis"
+    if usd < 0.001:
+        return f"${usd*1000:.2f}m"   # milicentavos
+    if usd < 1:
+        return f"${usd:.4f}"
+    return f"${usd:.2f}"

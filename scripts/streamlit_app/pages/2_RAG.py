@@ -1,19 +1,25 @@
 # -*- coding: utf-8 -*-
 """
-2_🔍_RAG.py — Consultas RAG sobre el índice FAISS de un proyecto/categoría.
+2_RAG.py — Consultas RAG sobre índice FAISS, con tres providers de síntesis:
 
-Dos modos (toggle):
-  - Solo retrieval: muestra top-k chunks con metadatos (réplica de 8_query_rag.py)
-  - Retrieval + síntesis: pasa los chunks a un LLM Ollama para obtener
-    una respuesta sintetizada con citas [N].
+  - Ollama (local)     — gratis, requiere VPN UCA
+  - Anthropic (Claude) — pago, requiere ANTHROPIC_API_KEY
+  - OpenAI  (GPT)      — pago, requiere OPENAI_API_KEY
 
-Cachea índices FAISS con @st.cache_resource para no recargar en cada consulta.
+Características:
+  - Estimación de coste antes de la consulta
+  - Coste real (input/output tokens) después
+  - Contador acumulado del mes (lee /Volumes/research/metadatos/rag_usage/)
+  - Streaming en los tres providers
+  - Selector de índice (proyecto + fase) que soporta múltiples modelos de embedding
 """
 
 from __future__ import annotations
 
 import json
+import os
 import sys
+from datetime import datetime
 from pathlib import Path
 
 import faiss
@@ -21,15 +27,19 @@ import numpy as np
 import ollama
 import streamlit as st
 
-# Permitir import de utils.py de la carpeta padre
+# Permitir import de app_utils.py de la carpeta padre
 STREAMLIT_APP_DIR = Path(__file__).resolve().parent.parent
 if str(STREAMLIT_APP_DIR) not in sys.path:
     sys.path.insert(0, str(STREAMLIT_APP_DIR))
 
 from app_utils import (
-    CATEGORIAS_DIR, OLLAMA_HOST, OLLAMA_MODELS_LLM, OLLAMA_MODEL_EMBED,
-    check_nas, check_ollama,
-    list_embedding_phases, list_existing_categories,
+    ANTHROPIC_MODELS, OPENAI_MODELS, OLLAMA_MODELS_LLM, OLLAMA_MODEL_EMBED,
+    OLLAMA_HOST, ANTHROPIC_API_KEY, OPENAI_API_KEY,
+    CATEGORIAS_DIR, LLM_PRICING,
+    check_anthropic_api, check_nas, check_ollama, check_openai_api,
+    embedding_phase_model, estimate_cost_pre_query, estimate_cost_usd,
+    fmt_cost, get_monthly_usage, list_embedding_phases, list_existing_categories,
+    record_rag_query,
 )
 
 st.set_page_config(page_title="RAG", page_icon="🔍", layout="wide")
@@ -50,14 +60,14 @@ if not nas_ok:
     st.error("El NAS no está montado. No se puede acceder a los índices FAISS.")
     st.stop()
 if not ollama_ok:
-    st.error("Ollama no está accesible. No se pueden generar embeddings de la consulta.")
+    st.error("Ollama no está accesible. Se necesita para generar embeddings de la consulta.")
     st.stop()
 
 st.divider()
 
 
 # ---------------------------------------------------------------------------
-# Caché de índices FAISS y metadatos
+# Caché de índices FAISS
 # ---------------------------------------------------------------------------
 
 @st.cache_resource(show_spinner="Cargando índice FAISS…")
@@ -74,7 +84,7 @@ def load_index(project: str, phase: str):
         return None, None, None
 
     index = faiss.read_index(str(index_path))
-    meta  = []
+    meta = []
     with meta_path.open(encoding="utf-8") as f:
         for line in f:
             line = line.strip()
@@ -93,13 +103,25 @@ def get_ollama_client():
     return ollama.Client(host=OLLAMA_HOST)
 
 
+@st.cache_resource(show_spinner=False)
+def get_anthropic_client():
+    import anthropic
+    return anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+
+
+@st.cache_resource(show_spinner=False)
+def get_openai_client():
+    from openai import OpenAI
+    return OpenAI(api_key=OPENAI_API_KEY)
+
+
 def embed_query(client, query: str, model: str) -> np.ndarray:
     resp = client.embeddings(model=model, prompt=query)
     return np.array(resp["embedding"], dtype="float32")
 
 
 # ---------------------------------------------------------------------------
-# Sidebar — selectores
+# Sidebar
 # ---------------------------------------------------------------------------
 
 with st.sidebar:
@@ -112,20 +134,30 @@ with st.sidebar:
 
     project = st.selectbox("Proyecto", options=projects, key="rag_project")
 
-    phases_with_index = list_embedding_phases(project)
-    if not phases_with_index:
+    phases = list_embedding_phases(project)
+    if not phases:
         st.error(
             f"No hay índices FAISS para `{project}`.\n\n"
-            "Lanza primero `5_build_embeddings.py` desde la página de Ingestar."
+            "Lanza primero `5_build_embeddings.py` desde Ingestar."
         )
         st.stop()
 
-    phase = st.selectbox("Fase", options=phases_with_index, key="rag_phase")
+    # Mostrar nombre de fase + modelo (entre paréntesis) para que sepas cuál es cuál
+    phase_labels = {
+        p: f"{p}  ·  ({embedding_phase_model(project, p)})"
+        for p in phases
+    }
+    phase = st.selectbox(
+        "Fase / índice",
+        options=phases,
+        format_func=lambda p: phase_labels[p],
+        key="rag_phase",
+    )
 
     st.divider()
-    st.header("Búsqueda")
+    st.header("Recuperación")
 
-    k = st.slider("Top-k", min_value=3, max_value=30, value=8)
+    k = st.slider("Top-k chunks", min_value=3, max_value=30, value=8)
     type_filter = st.selectbox(
         "Filtrar por tipo",
         options=["(todos)", "text", "table"],
@@ -134,30 +166,66 @@ with st.sidebar:
     paper_filter = st.text_input(
         "Filtrar por paper_id (substring)",
         value="",
-        help="Opcional. Filtra resultados cuyo paper_id contenga este texto.",
     )
 
     st.divider()
-    st.header("Respuesta")
+    st.header("Síntesis LLM")
 
-    do_synth = st.toggle(
-        "Sintetizar respuesta con LLM",
-        value=True,
-        help="Si está activo, pasa los chunks recuperados a un LLM Ollama para obtener una respuesta con citas.",
-    )
+    do_synth = st.toggle("Sintetizar respuesta con LLM", value=True)
+
     if do_synth:
-        synth_model = st.selectbox(
-            "Modelo Ollama",
-            options=OLLAMA_MODELS_LLM,
-            index=1,  # qwen3:8b por defecto (más rápido que 14b)
+        provider = st.selectbox(
+            "Provider",
+            options=["Ollama (local)", "Anthropic (Claude)", "OpenAI (GPT)"],
+            index=0,
         )
 
+        if provider == "Ollama (local)":
+            synth_model = st.selectbox("Modelo", options=OLLAMA_MODELS_LLM, index=1)
+        elif provider == "Anthropic (Claude)":
+            ant_ok, ant_msg = check_anthropic_api()
+            if not ant_ok:
+                st.error(f"Anthropic: {ant_msg}")
+                synth_model = None
+            else:
+                synth_model = st.selectbox("Modelo", options=ANTHROPIC_MODELS, index=1)
+        else:  # OpenAI
+            oai_ok, oai_msg = check_openai_api()
+            if not oai_ok:
+                st.error(f"OpenAI: {oai_msg}")
+                synth_model = None
+            else:
+                synth_model = st.selectbox("Modelo", options=OPENAI_MODELS, index=0)
+
+        max_output_tokens = st.slider(
+            "Máx tokens respuesta", 256, 4096, 1024, step=256,
+            help="Tope superior. La respuesta real suele ser bastante menor.",
+        )
+    else:
+        provider = synth_model = max_output_tokens = None
+
+    # Contador mensual
+    st.divider()
+    st.header("Uso del mes")
+    usage = get_monthly_usage()
+    st.metric(
+        f"Mes {usage['month']}",
+        fmt_cost(usage["total_cost_usd"]),
+        f"{usage['n_queries']} consultas",
+    )
+    if usage["by_provider"]:
+        with st.expander("Desglose"):
+            for prov, stats in usage["by_provider"].items():
+                st.write(
+                    f"**{prov}** — {stats['queries']} consultas · "
+                    f"{fmt_cost(stats['cost_usd'])}"
+                )
+
 
 # ---------------------------------------------------------------------------
-# Main — query
+# Main
 # ---------------------------------------------------------------------------
 
-# Cargar índice + meta
 index, meta, cfg = load_index(project, phase)
 if index is None:
     st.error("No se pudo cargar el índice. ¿Existen index.faiss y metadata.jsonl?")
@@ -167,7 +235,7 @@ embed_model = cfg.get("model", OLLAMA_MODEL_EMBED)
 
 st.markdown(
     f"**Proyecto**: `{project}` · **Fase**: `{phase}` · "
-    f"**Chunks indexados**: {len(meta)} · **Modelo embed**: `{embed_model}`"
+    f"**Chunks**: {len(meta)} · **Modelo embed**: `{embed_model}` ({index.d} dims)"
 )
 
 query = st.text_area(
@@ -176,6 +244,23 @@ query = st.text_area(
     height=80,
     placeholder="Ej: ¿Qué pretratamientos mejoran el rendimiento de biometanización de PLA?",
 )
+
+# Estimación de coste antes de buscar (basada en k y output esperado)
+if do_synth and synth_model:
+    avg_chunk_chars = 1200  # estimación heurística
+    estimated_prompt_chars = avg_chunk_chars * k + 500  # +500 por prompt fijo
+    est_in_tk  = estimated_prompt_chars // 4
+    est_out_tk = (max_output_tokens or 500) // 3  # output medio ≈ 1/3 del máximo
+    est_cost   = estimate_cost_usd(synth_model, est_in_tk, est_out_tk)
+
+    if est_cost > 0:
+        st.info(
+            f"💰 **Coste estimado** para esta consulta con {synth_model}: "
+            f"~{fmt_cost(est_cost)} "
+            f"({est_in_tk:,} input + ~{est_out_tk:,} output tokens, k={k})"
+        )
+    else:
+        st.info(f"💰 **Coste**: gratis (Ollama local)")
 
 go = st.button("🔍 Buscar", type="primary", disabled=not query.strip())
 
@@ -187,9 +272,8 @@ if not go:
 # ---------------------------------------------------------------------------
 
 with st.spinner("Generando embedding y buscando…"):
-    client = get_ollama_client()
-    qv = embed_query(client, query, embed_model).reshape(1, -1)
-    # Pedimos k*5 para luego aplicar filtros
+    ollama_client = get_ollama_client()
+    qv = embed_query(ollama_client, query, embed_model).reshape(1, -1)
     D, I = index.search(qv, k * 5)
 
 results = []
@@ -206,20 +290,25 @@ for dist, idx in zip(D[0].tolist(), I[0].tolist()):
         break
 
 if not results:
-    st.warning("Sin resultados que cumplan los filtros. Prueba aflojando filtros o cambiando la consulta.")
+    st.warning("Sin resultados con esos filtros. Prueba aflojando filtros o cambia la consulta.")
     st.stop()
 
 # ---------------------------------------------------------------------------
-# Síntesis con LLM (opcional)
+# Síntesis
 # ---------------------------------------------------------------------------
 
-if do_synth:
+usage_capture = {
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "is_estimated": False,
+}
+
+if do_synth and synth_model:
     st.subheader("Respuesta")
 
-    # Construir contexto numerado [1], [2], ...
     context_parts = []
     for i, (_, _, m) in enumerate(results, start=1):
-        snippet = m.get("text", "").strip()
+        snippet  = m.get("text", "").strip()
         paper_id = m.get("paper_id", "?")
         section  = m.get("section", "?")
         context_parts.append(f"[{i}] ({paper_id}, sección: {section})\n{snippet}")
@@ -240,30 +329,100 @@ Pregunta: {query}
 
 Respuesta:"""
 
-    def stream_answer():
-        for chunk in client.generate(model=synth_model, prompt=prompt, stream=True):
-            yield chunk.get("response", "")
+    # ─────────────────────────── Streaming por provider ──────────────────────
+
+    def stream_ollama():
+        full = ""
+        for chunk in ollama_client.generate(model=synth_model, prompt=prompt, stream=True):
+            text = chunk.get("response", "")
+            full += text
+            yield text
+        # Ollama no devuelve token counts → estimar
+        usage_capture["input_tokens"]  = max(1, len(prompt) // 4)
+        usage_capture["output_tokens"] = max(1, len(full) // 4)
+        usage_capture["is_estimated"]  = True
+
+    def stream_anthropic():
+        client = get_anthropic_client()
+        with client.messages.stream(
+            model=synth_model,
+            max_tokens=max_output_tokens,
+            messages=[{"role": "user", "content": prompt}],
+        ) as stream:
+            for text in stream.text_stream:
+                yield text
+            final = stream.get_final_message()
+            usage_capture["input_tokens"]  = final.usage.input_tokens
+            usage_capture["output_tokens"] = final.usage.output_tokens
+
+    def stream_openai():
+        client = get_openai_client()
+        oa_stream = client.chat.completions.create(
+            model=synth_model,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=max_output_tokens,
+            stream=True,
+            stream_options={"include_usage": True},
+        )
+        for chunk in oa_stream:
+            if chunk.choices and len(chunk.choices) > 0:
+                delta = chunk.choices[0].delta
+                if delta and delta.content:
+                    yield delta.content
+            if getattr(chunk, "usage", None):
+                usage_capture["input_tokens"]  = chunk.usage.prompt_tokens
+                usage_capture["output_tokens"] = chunk.usage.completion_tokens
 
     try:
-        st.write_stream(stream_answer())
+        if provider == "Ollama (local)":
+            st.write_stream(stream_ollama())
+        elif provider == "Anthropic (Claude)":
+            st.write_stream(stream_anthropic())
+        elif provider == "OpenAI (GPT)":
+            st.write_stream(stream_openai())
     except Exception as e:
-        st.error(f"Error al sintetizar respuesta: {e}")
-        st.code(prompt, language="text")
+        st.error(f"Error al generar respuesta con {provider}: {e}")
+        with st.expander("Prompt enviado (debug)"):
+            st.code(prompt, language="text")
+        st.stop()
+
+    # Coste real y registro
+    in_tk  = usage_capture["input_tokens"]
+    out_tk = usage_capture["output_tokens"]
+    cost   = estimate_cost_usd(synth_model, in_tk, out_tk)
+
+    cost_label = "Coste estimado" if usage_capture["is_estimated"] else "Coste real"
+    st.caption(
+        f"📊 {cost_label}: **{fmt_cost(cost)}** · "
+        f"{in_tk:,} input + {out_tk:,} output tokens · "
+        f"modelo `{synth_model}`"
+    )
+
+    record_rag_query(
+        provider=provider.split(" ")[0].lower(),
+        model=synth_model,
+        input_tokens=in_tk,
+        output_tokens=out_tk,
+        cost_usd=cost,
+        query=query,
+        project=project,
+        is_estimated=usage_capture["is_estimated"],
+    )
 
     st.divider()
 
 # ---------------------------------------------------------------------------
-# Resultados (chunks)
+# Chunks
 # ---------------------------------------------------------------------------
 
 st.subheader(f"Chunks recuperados ({len(results)})")
 
 for rank, (dist, idx, m) in enumerate(results, start=1):
-    paper_id = m.get("paper_id", "?")
-    section  = m.get("section", "?")
+    paper_id   = m.get("paper_id", "?")
+    section    = m.get("section", "?")
     chunk_type = m.get("type", "?")
-    phase_tag = m.get("phase", "?")
-    snippet  = m.get("text", "")
+    phase_tag  = m.get("phase", "?")
+    snippet    = m.get("text", "")
 
     with st.expander(
         f"**[{rank}]** dist={dist:.4f} · `{paper_id}` · {section} · {chunk_type}",
