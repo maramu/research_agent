@@ -4,20 +4,22 @@
 
 | Componente | Detalle |
 |---|---|
-| Mac mini M4 Pro | 32GB RAM, procesa todo |
-| NAS | `/Volumes/research/` — almacenamiento |
+| Mac mini M4 Pro (casa) | 32GB RAM, modo servidor 24/7, ejecuta scripts y Streamlit |
+| NAS (casa) | `/Volumes/research/` — almacenamiento (PDFs, MDs, chunks, embeddings) |
+| Mac mini Pro (UCA) | `pciq22.uca.es` — host de Ollama + GROBID |
 | Scripts | `/Volumes/Disco/proyectos/research_agent/scripts/` |
 | Config | `/Volumes/Disco/proyectos/research_agent/config/` |
-| Venv | `~/venvs/rag_papers` |
+| Venv | `~/venvs/rag_papers` (Python 3.13) |
 | GROBID | Docker, `http://pciq22.uca.es:8070` |
 | Ollama | `http://pciq22.uca.es:11434` |
+| Streamlit | `http://<ip-mac-mini>:8501` — servicio launchd 24/7 |
 | GitHub | `https://github.com/maramu/research_agent` |
 
 ## Modelos Ollama disponibles
 
 - `qwen3:14b` — resúmenes detallados
 - `gemma3:4b` — cribado rápido de abstracts
-- `qwen3:8b` — uso general
+- `qwen3:8b` — uso general (RAG por defecto en la web)
 - `nomic-embed-text` — embeddings FAISS
 
 ## Estructura NAS
@@ -29,10 +31,10 @@
 ├── fallidos/           ← PDFs no clasificables
 ├── metadatos/          ← CSVs globales, doi_manual.xlsx, cache
 └── categorias/
-    ├── biogas_upgrading_biomethanation/
+    ├── biogas_upgrading_biomethanation/        ← validado pipeline completo
     ├── bioplastics_microplastics/
     ├── biological_gas_odor_treatment/
-    ├── anoxic_biogas_biodesulfurization/   ← validado pipeline completo
+    ├── anoxic_biogas_biodesulfurization/       ← validado pipeline completo
     ├── microalgae/
     ├── single_cell_protein/
     ├── advanced_oxidation_processes/
@@ -53,13 +55,13 @@
 ```
 research_agent/
 ├── config/
-│   ├── .env                  ← claves API, hosts
-│   ├── keywords.yml          ← palabras clave para cribado (8 categorías)
-│   └── scopus_queries.yml    ← queries Scopus por categoría
+│   ├── .env                          ← claves API, hosts
+│   ├── keywords.yml                  ← palabras clave para cribado (8 categorías)
+│   └── scopus_queries.yml            ← queries Scopus por categoría
 ├── scripts/
-│   ├── pipeline.py           ← orquestador (módulo importable)
-│   ├── run_pipeline.py       ← CLI del orquestador (scopus/inbox/adhoc)
-│   ├── 0_scopus_api.py       ← búsqueda Scopus API
+│   ├── pipeline.py                   ← orquestador (módulo importable)
+│   ├── run_pipeline.py               ← CLI del orquestador (scopus/inbox/adhoc)
+│   ├── 0_scopus_api.py               ← búsqueda Scopus API
 │   ├── 1_rename_papers_by_doi.py
 │   ├── 2_screen_pdfs.py
 │   ├── 3_process_corpus.py
@@ -70,9 +72,22 @@ research_agent/
 │   ├── 6_make_packages.py
 │   ├── 7_make_master_index.py
 │   ├── 8_query_rag.py
-│   └── utils/
-│       └── pdf_utils.py
-├── logs/
+│   ├── utils/
+│   │   └── pdf_utils.py
+│   └── streamlit_app/                ← Interfaz web (Streamlit)
+│       ├── app.py                    ← portada: health checks + tabla categorías
+│       ├── app_utils.py              ← helpers compartidos (renombrado para no
+│       │                               colisionar con scripts/utils/)
+│       ├── README.md                 ← instrucciones despliegue + launchd
+│       └── pages/
+│           ├── 1_Ingestar.py         ← scopus / inbox / adhoc con progreso live
+│           ├── 2_RAG.py              ← retrieval FAISS + síntesis LLM opcional
+│           ├── 3_Keywords.py         ← editor estructurado de keywords.yml
+│           ├── 4_Scopus_queries.py   ← editor de scopus_queries.yml
+│           └── 5_DOI_manual.py       ← visor filtrable de doi_manual.xlsx
+├── deployment/
+│   └── com.research_agent.streamlit.plist   ← LaunchAgent del servicio Streamlit
+├── logs/                             ← logs antiguos de scripts numerados
 ├── .gitignore
 └── requirements.txt
 ```
@@ -91,17 +106,20 @@ research_agent/
 | `5_build_embeddings.py` | Genera índice FAISS con nomic-embed-text via Ollama | ✅ |
 | `6_make_packages.py` | Crea paquetes NotebookLM (FULLTEXT, REFERENCES, INDEX) | ✅ |
 | `7_make_master_index.py` | Genera MASTER_INDEX.md por categoría | ✅ |
-| `8_query_rag.py` | Consultas RAG sobre índice FAISS | ✅ |
+| `8_query_rag.py` | Consultas RAG sobre índice FAISS (CLI) | ✅ |
 | `pipeline.py` | Orquestador: tres flujos (scopus, inbox, adhoc). Importable por Streamlit | ✅ |
 | `run_pipeline.py` | CLI del orquestador con subcomandos | ✅ |
+| `streamlit_app/` | Interfaz web sobre el pipeline (ver sección dedicada) | ✅ |
 | `utils/pdf_utils.py` | Funciones comunes (DOI, slugify, texto) | ✅ |
 
 ## Tres flujos del pipeline
 
+Cada uno accesible tanto por CLI (`run_pipeline.py`) como por la interfaz web
+(página **📥 Ingestar**, tres tabs).
+
 ### Flujo A — Scopus (categorizado de origen)
 
 No necesita cribado: la query de Scopus ya define la categoría.
-Los PDFs van directamente a `categorias/<cat>/pdfs/`.
 
 ```
 0_scopus_api   → inbox_csv/scopus_<cat>_<fecha>.csv
@@ -121,8 +139,6 @@ python run_pipeline.py scopus --category microalgae --max 500 --year-start 2020
 
 ### Flujo B — Inbox (PDFs sueltos sin clasificar)
 
-Para PDFs descargados manualmente o acumulados en inbox/.
-
 ```
 1_rename       → inbox/ (renombrados) + doi_manual.xlsx
 2_screen       → categorias/<cat>/pdfs/ + fallidos/
@@ -135,8 +151,6 @@ python run_pipeline.py inbox
 
 ### Flujo C — Ad-hoc (proyecto temporal)
 
-Lote de PDFs sin clasificación. Crea proyecto, copia PDFs, procesa y deja listo para RAG.
-
 ```
 carpeta PDFs → categorias/<nombre>/pdfs/ (copia)
 3_process … 7_index
@@ -147,6 +161,71 @@ carpeta PDFs → categorias/<nombre>/pdfs/ (copia)
 python run_pipeline.py adhoc --name revision_metanol --pdfs ~/papers_metanol
 python 8_query_rag.py --project revision_metanol "tu pregunta"
 ```
+
+## Interfaz web (Streamlit)
+
+Todos los flujos del pipeline son accesibles desde la web, además de
+herramientas adicionales (RAG, editores de configuración, visor de DOIs).
+
+| Página | Función |
+|---|---|
+| `app.py` (portada) | Health checks (NAS / Ollama / GROBID) + tabla de categorías con conteos (PDFs, pendientes, MD, resúmenes, chunks, metadata, FAISS, paquetes) |
+| `1_Ingestar` | 3 tabs (Scopus / Inbox / Ad-hoc) con formularios y progreso en directo de cada subproceso vía callback `on_output` |
+| `2_RAG` | Búsqueda FAISS sobre cualquier proyecto+fase. Filtros por tipo y paper_id. Toggle de síntesis LLM con qwen3:8b/14b/gemma3:4b. Cita fuentes con [N]. |
+| `3_Keywords` | Editor tabular de `config/keywords.yml` con backup automático (.bak) |
+| `4_Scopus_queries` | Editor por categoría de `config/scopus_queries.yml` (multilínea, añadir/duplicar/borrar queries) |
+| `5_DOI_manual` | Visor con filtros de `doi_manual.xlsx`, descarga CSV de vista filtrada |
+
+Importa directamente `pipeline.py` (no subprocess separado). Watchdog instalado
+para auto-recarga al editar ficheros.
+
+## Despliegue
+
+### Mac mini en modo servidor 24/7
+
+```bash
+sudo pmset -c sleep 0          # no se duerme nunca
+sudo pmset -c disksleep 0      # discos no se duermen
+sudo pmset -c displaysleep 0   # pantalla irrelevante
+sudo pmset -c hibernatemode 0  # sin hibernación
+sudo pmset -c womp 1           # wake on network
+sudo pmset -c autorestart 1    # reinicio automático tras corte de luz
+```
+
+Consumo idle ≈ 5-10W.
+
+### Streamlit como servicio launchd
+
+| Aspecto | Valor |
+|---|---|
+| Plist en repo | `deployment/com.research_agent.streamlit.plist` |
+| Instalado en | `~/Library/LaunchAgents/com.research_agent.streamlit.plist` |
+| Etiqueta | `com.research_agent.streamlit` |
+| Comando | `python3.13 -m streamlit run app.py …` (NO el shim `streamlit`) |
+| Logs | `~/Library/Logs/research_agent/streamlit.{log,err.log}` |
+| KeepAlive | true (reinicia automáticamente si se cae) |
+| RunAtLoad | true (arranca al login) |
+
+Comandos día a día:
+
+```bash
+# Estado
+launchctl list | grep streamlit
+
+# Log en vivo
+tail -f ~/Library/Logs/research_agent/streamlit.log
+
+# Parar / arrancar / recargar
+launchctl bootout  gui/$(id -u)/com.research_agent.streamlit
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.research_agent.streamlit.plist
+```
+
+### Acceso
+
+- Mac mini (local): `http://localhost:8501`
+- LAN (en casa): `http://192.168.0.17:8501`
+- Fuera (con VPN casa activa): `http://192.168.0.17:8501`
+- **NO** expuesto a internet (URL pública del router NO funciona — y bien que está)
 
 ## Configuración (config/.env)
 
@@ -161,9 +240,11 @@ ELSEVIER_API_KEY=<clave>
 
 ## Queries Scopus (config/scopus_queries.yml)
 
-Fichero YAML con queries de búsqueda por categoría en sintaxis Scopus
-(`TITLE-ABS-KEY`, `AND`, `OR`, `W/N`). Las queries son independientes
-de `keywords.yml` (usado solo para cribado de PDFs sueltos).
+YAML con queries por categoría en sintaxis Scopus (`TITLE-ABS-KEY`, `AND`,
+`OR`, `W/N`). Independientes de `keywords.yml` (que solo se usa para cribado
+de PDFs sueltos en el flujo inbox).
+
+Editor visual disponible en la página **📚 Scopus_queries** de la web.
 
 ## Categorías de investigación (config/keywords.yml)
 
@@ -179,10 +260,19 @@ de `keywords.yml` (usado solo para cribado de PDFs sueltos).
 ## Plan pendiente (por orden)
 
 1. ~~**`0_scopus_api.py`**~~ ✅ — consulta Scopus API con queries personalizadas por categoría
-2. ~~**Orquestador + ingesta continua**~~ ✅ — `pipeline.py` + `run_pipeline.py` con tres flujos (scopus/inbox/adhoc)
-3. **Cron/launchd** — configurar ejecución automática semanal en Mac mini
-4. **Interfaz web Streamlit** — panel de estado, ejecución de scripts, RAG integrado, editor de doi_manual.xlsx
-5. **README.md y docstrings** — documentación final de todos los scripts
+2. ~~**Orquestador + ingesta continua**~~ ✅ — `pipeline.py` + `run_pipeline.py` con tres flujos
+3. ~~**Interfaz web Streamlit**~~ ✅ — 5 páginas + despliegue como servicio launchd 24/7
+4. **Cron/launchd para ingesta semanal automática** — pendiente. Ejemplo de plist o cron:
+   ```bash
+   0 6 * * 1  cd /Volumes/Disco/proyectos/research_agent/scripts && \
+              /Users/martinramirez/venvs/rag_papers/bin/python run_pipeline.py scopus --recent-days 7
+   ```
+5. **README.md global + docstrings** — documentación final de todos los scripts
+6. **Mejoras UX (opcional, según rozaduras de uso real)**:
+   - Botones por fila en la portada para procesar pendientes directos por categoría
+   - Página de logs en vivo (`tail -f` de `~/Library/Logs/research_agent/*.log`)
+   - Editor de `doi_manual.xlsx` con `st.data_editor` (hoy solo visor)
+   - Métricas de uso de Ollama (latencia media por modelo)
 
 ## Notas importantes
 
@@ -195,3 +285,25 @@ de `keywords.yml` (usado solo para cribado de PDFs sueltos).
 - Skip automático en todos los scripts: no reprocesa lo ya existente
 - FAISS para embeddings (no ChromaDB), manteniendo scripts originales
 - Argumentos inconsistentes entre scripts: `--phase` (3_process, 3b_summarize) vs `--project` (4–8). El orquestador absorbe la diferencia.
+
+### Streamlit / launchd — gotchas aprendidos durante el despliegue
+
+- **No usar el shim `~/venvs/.../bin/streamlit`** desde launchd: macOS 15+ le pone `com.apple.provenance` y bloquea el spawn con `EX_CONFIG` (78). Solución: invocar el intérprete Python directamente con `-m streamlit`.
+- **Logs NO en `/Volumes/Disco/` ni `/Volumes/research/`**: TCC bloquea a los launchd user agents la escritura en volúmenes externos. Los logs van a `~/Library/Logs/research_agent/`.
+- **No usar emojis en nombres de fichero de `pages/`**: macOS los guarda en Unicode NFD y Streamlit no descubre las páginas en sidebar. Los iconos visuales se ponen con `st.set_page_config(page_icon="📥", ...)` dentro del fichero.
+- **Módulo de helpers de la web se llama `app_utils.py`, NO `utils.py`**: hay colisión con el paquete `scripts/utils/` (que contiene `pdf_utils.py`) cuando `scripts/` está en `sys.path`. Python resuelve al paquete viejo en lugar de al módulo de la app.
+- **Verificación de salud al cargar el plist**: tras `launchctl bootstrap`, comprobar con `launchctl list | grep streamlit` que sale PID + status `0`. Si sale `-  78`, mirar logs de launchd con:
+  ```bash
+  log show --predicate 'process == "launchd"' --last 5m --info 2>/dev/null \
+      | grep -iE "research_agent|streamlit" | tail -20
+  ```
+
+### Decisión arquitectónica
+
+Streamlit corre en el **Mac mini de casa** (no en el NAS ni en el Mac mini Pro
+UCA) porque:
+- Scripts y venv ya viven ahí
+- El NAS está montado **localmente** → I/O rápida (la mayoría del trabajo es
+  leer/escribir ficheros del NAS)
+- Ollama/GROBID son llamadas HTTP cortas, perfectamente tolerables sobre VPN UCA
+- Es la única máquina con acceso simultáneo y cómodo a ambos recursos
