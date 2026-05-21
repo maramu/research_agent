@@ -114,7 +114,7 @@ def summarize_paper(
 
 def write_report(report_rows: List[Dict], project_dir: Path) -> None:
     report_dir = project_dir / "logs"
-    report_dir.mkdir(parents=True, exist_ok=True)
+    os.makedirs(str(report_dir), exist_ok=True)
     report_path = report_dir / "3b_summarize_report.csv"
 
     fieldnames = ["paper_id", "md_path", "summary_path",
@@ -139,9 +139,8 @@ def main() -> None:
     )
     ap.add_argument(
         "--phase", required=True,
-        choices=VALID_PHASES,
         metavar="PHASE",
-        help=f"Categoría temática: {{{', '.join(VALID_PHASES)}}}",
+        help="Nombre de la fase/categoría del proyecto (p.ej. 'bioreactores', 'adhoc_xyz')",
     )
     ap.add_argument("--base",    default=DEFAULT_BASE,
                     help=f"Directorio raíz (defecto: {DEFAULT_BASE})")
@@ -230,7 +229,7 @@ def main() -> None:
 
         # ── Leer Markdown ─────────────────────────────────────
         try:
-            md_content = md_path.read_text(encoding="utf-8")
+            md_content = md_path.read_text(encoding="utf-8", errors="replace")
         except Exception as e:
             print(f"ERROR_LECTURA")
             row["status"] = "error_lectura"

@@ -22,4 +22,4 @@ logs/
 .vscode/
 .idea/
 *.swp
-EOF
+EOFscripts/streamlit_app/streamlit.log

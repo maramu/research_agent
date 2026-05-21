@@ -524,9 +524,8 @@ def main():
     )
     ap.add_argument(
         "--phase", required=True,
-        choices=VALID_PHASES,
         metavar="PHASE",
-        help=f"Categoría temática: {{{', '.join(VALID_PHASES)}}}",
+        help="Nombre de la fase/categoría del proyecto (p.ej. 'bioreactores', 'adhoc_xyz')",
     )
     ap.add_argument("--base",          default=DEFAULT_BASE,
                     help=f"Directorio raíz (defecto: {DEFAULT_BASE})")
