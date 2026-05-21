@@ -19,8 +19,9 @@
 
 - `qwen3:14b` — resúmenes detallados
 - `gemma3:4b` — cribado rápido de abstracts
-- `qwen3:8b` — uso general (RAG por defecto en la web)
-- `nomic-embed-text` — embeddings FAISS
+- `qwen3:8b` — uso general (RAG: síntesis por defecto en la web)
+- `nomic-embed-text` — embeddings FAISS (8192 ctx, 768 dims) — modelo actual de producción
+- `bge-m3` — embeddings FAISS alternativos (8192 ctx, 1024 dims, multilingüe) — en evaluación
 
 ## Estructura NAS
 
@@ -30,6 +31,7 @@
 ├── inbox_csv/          ← CSVs de Scopus (manual o via 0_scopus_api.py)
 ├── fallidos/           ← PDFs no clasificables
 ├── metadatos/          ← CSVs globales, doi_manual.xlsx, cache
+│   └── rag_usage/      ← registros de uso RAG (rag_usage_YYYY-MM.jsonl)
 └── categorias/
     ├── biogas_upgrading_biomethanation/        ← validado pipeline completo
     ├── bioplastics_microplastics/
@@ -171,7 +173,7 @@ herramientas adicionales (RAG, editores de configuración, visor de DOIs).
 |---|---|
 | `app.py` (portada) | Health checks (NAS / Ollama / GROBID) + tabla de categorías con conteos (PDFs, pendientes, MD, resúmenes, chunks, metadata, FAISS, paquetes) |
 | `1_Ingestar` | 3 tabs (Scopus / Inbox / Ad-hoc) con formularios y progreso en directo de cada subproceso vía callback `on_output` |
-| `2_RAG` | Búsqueda FAISS sobre cualquier proyecto+fase. Filtros por tipo y paper_id. Toggle de síntesis LLM con qwen3:8b/14b/gemma3:4b. Cita fuentes con [N]. |
+| `2_RAG` | Búsqueda FAISS sobre cualquier proyecto+fase. Filtros por tipo y paper_id. Selector de provider (Ollama / Anthropic / OpenAI) y modelo. Toggle síntesis LLM con streaming. Pre-estimación de coste pre-query. Coste real post-query. Contador acumulado mensual en sidebar. |
 | `3_Keywords` | Editor tabular de `config/keywords.yml` con backup automático (.bak) |
 | `4_Scopus_queries` | Editor por categoría de `config/scopus_queries.yml` (multilínea, añadir/duplicar/borrar queries) |
 | `5_DOI_manual` | Visor con filtros de `doi_manual.xlsx`, descarga CSV de vista filtrada |
@@ -259,24 +261,29 @@ Editor visual disponible en la página **📚 Scopus_queries** de la web.
 
 ## Plan pendiente (por orden)
 
-1. ~~**`0_scopus_api.py`**~~ ✅ — consulta Scopus API con queries personalizadas por categoría
-2. ~~**Orquestador + ingesta continua**~~ ✅ — `pipeline.py` + `run_pipeline.py` con tres flujos
-3. ~~**Interfaz web Streamlit**~~ ✅ — 5 páginas + despliegue como servicio launchd 24/7
-4. **Cron/launchd para ingesta semanal automática** — pendiente. Ejemplo de plist o cron:
+1. ~~**`0_scopus_api.py`**~~ ✅ — consulta Scopus API con queries personalizadas
+2. ~~**Orquestador + ingesta continua**~~ ✅ — `pipeline.py` + `run_pipeline.py`
+3. ~~**Interfaz web Streamlit**~~ ✅ — 5 páginas + servicio launchd 24/7
+4. ~~**RAG multi-provider + cost tracking**~~ ✅ — Ollama / Anthropic / OpenAI con streaming y contador mensual
+5. **Re-embeddear con bge-m3** 🔄 — en progreso (tmux). Pendiente: evaluar nomic vs bge-m3 con casos reales (especialmente consultas en castellano) y decidir modelo definitivo
+6. **Mejorar editor keywords** — tabla actual poco práctica. Ver opciones en NOTAS_PENDIENTES.md
+7. **Cron/launchd para ingesta semanal automática** — pendiente:
    ```bash
    0 6 * * 1  cd /Volumes/Disco/proyectos/research_agent/scripts && \
               /Users/martinramirez/venvs/rag_papers/bin/python run_pipeline.py scopus --recent-days 7
    ```
-5. **README.md global + docstrings** — documentación final de todos los scripts
-6. **Mejoras UX (opcional, según rozaduras de uso real)**:
-   - Botones por fila en la portada para procesar pendientes directos por categoría
-   - Página de logs en vivo (`tail -f` de `~/Library/Logs/research_agent/*.log`)
-   - Editor de `doi_manual.xlsx` con `st.data_editor` (hoy solo visor)
-   - Métricas de uso de Ollama (latencia media por modelo)
+8. **README.md global + docstrings** — documentación final de todos los scripts
+9. **Mejoras UX menores** (según rozaduras de uso real):
+   - Aviso visible cuando toggle síntesis RAG está OFF
+   - Botones por fila en portada para procesar pendientes por categoría
+   - Página de logs en vivo
+   - Editor `doi_manual.xlsx` con `st.data_editor`
 
 ## Notas importantes
 
-- Ollama en `pciq22.uca.es` solo accesible desde red UCA o VPN
+- Ollama en `pciq22.uca.es` solo accesible desde red UCA o VPN. Las consultas RAG con Anthropic/OpenAI NO requieren VPN UCA (útil cuando la VPN cae)
+- `mxbai-embed-large` NO es compatible con los chunks actuales (512 ctx vs ~1500 chars por chunk). Usar `bge-m3` (8192 ctx) como alternativa a nomic
+- Los registros de coste RAG se guardan en `/Volumes/research/metadatos/rag_usage/rag_usage_YYYY-MM.jsonl`
 - Descargas Elsevier requieren VPN activa (autenticación por IP institucional)
 - GROBID puede necesitar warm-up tras inactividad (primera llamada lenta)
 - El cribado (`2_screen`) usa keywords primero (rápido) y Ollama como fallback
