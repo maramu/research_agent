@@ -91,7 +91,7 @@ CANONICAL_CATEGORIES = [
 
 OLLAMA_MODELS_LLM     = ["qwen3:14b", "qwen3:8b", "gemma3:4b"]
 OLLAMA_EMBED_MODELS   = ["nomic-embed-text", "bge-m3", "snowflake-arctic-embed:l"]
-OLLAMA_MODEL_EMBED    = "nomic-embed-text"  # default histórico
+OLLAMA_MODEL_EMBED    = "bge-m3" # antes era "nomic-embed-text"  # default histórico
 
 ANTHROPIC_MODELS = [
     "claude-haiku-4-5",

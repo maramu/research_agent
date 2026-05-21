@@ -172,7 +172,7 @@ herramientas adicionales (RAG, editores de configuración, visor de DOIs).
 | Página | Función |
 |---|---|
 | `app.py` (portada) | Health checks (NAS / Ollama / GROBID) + tabla de categorías con conteos (PDFs, pendientes, MD, resúmenes, chunks, metadata, FAISS, paquetes) |
-| `1_Ingestar` | 3 tabs (Scopus / Inbox / Ad-hoc) con formularios y progreso en directo de cada subproceso vía callback `on_output` |
+| `1_Ingestar` | 3 tabs (Scopus / Inbox / Ad-hoc) con formularios y progreso en directo de cada subproceso vía callback `on_output` | 4 tabs (Scopus / Inbox / **Pendientes** / Ad-hoc) con formularios y progreso en directo de cada subproceso vía callback `on_output`. **Pendientes**: tabla de brechas por categoría (MD / resúmenes / chunks / metadata / FAISS / paquetes) con selector y botón para reprocesar lo incompleto sin relanzar toda la ingesta. |
 | `2_RAG` | Búsqueda FAISS sobre cualquier proyecto+fase. Filtros por tipo y paper_id. Selector de provider (Ollama / Anthropic / OpenAI) y modelo. Toggle síntesis LLM con streaming. Pre-estimación de coste pre-query. Coste real post-query. Contador acumulado mensual en sidebar. |
 | `3_Keywords` | Editor tabular de `config/keywords.yml` con backup automático (.bak) |
 | `4_Scopus_queries` | Editor por categoría de `config/scopus_queries.yml` (multilínea, añadir/duplicar/borrar queries) |

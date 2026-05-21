@@ -25,7 +25,9 @@ línea a línea — útil para st.write() en Streamlit.
 
 from __future__ import annotations
 
+import csv
 import logging
+import os
 import shutil
 import subprocess
 import sys
@@ -42,6 +44,7 @@ NAS_ROOT = Path("/Volumes/research")
 CATEGORIAS_DIR = NAS_ROOT / "categorias"
 INBOX_DIR = NAS_ROOT / "inbox"
 INBOX_CSV_DIR = NAS_ROOT / "inbox_csv"
+KNOWN_DOIS_FILE = NAS_ROOT / "metadatos" / "doi_registry.txt"
 
 log = logging.getLogger("pipeline")
 
@@ -168,6 +171,10 @@ def process_category(
             log.error("Cadena interrumpida en %s para '%s'.", script, category)
             break
 
+    if status == "ok":
+        new_dois = update_doi_registry(category)
+        log.info("DOI registry: +%d DOIs nuevos para '%s'", new_dois, category)
+
     return {"status": status, "steps": steps_results}
 
 
@@ -213,6 +220,99 @@ def detect_affected_categories() -> List[str]:
     return affected
 
 
+def update_doi_registry(category: str) -> int:
+    """Actualiza doi_registry.txt con los DOIs de categorias/<category>/pdfs/.
+
+    Devuelve el número de DOIs nuevos añadidos. Tolerante a fallos.
+    """
+    try:
+        sys.path.insert(0, str(SCRIPTS_DIR))
+        from utils.pdf_utils import extract_doi_from_pdf  # noqa: PLC0415
+
+        existing: Dict[str, str] = {}
+        if KNOWN_DOIS_FILE.exists():
+            with KNOWN_DOIS_FILE.open(encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    parts = line.split("\t", 1)
+                    if len(parts) == 2:
+                        existing[parts[0]] = parts[1]
+
+        pdfs_dir = CATEGORIAS_DIR / category / "pdfs"
+        if not pdfs_dir.exists():
+            return 0
+
+        added = 0
+        for pdf in sorted(pdfs_dir.glob("*.pdf")):
+            doi = extract_doi_from_pdf(pdf)
+            if doi and doi not in existing:
+                existing[doi] = f"{category}/{pdf.name}"
+                added += 1
+
+        if added > 0:
+            KNOWN_DOIS_FILE.parent.mkdir(parents=True, exist_ok=True)
+            with KNOWN_DOIS_FILE.open("w", encoding="utf-8") as f:
+                for doi, origen in sorted(existing.items()):
+                    f.write(f"{doi}\t{origen}\n")
+
+        return added
+    except Exception as e:
+        log.warning("update_doi_registry(%s) falló: %s", category, e)
+        return 0
+
+
+def build_doi_registry_from_nas() -> int:
+    """Escanea todas las categorías y reconstruye doi_registry.txt desde cero.
+
+    Lee los PDFs de categorias/*/pdfs/ y extrae DOIs. Es útil antes del cribado
+    para detectar duplicados contra artículos ya procesados.
+
+    Returns:
+        Número total de DOIs registrados.
+    """
+    try:
+        sys.path.insert(0, str(SCRIPTS_DIR))
+        from utils.pdf_utils import extract_doi_from_pdf  # noqa: PLC0415
+    except Exception as e:
+        log.warning("No se pudo importar extract_doi_from_pdf: %s", e)
+        return 0
+
+    registry: Dict[str, str] = {}
+
+    if not CATEGORIAS_DIR.exists():
+        return 0
+
+    for cat_dir in sorted(CATEGORIAS_DIR.iterdir()):
+        if not cat_dir.is_dir():
+            continue
+        pdfs_dir = cat_dir / "pdfs"
+        if not pdfs_dir.exists():
+            continue
+
+        pdfs = sorted(
+            p for p in pdfs_dir.iterdir()
+            if p.is_file() and p.suffix.lower() == ".pdf"
+        )
+        for pdf in pdfs:
+            try:
+                doi = extract_doi_from_pdf(pdf)
+                if doi and doi not in registry:
+                    registry[doi] = f"{cat_dir.name}/{pdf.name}"
+            except Exception as e:
+                log.debug("Error extrayendo DOI de %s: %s", pdf.name, e)
+                continue
+
+    KNOWN_DOIS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    with KNOWN_DOIS_FILE.open("w", encoding="utf-8") as f:
+        for doi, origen in sorted(registry.items()):
+            f.write(f"{doi}\t{origen}\n")
+
+    log.info("doi_registry.txt reconstruido: %d DOIs desde el NAS", len(registry))
+    return len(registry)
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # FLUJO A — Scopus
 # ═══════════════════════════════════════════════════════════════════════════
@@ -250,6 +350,9 @@ def run_scopus(
         {"status": "ok"|"partial"|"error", "categories": {cat: result}}
     """
     check_nas()
+    _setup_pipeline_log("scopus")
+    log.info("=== run_scopus iniciado ===")
+    handler = _make_output_handler(on_output)
     run_date = datetime.now().strftime("%Y%m%d")
     results: Dict[str, Any] = {}
 
@@ -273,7 +376,7 @@ def run_scopus(
     if dry_run:
         scopus_args.append("--dry-run")
 
-    scopus_result = run_step("0_scopus_api.py", scopus_args, on_output=on_output)
+    scopus_result = run_step("0_scopus_api.py", scopus_args, on_output=handler)
     if scopus_result["returncode"] != 0:
         return {"status": "error", "stage": "scopus_search", "details": scopus_result}
 
@@ -315,7 +418,7 @@ def run_scopus(
         dl_result = run_step(
             "3a_download_pdfs.py",
             ["--csv", str(csv_path), "--out-dir", str(pdfs_dir)],
-            on_output=on_output,
+            on_output=handler,
             label=f"download [{cat}]",
         )
 
@@ -324,7 +427,7 @@ def run_scopus(
             continue
 
         # Cadena de procesado
-        proc_result = process_category(cat, on_output=on_output)
+        proc_result = process_category(cat, on_output=handler)
         results[cat] = proc_result
 
     # --- Resumen ---
@@ -341,47 +444,100 @@ def run_scopus(
 # FLUJO B — Inbox (PDFs sueltos)
 # ═══════════════════════════════════════════════════════════════════════════
 
-def run_inbox(
+def run_inbox_screen(
     folders: Optional[List[str]] = None,
     rename: bool = True,
     on_output: Optional[Callable[[str], None]] = None,
 ) -> Dict[str, Any]:
-    """Flujo B: PDFs en inbox → renombrar → cribado → categorías → procesado.
+    """Fase 1 del flujo Inbox: renombrar + cribado sin mover PDFs.
 
-    Args:
-        folders:    carpetas con PDFs (default: /Volumes/research/inbox)
-        rename:     ejecutar 1_rename antes del cribado
-        on_output:  callback para líneas de salida
+    Genera cribado_pendiente.csv con la clasificación propuesta.
 
     Returns:
-        {"status": "ok"|"partial"|"error", "categories": {cat: result}}
+        {"status": "ok", "csv_path": str, "rows": [dicts del CSV]}
     """
     check_nas()
+    _setup_pipeline_log("inbox_screen")
+    log.info("=== run_inbox_screen iniciado ===")
+    handler = _make_output_handler(on_output)
     inbox_folders = folders or [str(INBOX_DIR)]
+    pending_csv = NAS_ROOT / "metadatos" / "cribado_pendiente.csv"
 
-    # --- Paso 1: renombrar PDFs por DOI ---
     if rename:
         rename_result = run_step(
             "1_rename_papers_by_doi.py",
             ["--folder", inbox_folders[0], "--apply"],
-            on_output=on_output,
+            on_output=handler,
             label="rename",
         )
         if rename_result["returncode"] != 0:
             log.warning("Renombrado falló, pero continuamos con el cribado.")
 
-    # --- Paso 2: cribado con keywords + Ollama ---
-    screen_args = ["--folders"] + inbox_folders + ["--apply"]
+    if handler:
+        handler("Actualizando registro de DOIs del NAS...")
+    try:
+        n_dois = build_doi_registry_from_nas()
+        log.info("Registro de DOIs actualizado: %d DOIs conocidos", n_dois)
+        if handler:
+            handler(f"✓ Registro actualizado: {n_dois} DOIs conocidos en el NAS")
+    except Exception as e:
+        log.warning("Error actualizando doi_registry.txt: %s", e)
+        if handler:
+            handler(f"⚠️ No se pudo actualizar registro de DOIs: {e}")
+
+    screen_args = ["--folders"] + inbox_folders + ["--output-csv", str(pending_csv)]
     screen_result = run_step(
         "2_screen_pdfs.py",
         screen_args,
-        on_output=on_output,
-        label="screen",
+        on_output=handler,
+        label="screen [preview]",
     )
     if screen_result["returncode"] != 0:
         return {"status": "error", "stage": "screen", "details": screen_result}
 
-    # --- Paso 3: detectar categorías afectadas y procesar ---
+    rows: List[Dict[str, Any]] = []
+    if pending_csv.exists():
+        with pending_csv.open(encoding="utf-8", newline="") as f:
+            rows = list(csv.DictReader(f))
+
+    return {"status": "ok", "csv_path": str(pending_csv), "rows": rows}
+
+
+def run_inbox_process(
+    csv_path: Optional[str] = None,
+    on_output: Optional[Callable[[str], None]] = None,
+) -> Dict[str, Any]:
+    """Fase 2 del flujo Inbox: aplicar movimientos y procesar categorías afectadas.
+
+    Toma el CSV de cribado (csv_path o cribado_pendiente.csv por defecto).
+
+    Returns:
+        {"status": "ok"|"partial"|"error", "categories": {cat: result}}
+    """
+    check_nas()
+    _setup_pipeline_log("inbox_process")
+    log.info("=== run_inbox_process iniciado ===")
+    handler = _make_output_handler(on_output)
+
+    effective_csv = (
+        Path(csv_path) if csv_path
+        else NAS_ROOT / "metadatos" / "cribado_pendiente.csv"
+    )
+    inbox_folders = [str(INBOX_DIR)]
+
+    screen_args = (
+        ["--folders"] + inbox_folders
+        + ["--apply", "--from-csv", str(effective_csv)]
+    )
+    screen_result = run_step(
+        "2_screen_pdfs.py",
+        screen_args,
+        on_output=handler,
+        label="screen [apply]",
+    )
+    if screen_result["returncode"] != 0:
+        return {"status": "error", "stage": "screen", "details": screen_result}
+
     affected = detect_affected_categories()
     if not affected:
         log.info("No hay PDFs nuevos que procesar tras el cribado.")
@@ -393,16 +549,32 @@ def run_inbox(
     for cat in affected:
         log.info("═" * 50)
         log.info("CATEGORÍA: %s", cat)
-        proc_result = process_category(cat, on_output=on_output)
+        proc_result = process_category(cat, on_output=handler)
         results[cat] = proc_result
 
     ok = sum(1 for r in results.values() if r.get("status") == "ok")
     total = len(results)
     overall = "ok" if ok == total else ("partial" if ok > 0 else "error")
 
-    summary = {"status": overall, "categories": results}
+    summary: Dict[str, Any] = {"status": overall, "categories": results}
     _log_summary("INBOX", results)
     return summary
+
+
+def run_inbox(
+    folders: Optional[List[str]] = None,
+    rename: bool = True,
+    on_output: Optional[Callable[[str], None]] = None,
+) -> Dict[str, Any]:
+    """Flujo B completo: cribar + procesar en secuencia.
+
+    Wrapper de compatibilidad para CLI y cron. Equivale a llamar
+    run_inbox_screen() seguido de run_inbox_process().
+    """
+    screen = run_inbox_screen(folders=folders, rename=rename, on_output=on_output)
+    if screen.get("status") != "ok":
+        return screen
+    return run_inbox_process(csv_path=screen.get("csv_path"), on_output=on_output)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -453,7 +625,7 @@ def run_adhoc(
         if dest.exists():
             skipped += 1
             continue
-        shutil.copy2(pdf, dest)
+        shutil.copy(pdf, dest)
         copied += 1
 
     msg = f"PDFs copiados: {copied}, ya existían: {skipped}"
@@ -484,6 +656,30 @@ def run_adhoc(
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def _setup_pipeline_log(flow: str) -> Path:
+    """Crea un FileHandler con timestamp para el logger pipeline y devuelve su Path."""
+    logs_dir = SCRIPTS_DIR.parent / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_path = logs_dir / f"pipeline_{flow}_{ts}.log"
+    fh = logging.FileHandler(str(log_path), encoding="utf-8")
+    fh.setLevel(logging.DEBUG)
+    fh.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
+    log.addHandler(fh)
+    return log_path
+
+
+def _make_output_handler(
+    on_output: Optional[Callable[[str], None]] = None,
+) -> Callable[[str], None]:
+    """Devuelve un callable que loguea cada línea y la reenvía a on_output."""
+    def handler(line: str) -> None:
+        log.info("[out] %s", line)
+        if on_output:
+            on_output(line)
+    return handler
+
 
 def _log_summary(flow: str, results: Dict[str, Any]) -> None:
     """Imprime resumen final de un flujo."""

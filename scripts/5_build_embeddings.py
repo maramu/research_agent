@@ -102,6 +102,8 @@ def main():
     ap.add_argument("--model",      default=DEFAULT_MODEL, help=f"Modelo Ollama (defecto: {DEFAULT_MODEL})")
     ap.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE,
                     help="Chunks por progreso (el embedding es siempre uno a uno en Ollama)")
+    ap.add_argument("--force",      action="store_true",
+                    help="Sobrescribe el índice aunque ya exista")
     args = ap.parse_args()
 
     base        = Path(args.base)
@@ -111,6 +113,11 @@ def main():
 
     if not chunks_dir.exists():
         raise SystemExit(f"No existe chunks dir: {chunks_dir}")
+
+    if (out_dir / "index.faiss").exists() and not args.force:
+        print(f"Índice existente, salto: {out_dir / 'index.faiss'}")
+        print("Usa --force para re-indexar y sobrescribirlo.")
+        return
 
     out_dir.mkdir(parents=True, exist_ok=True)
 

@@ -34,6 +34,22 @@ from dotenv import load_dotenv
 sys.path.insert(0, str(Path(__file__).parent))
 from utils.pdf_utils import extract_doi_from_pdf
 
+# Reutilizar funciones de Crossref del script de renombrado
+try:
+    import importlib.util
+    _rename_script = Path(__file__).parent / "1_rename_papers_by_doi.py"
+    _spec = importlib.util.spec_from_file_location("rename_utils", _rename_script)
+    _rename_mod = importlib.util.module_from_spec(_spec)
+    _spec.loader.exec_module(_rename_mod)
+    fetch_crossref_metadata = _rename_mod.fetch_crossref_metadata
+    extract_title_from_metadata = _rename_mod.extract_title
+    CROSSREF_AVAILABLE = True
+except Exception as e:
+    fetch_crossref_metadata = None
+    extract_title_from_metadata = None
+    CROSSREF_AVAILABLE = False
+    print(f"Advertencia: no se pudo cargar Crossref helpers: {e}")
+
 # ============================================================
 # CONSTANTES
 # ============================================================
@@ -45,8 +61,11 @@ LOG_FILE = LOG_DIR / "2_screen_pdfs.log"
 DEFAULT_OUTPUT_CSV = Path("/Volumes/research/metadatos/cribado_inicial.csv")
 DEFAULT_DEST_BASE = Path("/Volumes/research/categorias")
 FALLIDOS_DIR = Path("/Volumes/research/fallidos")
+DUPLICADOS_DIR = Path("/Volumes/research/duplicados")
+KNOWN_DOIS_FILE = Path("/Volumes/research/metadatos/doi_registry.txt")
 
 LOW_CONFIDENCE_THRESHOLD = 0.6
+CROSSREF_EMAIL = "martin.ramirez@uca.es"  # para Crossref API (educado: identificarse)
 
 VALID_CATEGORIES = {
     "biological_gas_odor_treatment",
@@ -108,6 +127,25 @@ def setup_logging() -> logging.Logger:
     fh.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
     logger.addHandler(fh)
     return logger
+
+
+def load_known_dois(path: Path) -> dict[str, str]:
+    """Lee doi_registry.txt (doi\\torigencategoria/archivo) y devuelve {doi: origen}."""
+    if not path.exists():
+        return {}
+    result: dict[str, str] = {}
+    try:
+        with path.open(encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                parts = line.split("\t", 1)
+                if len(parts) == 2:
+                    result[parts[0]] = parts[1]
+    except Exception as e:
+        print(f"Advertencia: no se pudo leer {path}: {e}")
+    return result
 
 
 def load_keywords(yml_path: Path) -> dict[str, list[str]]:
@@ -342,13 +380,35 @@ def process_pdf(
 
     first_page_text = pages_text[0] if pages_text else ""
     multi_page_text = "\n".join(pages_text)
-    titulo, abstract = detect_title_and_abstract(first_page_text, multi_page_text)
-    result["titulo_detectado"] = titulo
-    result["abstract_detectado"] = abstract
 
-    # Extraer DOI
+    # Extraer DOI primero (lo necesitamos para Crossref)
     doi = extract_doi_from_pdf(pdf_path)
     result["doi"] = doi or ""
+
+    # Intentar obtener título de Crossref si hay DOI
+    titulo = ""
+    abstract = ""
+
+    if doi and CROSSREF_AVAILABLE:
+        try:
+            metadata = fetch_crossref_metadata(doi, email=CROSSREF_EMAIL)
+            titulo = extract_title_from_metadata(metadata)
+            logger.info(f"{pdf_path.name}: título obtenido de Crossref (DOI: {doi})")
+            # Breve delay para no saturar la API
+            import time
+            time.sleep(0.15)
+        except Exception as e:
+            logger.warning(f"{pdf_path.name}: Crossref falló ({e}), usando parsing PDF")
+
+    # Fallback: parsear del PDF si no hay DOI válido o Crossref falló
+    if not titulo:
+        titulo, abstract = detect_title_and_abstract(first_page_text, multi_page_text)
+    else:
+        # Si tenemos título de Crossref, aún así parsear abstract del PDF
+        _, abstract = detect_title_and_abstract(first_page_text, multi_page_text)
+
+    result["titulo_detectado"] = titulo
+    result["abstract_detectado"] = abstract
 
     # Detección de duplicados
     if doi:
@@ -436,23 +496,32 @@ def apply_moves(
     dest_base: Path,
     fallidos_dir: Path,
     logger: logging.Logger,
+    duplicados_dir: Path = DUPLICADOS_DIR,
 ) -> dict[str, int]:
     """Mueve los PDFs clasificados según resultado:
     - clasificacion válida y confianza >= 0.6 → dest_base/<categoria>/pdfs/
     - clasificacion == 'irrelevante' o confianza < 0.6 → fallidos_dir/
-    - DUPLICADO / ERROR_* → se omiten (no se mueven)
+    - DUPLICADO → duplicados_dir/
+    - ERROR_* → se omiten (no se mueven)
     """
     moved: dict[str, int] = {}
     for row in rows:
         estado = row["estado"]
         clasificacion = row["clasificacion"]
 
-        if estado in ("DUPLICADO", "ERROR_LECTURA_PDF", "ERROR_CLASIFICACION"):
+        if estado in ("ERROR_LECTURA_PDF", "ERROR_CLASIFICACION"):
             continue
 
         src = Path(row["ruta_original"])
         if not src.exists():
             logger.warning(f"Archivo no encontrado para mover: {src}")
+            continue
+
+        if estado == "DUPLICADO":
+            dest = _move_file(src, duplicados_dir, logger)
+            if dest:
+                logger.info(f"Duplicado movido: {src.name} → {dest}")
+                moved["duplicados"] = moved.get("duplicados", 0) + 1
             continue
 
         try:
@@ -499,6 +568,10 @@ def main() -> int:
         "--apply", action="store_true",
         help=f"Mueve los PDFs clasificados a {DEFAULT_DEST_BASE}/<categoria>/pdfs/",
     )
+    parser.add_argument(
+        "--from-csv", default=None, metavar="PATH",
+        help="Cargar clasificaciones desde CSV existente; omite re-clasificar los PDFs",
+    )
     args = parser.parse_args()
     apply_mode = args.apply
 
@@ -510,6 +583,29 @@ def main() -> int:
 
     logger = setup_logging()
     logger.info(f"=== 2_screen_pdfs.py | modo={'APPLY' if apply_mode else 'PREVIEW'} ===")
+
+    # ── Modo --from-csv: cargar filas pre-clasificadas y salir ────────────
+    if args.from_csv:
+        from_csv_path = Path(args.from_csv)
+        logger.info(f"Modo from-csv: {from_csv_path} | apply={apply_mode}")
+        if not from_csv_path.exists():
+            print(f"Error: CSV no encontrado: {from_csv_path}")
+            return 1
+        with from_csv_path.open(encoding="utf-8", newline="") as f:
+            rows: list[dict] = list(csv.DictReader(f))
+        print(f"CSV cargado: {from_csv_path}  ({len(rows)} filas)")
+        if apply_mode:
+            print("Aplicando movimientos desde CSV...")
+            moved_counts = apply_moves(rows, DEFAULT_DEST_BASE, FALLIDOS_DIR, logger)
+            ok_count = sum(v for k, v in moved_counts.items() if k not in ("fallidos", "duplicados"))
+            print(f"  → clasificados movidos: {ok_count}")
+            print(f"  → fallidos:             {moved_counts.get('fallidos', 0)}")
+            print(f"  → duplicados: {moved_counts.get('duplicados', 0)} movidos  [{DUPLICADOS_DIR}]")
+        else:
+            for row in rows:
+                print(f"  {Path(row['ruta_original']).name}: {row['clasificacion']} ({row['confianza']}) [{row['estado']}]")
+        logger.info(f"=== Fin from-csv: {len(rows)} filas ===")
+        return 0
 
     folders = [Path(f).expanduser().resolve() for f in args.folders]
     pdfs = collect_pdfs(folders)
@@ -531,7 +627,9 @@ def main() -> int:
     print("-" * 80)
 
     rows: list[dict] = []
-    doi_registry: dict[str, str] = {}
+    doi_registry: dict[str, str] = load_known_dois(KNOWN_DOIS_FILE)
+    logger.info(f"DOIs conocidos precargados: {len(doi_registry)}")
+    print(f"DOIs conocidos:  {len(doi_registry)} (cargados de doi_registry.txt)")
     total = len(pdfs)
     errors = 0
 
@@ -587,6 +685,7 @@ def main() -> int:
         print(f"  {cat:<28} {n}{suffix}")
     if apply_mode:
         print(f"  {'→ fallidos (irrel. / conf<0.6)':<28}   {moved_counts.get('fallidos', 0)} movidos  [{FALLIDOS_DIR}]")
+        print(f"  → duplicados: {moved_counts.get('duplicados', 0)} movidos  [{DUPLICADOS_DIR}]")
     print(f"Duplicados:           {duplicates}")
     print(f"Errores:              {errors}")
     print(f"Método keywords:      {kw_count}")

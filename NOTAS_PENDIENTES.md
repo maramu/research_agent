@@ -38,6 +38,20 @@
 - Pre-estimación de coste antes de cada consulta
 - bge-m3 disponible como índice alternativo a nomic para `anoxic_biogas_biodesulfurization`
 
+
+### ✅ Tab Pendientes para reprocesado selectivo (completado 2026-05-21)
+
+**Problema:** si una ingesta se corta (Streamlit reiniciado, VPN caída, timeout), no había forma sencilla de reanudar desde la web — había que lanzar comandos manuales por categoría.
+
+**Solución implementada:**
+- Nueva pestaña **Pendientes** en `1_Ingestar.py` (4 tabs ahora: Scopus / Inbox / Pendientes / Ad-hoc)
+- Tabla de brechas por categoría: PDFs, MD limpio, Resúmenes, Chunks, Metadata, FAISS, Paquetes
+- Lógica de detección de incompletitud: categorías con faltantes en MD/resúmenes/chunks/metadata
+- Selector de categorías + botón "Reprocesar pendientes" → ejecuta `process_category()` con skip logic
+- Salida en vivo igual que los otros flujos
+
+**Caso de uso real:** `bioplastics_microplastics` con 64 PDFs, 64 MD, pero solo 50 resúmenes y 8 metadata → detectado correctamente como incompleto y reprocesado desde la web sin comandos manuales.
+
 ---
 
 ## En progreso
@@ -126,6 +140,22 @@ Pendiente. Ejemplo de LaunchAgent o cron:
   Evita confusión de "¿por qué no responde?".
 - **Botones por fila en portada**: acción "Procesar pendientes" directa por categoría
   en la tabla principal, sin tener que ir a la tab de Ingestar.
+- **Página de logs en vivo**: `tail -f` de `~/Library/Logs/research_agent/*.log`
+  directamente en la web.
+- **Editor doi_manual.xlsx** con `st.data_editor` — actualmente solo visor.
+ ~~**Mejoras UX menores**~~ ✅ (parcialmente implementado)
+   - ~~Botones por fila en portada para procesar pendientes por categoría~~ → **Resuelto con tab Pendientes en Ingestar** ✅
+   - Toggle síntesis OFF: aviso visible cuando está desactivado (pendiente)
+   - Página de logs en vivo (pendiente)
+   - Editor doi_manual.xlsx con st.data_editor (pendiente, actualmente solo visor)
+### 3. Pequeñas mejoras UX en la web (baja prioridad)
+
+- ~~**Botones por fila en portada**~~ → **Resuelto con tab Pendientes** ✅
+- **Toggle síntesis OFF**: cuando el toggle de "Sintetizar respuesta con LLM"
+  está desactivado, mostrar un aviso visible en el área principal
+  (ej. "Síntesis desactivada — activa el toggle en la sidebar para obtener
+  una respuesta con citas") en lugar de pasar silenciosamente a mostrar solo chunks.
+  Evita confusión de "¿por qué no responde?".
 - **Página de logs en vivo**: `tail -f` de `~/Library/Logs/research_agent/*.log`
   directamente en la web.
 - **Editor doi_manual.xlsx** con `st.data_editor` — actualmente solo visor.
