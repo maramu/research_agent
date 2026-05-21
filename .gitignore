@@ -23,3 +23,5 @@ logs/
 .idea/
 *.swp
 EOFscripts/streamlit_app/streamlit.log
+scripts/streamlit_app/streamlit.log
+scripts/streamlit_app/*.log
