@@ -19,6 +19,19 @@ Los PDFs del ad-hoc se procesan con nombres originales. Al renombrarlos después
 los chunks/summaries/metadata quedan huérfanos. Renombrar por DOI debe ir
 antes de `process_category()` también en `run_adhoc()`.
 
+### Bug #1 — integrate_adhoc() crea ficheros _2 (duplicados)
+
+`integrate_adhoc()` copia PDFs y luego `1_rename_papers_by_doi.py` crea `_2`
+porque el original ya existe en el destino.
+Orden correcto: copiar PDFs → renombrar por DOI → `process_category()`.
+**Workaround actual:** borrar `_2` manualmente + reprocesar con `--force`.
+
+### Bug #2 — Streamlit cachea índice FAISS tras re-indexado
+
+Tras regenerar el índice FAISS, la web sigue usando el anterior hasta reiniciar
+el servicio launchd. Añadir botón "Recargar índices" en sidebar de `2_RAG.py`
+o invalidar cache automáticamente detectando cambio en `mtime` del `index.faiss`.
+
 ---
 
 ## Verificaciones completadas
@@ -174,6 +187,33 @@ bge-m3 adoptado como modelo de producción. `utils/constants.py` centraliza el v
 Ver sección "🔴 Bugs pendientes" arriba.
 Requiere modificar `pipeline.py`: llamar a `1_rename_papers_by_doi.py`
 como paso previo al procesado en ambas funciones.
+Hasta que se implemente: tras `integrate_adhoc()` reprocesar manualmente con
+`3_process_corpus → 3b_summarize → 4_extract → 5_build_embeddings --force`.
+
+### 10. Instancia RAG pública (puerto 8502)
+
+Segunda instancia Streamlit solo con página RAG, sin ingesta ni configuración,
+limitada a Ollama (gratuito). Para compartir con colaboradores.
+Requiere segundo plist launchd en puerto 8502 y control de acceso (VPN o similar).
+
+### 11. Exportar papers desde RAG
+
+Tras consulta RAG, botón "Exportar papers relacionados" que genera ZIP descargable
+con PDFs + md_clean (+ opcional summaries) de los `paper_id`s recuperados.
+Implementar con `zipfile` en memoria + `st.download_button` en `2_RAG.py`.
+
+### 12. Validar nombre proyecto en run_adhoc() (revision.md — mejora C)
+
+```python
+import re
+if not re.match(r'^[a-z0-9_-]+$', name):
+    raise ValueError(f"Nombre de proyecto inválido: {name}")
+```
+
+### 13. Validar API keys con llamada real (revision.md — mejora F)
+
+`check_anthropic_api()` y `check_openai_api()` solo validan formato.
+Hacer una llamada barata (`list models`) para verificar que la key no está revocada.
 
 
 ### C. Validar el nombre de proyecto en `run_adhoc()`
