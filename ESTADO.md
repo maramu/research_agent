@@ -20,8 +20,8 @@
 - `qwen3:14b` — resúmenes detallados
 - `gemma3:4b` — cribado rápido de abstracts
 - `qwen3:8b` — uso general (RAG: síntesis por defecto en la web)
-- `nomic-embed-text` — embeddings FAISS (8192 ctx, 768 dims) — modelo actual de producción
-- `bge-m3` — embeddings FAISS alternativos (8192 ctx, 1024 dims, multilingüe) — en evaluación
+- ~~`nomic-embed-text`~~ — embeddings FAISS (768 dims) — **retirado**, reemplazado por bge-m3
+- `bge-m3` — embeddings FAISS (8192 ctx, 1024 dims, multilingüe) — **modelo de producción**
 
 ## Estructura NAS
 
@@ -75,7 +75,8 @@ research_agent/
 │   ├── 7_make_master_index.py
 │   ├── 8_query_rag.py
 │   ├── utils/
-│   │   └── pdf_utils.py
+│   │   ├── pdf_utils.py
+│   │   └── constants.py              ← Constantes compartidas (OLLAMA_MODEL_EMBED)
 │   └── streamlit_app/                ← Interfaz web (Streamlit)
 │       ├── app.py                    ← portada: health checks + tabla categorías
 │       ├── app_utils.py              ← helpers compartidos (renombrado para no
@@ -105,11 +106,12 @@ research_agent/
 | `3a_download_pdfs.py` | Descarga PDFs desde CSV Scopus via Unpaywall + Elsevier API | ✅ |
 | `3b_summarize.py` | Genera resúmenes con qwen3:14b | ✅ |
 | `4_extract_metadata.py` | Extrae metadatos de TEI XML (título, DOI, autores, refs) | ✅ |
-| `5_build_embeddings.py` | Genera índice FAISS con nomic-embed-text via Ollama | ✅ |
+| `5_build_embeddings.py` | Genera índice FAISS con bge-m3 via Ollama | ✅ |
 | `6_make_packages.py` | Crea paquetes NotebookLM (FULLTEXT, REFERENCES, INDEX) | ✅ |
 | `7_make_master_index.py` | Genera MASTER_INDEX.md por categoría | ✅ |
 | `8_query_rag.py` | Consultas RAG sobre índice FAISS (CLI) | ✅ |
-| `pipeline.py` | Orquestador: tres flujos (scopus, inbox, adhoc). Importable por Streamlit | ✅ |
+| `9_cleanup_duplicates.py` | Detecta y elimina PDFs duplicados por DOI | ✅ |
+| `pipeline.py` | Orquestador: cinco flujos (`run_scopus`, `run_inbox`, `run_adhoc`, `integrate_adhoc`, `promote_adhoc_to_category`). Helpers: `_copy_files_skip_existing()`, `_CANONICAL_CATEGORIES`. Importable por Streamlit | ✅ |
 | `run_pipeline.py` | CLI del orquestador con subcomandos | ✅ |
 | `streamlit_app/` | Interfaz web sobre el pipeline (ver sección dedicada) | ✅ |
 | `utils/pdf_utils.py` | Funciones comunes (DOI, slugify, texto) | ✅ |
@@ -172,9 +174,9 @@ herramientas adicionales (RAG, editores de configuración, visor de DOIs).
 | Página | Función |
 |---|---|
 | `app.py` (portada) | Health checks (NAS / Ollama / GROBID) + tabla de categorías con conteos (PDFs, pendientes, MD, resúmenes, chunks, metadata, FAISS, paquetes) |
-| `1_Ingestar` | 3 tabs (Scopus / Inbox / Ad-hoc) con formularios y progreso en directo de cada subproceso vía callback `on_output` | 4 tabs (Scopus / Inbox / **Pendientes** / Ad-hoc) con formularios y progreso en directo de cada subproceso vía callback `on_output`. **Pendientes**: tabla de brechas por categoría (MD / resúmenes / chunks / metadata / FAISS / paquetes) con selector y botón para reprocesar lo incompleto sin relanzar toda la ingesta. |
+| `1_Ingestar` | 4 tabs: **Scopus** / **Inbox** / **Pendientes** / **Ad-hoc**. Progreso en directo vía `on_output`. Pendientes: tabla de brechas por categoría con reprocesado selectivo. Ad-hoc: formulario + sección **🔗 Integrar ad-hoc en categoría** (selectbox origen/destino, checkbox borrar fuente, llama a `integrate_adhoc()`). |
 | `2_RAG` | Búsqueda FAISS sobre cualquier proyecto+fase. Filtros por tipo y paper_id. Selector de provider (Ollama / Anthropic / OpenAI) y modelo. Toggle síntesis LLM con streaming. Pre-estimación de coste pre-query. Coste real post-query. Contador acumulado mensual en sidebar. |
-| `3_Keywords` | Editor tabular de `config/keywords.yml` con backup automático (.bak) |
+| `3_Keywords` | Editor por textarea de `config/keywords.yml` (una keyword por línea, backup .bak automático) |
 | `4_Scopus_queries` | Editor por categoría de `config/scopus_queries.yml` (multilínea, añadir/duplicar/borrar queries) |
 | `5_DOI_manual` | Visor con filtros de `doi_manual.xlsx`, descarga CSV de vista filtrada |
 
@@ -265,8 +267,8 @@ Editor visual disponible en la página **📚 Scopus_queries** de la web.
 2. ~~**Orquestador + ingesta continua**~~ ✅ — `pipeline.py` + `run_pipeline.py`
 3. ~~**Interfaz web Streamlit**~~ ✅ — 5 páginas + servicio launchd 24/7
 4. ~~**RAG multi-provider + cost tracking**~~ ✅ — Ollama / Anthropic / OpenAI con streaming y contador mensual
-5. **Re-embeddear con bge-m3** 🔄 — en progreso (tmux). Pendiente: evaluar nomic vs bge-m3 con casos reales (especialmente consultas en castellano) y decidir modelo definitivo
-6. **Mejorar editor keywords** — tabla actual poco práctica. Ver opciones en NOTAS_PENDIENTES.md
+5. ~~**Re-embeddear con bge-m3**~~ ✅ — bge-m3 es el modelo de producción; `utils/constants.py` es la fuente de verdad
+6. ~~**Mejorar editor keywords**~~ ✅ — textarea por categoría, una keyword por línea, sin dependencias extra
 7. **Cron/launchd para ingesta semanal automática** — pendiente:
    ```bash
    0 6 * * 1  cd /Volumes/Disco/proyectos/research_agent/scripts && \
@@ -274,6 +276,7 @@ Editor visual disponible en la página **📚 Scopus_queries** de la web.
    ```
 8. **README.md global + docstrings** — documentación final de todos los scripts
 9. **Mejoras UX menores** (según rozaduras de uso real):
+   - ~~Editor `keywords.yml` — textarea por categoría (una keyword por línea)~~ ✅ (completado 2026-05-25)
    - Aviso visible cuando toggle síntesis RAG está OFF
    - Botones por fila en portada para procesar pendientes por categoría
    - Página de logs en vivo
@@ -292,6 +295,10 @@ Editor visual disponible en la página **📚 Scopus_queries** de la web.
 - Skip automático en todos los scripts: no reprocesa lo ya existente
 - FAISS para embeddings (no ChromaDB), manteniendo scripts originales
 - Argumentos inconsistentes entre scripts: `--phase` (3_process, 3b_summarize) vs `--project` (4–8). El orquestador absorbe la diferencia.
+- `_CANONICAL_CATEGORIES` en `pipeline.py` es una copia deliberada de `app_utils.CANONICAL_CATEGORIES` — se duplica para evitar el import circular `app_utils → pipeline`. Si se añade una categoría, actualizar **ambos** sitios.
+- `_copy_files_skip_existing(src, dst)` en `pipeline.py`: copia recursiva con `rglob`, skip por existencia de fichero, preserva subdirectorios. Usada por `integrate_adhoc()` y `promote_adhoc_to_category()`.
+- `integrate_adhoc(adhoc, target, delete_source)` en `pipeline.py`: copia pdfs/, md_clean/, summaries/, chunks/, metadata/ de un proyecto ad-hoc a una categoría canónica existente y re-indexa FAISS del destino. Los ficheros ya existentes se saltan.
+- `promote_adhoc_to_category(adhoc, new_name, keywords, delete_source)` en `pipeline.py`: crea una nueva categoría canónica desde un ad-hoc copiando también embeddings/ y registrando keywords en `config/keywords.yml`. Valida nombre (`^[a-z0-9_]+$`) y que la categoría no exista previamente.
 
 ### Streamlit / launchd — gotchas aprendidos durante el despliegue
 

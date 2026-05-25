@@ -100,7 +100,7 @@ def load_index(project: str, phase: str):
 
 @st.cache_resource(show_spinner=False)
 def get_ollama_client():
-    return ollama.Client(host=OLLAMA_HOST)
+    return ollama.Client(host=OLLAMA_HOST, timeout=120)
 
 
 @st.cache_resource(show_spinner=False)

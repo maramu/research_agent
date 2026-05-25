@@ -25,6 +25,7 @@ Variables de entorno (config/.env):
 import argparse
 import json
 import os
+import sys
 from pathlib import Path
 from typing import List, Dict
 
@@ -32,6 +33,9 @@ import numpy as np
 import faiss
 import ollama
 from dotenv import load_dotenv
+
+sys.path.insert(0, str(Path(__file__).parent))
+from utils.constants import OLLAMA_MODEL_EMBED
 
 # ── Cargar config/.env ────────────────────────────────────────────────────────
 _ENV_FILE = Path(__file__).parent.parent / "config" / ".env"
@@ -41,7 +45,7 @@ else:
     load_dotenv()
 
 DEFAULT_BASE  = "/Volumes/research/categorias"
-DEFAULT_MODEL = "nomic-embed-text"
+DEFAULT_MODEL = OLLAMA_MODEL_EMBED
 DEFAULT_K     = 8
 
 
@@ -96,7 +100,7 @@ def main():
         raise SystemExit(f"No existe index.faiss en: {emb_dir}")
 
     ollama_host = os.getenv("OLLAMA_HOST", "http://pciq22.uca.es:11434")
-    client      = ollama.Client(host=ollama_host)
+    client      = ollama.Client(host=ollama_host, timeout=120)
 
     index = faiss.read_index(str(index_path))
     meta  = load_metadata(emb_dir)

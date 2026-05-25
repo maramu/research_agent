@@ -47,7 +47,9 @@ if not PIPELINE_AVAILABLE:
     st.stop()
 
 from pipeline import (  # noqa: F401
+    integrate_adhoc,
     process_category,
+    promote_adhoc_to_category,
     run_adhoc,
     run_inbox,
     run_inbox_process,
@@ -563,3 +565,116 @@ with tab_adhoc:
                         f"Proyecto **{result['project']}** listo. "
                         f"Ve a 🔍 RAG para hacer consultas."
                     )
+
+    # ── Integrar / Promover ad-hoc ────────────────────────────────────────
+
+    st.divider()
+    st.subheader("🔗 Integrar proyecto ad-hoc")
+
+    _all_cats   = list_existing_categories()
+    _adhoc_opts = [c for c in _all_cats if c not in CANONICAL_CATEGORIES]
+
+    if not _adhoc_opts:
+        st.info("No hay proyectos ad-hoc disponibles en el NAS.")
+    else:
+        _adhoc_src = st.selectbox(
+            "Proyecto ad-hoc origen",
+            options=_adhoc_opts,
+            key="integrate_adhoc_src",
+        )
+
+        _destino = st.radio(
+            "Destino",
+            ["Categoría existente", "Nueva categoría"],
+            horizontal=True,
+            key="integrate_destino",
+        )
+
+        if _destino == "Categoría existente":
+            st.markdown(
+                "Copia los artefactos del proyecto ad-hoc a una categoría canónica "
+                "y re-indexa FAISS. Los ficheros ya existentes en el destino se saltan."
+            )
+            _adhoc_dst = st.selectbox(
+                "Categoría destino",
+                options=CANONICAL_CATEGORIES,
+                key="integrate_adhoc_dst",
+            )
+            _delete_src = st.checkbox(
+                "Borrar proyecto ad-hoc tras la integración",
+                value=False,
+                key="integrate_adhoc_delete",
+            )
+
+            if st.button("▶ Integrar", type="primary", key="btn_integrate_adhoc"):
+                _int_result = execute_with_live_output(
+                    integrate_adhoc, "Integrar ad-hoc",
+                    adhoc_name=_adhoc_src,
+                    target_category=_adhoc_dst,
+                    delete_source=_delete_src,
+                )
+                if _int_result:
+                    with st.expander("📊 Resumen detallado", expanded=True):
+                        st.json(_int_result)
+                    if _int_result.get("status") == "ok":
+                        st.success(
+                            f"**{_adhoc_src}** integrado en **{_adhoc_dst}** — "
+                            f"{_int_result['copied_pdfs']} PDFs nuevos, "
+                            f"{_int_result['skipped_pdfs']} ya existían."
+                        )
+                    else:
+                        st.error(
+                            f"Error en la integración: {_int_result.get('message', 'ver log')}"
+                        )
+
+        else:  # Nueva categoría
+            st.markdown(
+                "Crea una **nueva categoría canónica** a partir del proyecto ad-hoc. "
+                "Se copian todos los artefactos (incluidos los índices FAISS) y se "
+                "registran las keywords en `config/keywords.yml`."
+            )
+            _new_name = st.text_input(
+                "Nombre de la nueva categoría",
+                value="",
+                placeholder="p.ej. anaerobic_digestion_sludge",
+                help="Solo letras minúsculas, dígitos y '_'. No debe existir ya.",
+                key="promote_new_name",
+            )
+            _new_keywords_raw = st.text_area(
+                "Keywords (una por línea)",
+                value="",
+                height=140,
+                placeholder="anaerobic digestion\nbiogas\nsludge treatment",
+                key="promote_keywords",
+            )
+            _delete_src_promote = st.checkbox(
+                "Borrar proyecto ad-hoc tras la promoción",
+                value=False,
+                key="promote_delete_src",
+            )
+
+            if st.button("▶ Promover a nueva categoría", type="primary", key="btn_promote_adhoc"):
+                _new_kws = [k.strip() for k in _new_keywords_raw.splitlines() if k.strip()]
+                if not _new_name.strip():
+                    st.error("Indica el nombre de la nueva categoría.")
+                else:
+                    _promo_result = execute_with_live_output(
+                        promote_adhoc_to_category, "Promover ad-hoc",
+                        adhoc_name=_adhoc_src,
+                        new_name=_new_name.strip(),
+                        keywords=_new_kws,
+                        delete_source=_delete_src_promote,
+                    )
+                    if _promo_result:
+                        with st.expander("📊 Resumen detallado", expanded=True):
+                            st.json(_promo_result)
+                        if _promo_result.get("status") == "ok":
+                            st.success(
+                                f"Nueva categoría **{_promo_result['new_category']}** creada "
+                                f"con {_promo_result['copied_pdfs']} PDFs y "
+                                f"{_promo_result['keywords_added']} keywords."
+                            )
+                        else:
+                            st.error(
+                                f"Error: {_promo_result.get('message', 'ver log')}"
+                            )

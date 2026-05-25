@@ -28,12 +28,15 @@ from __future__ import annotations
 import csv
 import logging
 import os
+import re
 import shutil
 import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
+
+import yaml
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -44,7 +47,8 @@ NAS_ROOT = Path("/Volumes/research")
 CATEGORIAS_DIR = NAS_ROOT / "categorias"
 INBOX_DIR = NAS_ROOT / "inbox"
 INBOX_CSV_DIR = NAS_ROOT / "inbox_csv"
-KNOWN_DOIS_FILE = NAS_ROOT / "metadatos" / "doi_registry.txt"
+KNOWN_DOIS_FILE  = NAS_ROOT / "metadatos" / "doi_registry.txt"
+_KEYWORDS_PATH   = SCRIPTS_DIR.parent / "config" / "keywords.yml"
 
 log = logging.getLogger("pipeline")
 
@@ -52,6 +56,19 @@ log = logging.getLogger("pipeline")
 _PROJECT_SUBDIRS = [
     "pdfs", "tei", "md_clean", "summaries", "chunks",
     "embeddings", "metadata", "notebooklm_packages", "logs",
+]
+
+# Categorías canónicas del proyecto (espejo de app_utils.CANONICAL_CATEGORIES;
+# se duplica aquí para evitar importación circular con app_utils → pipeline).
+_CANONICAL_CATEGORIES = [
+    "biological_gas_odor_treatment",
+    "anoxic_biogas_biodesulfurization",
+    "bioplastics_microplastics",
+    "biogas_upgrading_biomethanation",
+    "microalgae",
+    "single_cell_protein",
+    "advanced_oxidation_processes",
+    "bioleaching_critical_materials",
 ]
 
 
@@ -188,6 +205,30 @@ def ensure_project_dirs(project_name: str) -> Path:
     for sub in _PROJECT_SUBDIRS:
         (project_dir / sub).mkdir(parents=True, exist_ok=True)
     return project_dir
+
+
+def _copy_files_skip_existing(src_dir: Path, dst_dir: Path) -> tuple[int, int]:
+    """Copia recursivamente src_dir → dst_dir; salta ficheros ya existentes.
+
+    Returns:
+        (copied, skipped)
+    """
+    if not src_dir.exists():
+        return 0, 0
+    dst_dir.mkdir(parents=True, exist_ok=True)
+    copied = skipped = 0
+    for src_file in sorted(src_dir.rglob("*")):
+        if not src_file.is_file():
+            continue
+        rel = src_file.relative_to(src_dir)
+        dst_file = dst_dir / rel
+        dst_file.parent.mkdir(parents=True, exist_ok=True)
+        if dst_file.exists():
+            skipped += 1
+        else:
+            shutil.copy2(src_file, dst_file)
+            copied += 1
+    return copied, skipped
 
 
 def detect_affected_categories() -> List[str]:
@@ -651,6 +692,223 @@ def run_adhoc(
         log.info("  python 8_query_rag.py --project %s \"tu pregunta\"", name)
 
     return summary
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# FLUJO D — Integrar ad-hoc en categoría canónica
+# ═══════════════════════════════════════════════════════════════════════════
+
+def integrate_adhoc(
+    adhoc_name: str,
+    target_category: str,
+    delete_source: bool = False,
+    on_output: Optional[Callable[[str], None]] = None,
+) -> Dict[str, Any]:
+    """Integra un proyecto ad-hoc en una categoría canónica.
+
+    Copia los artefactos ya generados (pdfs/, md_clean/, summaries/, chunks/,
+    metadata/) de categorias/<adhoc>/ a categorias/<target>/, saltando ficheros
+    que ya existen. Después re-indexa solo FAISS del target; el skip logic de
+    los demás scripts protege los artefactos ya presentes.
+
+    Args:
+        adhoc_name:      nombre del proyecto ad-hoc (debe existir en categorias/)
+        target_category: categoría canónica destino (debe estar en _CANONICAL_CATEGORIES)
+        delete_source:   si True, borra categorias/<adhoc>/ tras integrar
+        on_output:       callback para líneas de salida
+
+    Returns:
+        {"status": "ok"|"error", "copied_pdfs": N, "skipped_pdfs": N,
+         "totals": {subdir: {"copied": N, "skipped": N}}, ...}
+    """
+    check_nas()
+    handler = _make_output_handler(on_output)
+
+    adhoc_dir  = CATEGORIAS_DIR / adhoc_name
+    target_dir = CATEGORIAS_DIR / target_category
+
+    # ── Validaciones ──────────────────────────────────────────────────────
+    if not adhoc_dir.exists():
+        msg = f"Proyecto ad-hoc no encontrado: {adhoc_dir}"
+        handler(f"❌ {msg}")
+        return {"status": "error", "message": msg}
+
+    if target_category not in _CANONICAL_CATEGORIES:
+        msg = f"'{target_category}' no es una categoría canónica válida"
+        handler(f"❌ {msg}")
+        return {"status": "error", "message": msg}
+
+    handler(f"Integrando '{adhoc_name}' → '{target_category}'")
+    log.info("integrate_adhoc: %s → %s (delete_source=%s)", adhoc_name, target_category, delete_source)
+
+    # ── Asegurar estructura en el destino ─────────────────────────────────
+    ensure_project_dirs(target_category)
+
+    # ── Copiar artefactos subdir por subdir ───────────────────────────────
+    _COPY_SUBDIRS = ["pdfs", "md_clean", "summaries", "chunks", "metadata"]
+    totals: Dict[str, Dict[str, int]] = {}
+
+    for subdir in _COPY_SUBDIRS:
+        src = adhoc_dir / subdir
+        dst = target_dir / subdir
+        cp, sk = _copy_files_skip_existing(src, dst)
+        totals[subdir] = {"copied": cp, "skipped": sk}
+        if cp or sk:
+            handler(f"  {subdir}/: {cp} copiados, {sk} ya existían")
+
+    copied_pdfs  = totals.get("pdfs", {}).get("copied",  0)
+    skipped_pdfs = totals.get("pdfs", {}).get("skipped", 0)
+
+    # ── Re-indexar FAISS del target ───────────────────────────────────────
+    handler(f"\nRe-indexando FAISS para '{target_category}'…")
+    embed_result = run_step(
+        "5_build_embeddings.py",
+        ["--project", target_category],
+        on_output=handler,
+        label=f"5_build_embeddings [{target_category}]",
+    )
+
+    if embed_result["returncode"] != 0:
+        log.error("integrate_adhoc: falló 5_build_embeddings para '%s'", target_category)
+        return {
+            "status":    "error",
+            "message":   "Falló la re-indexación FAISS",
+            "totals":    totals,
+            "embed":     embed_result,
+        }
+
+    # ── Borrar fuente si se pidió ─────────────────────────────────────────
+    if delete_source:
+        shutil.rmtree(adhoc_dir, ignore_errors=True)
+        handler(f"🗑  Proyecto ad-hoc '{adhoc_name}' eliminado.")
+        log.info("integrate_adhoc: borrado %s", adhoc_dir)
+
+    handler(f"\n✓ Integración completada: {copied_pdfs} PDFs nuevos añadidos a '{target_category}'")
+
+    return {
+        "status":          "ok",
+        "adhoc":           adhoc_name,
+        "target_category": target_category,
+        "copied_pdfs":     copied_pdfs,
+        "skipped_pdfs":    skipped_pdfs,
+        "totals":          totals,
+        "deleted_source":  delete_source,
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# FLUJO E — Promover ad-hoc a nueva categoría canónica
+# ═══════════════════════════════════════════════════════════════════════════
+
+def promote_adhoc_to_category(
+    adhoc_name: str,
+    new_name: str,
+    keywords: List[str],
+    delete_source: bool = False,
+    on_output: Optional[Callable[[str], None]] = None,
+) -> Dict[str, Any]:
+    """Promueve un proyecto ad-hoc a una nueva categoría canónica.
+
+    Crea categorias/<new_name>/, copia todos los artefactos del ad-hoc
+    (incluyendo embeddings), añade las keywords al YAML y opcionalmente
+    borra el proyecto de origen.
+
+    Args:
+        adhoc_name:    nombre del proyecto ad-hoc existente
+        new_name:      nombre de la nueva categoría (^[a-z0-9_]+$)
+        keywords:      lista de keywords para keywords.yml
+        delete_source: si True, borra categorias/<adhoc_name>/ tras promover
+        on_output:     callback para líneas de salida
+
+    Returns:
+        {"status": "ok"|"error", "new_category": str, "copied_pdfs": int,
+         "totals": {subdir: {"copied": N, "skipped": N}},
+         "keywords_added": int, "deleted_source": bool}
+    """
+    check_nas()
+    handler = _make_output_handler(on_output)
+
+    # ── Validaciones ──────────────────────────────────────────────────────
+    if not re.fullmatch(r"[a-z0-9_]+", new_name):
+        msg = f"Nombre inválido '{new_name}': solo letras minúsculas, dígitos y '_'"
+        handler(f"❌ {msg}")
+        return {"status": "error", "message": msg}
+
+    new_dir   = CATEGORIAS_DIR / new_name
+    adhoc_dir = CATEGORIAS_DIR / adhoc_name
+
+    if new_dir.exists():
+        msg = f"Ya existe una categoría con el nombre '{new_name}'"
+        handler(f"❌ {msg}")
+        return {"status": "error", "message": msg}
+
+    if not adhoc_dir.exists():
+        msg = f"Proyecto ad-hoc no encontrado: {adhoc_dir}"
+        handler(f"❌ {msg}")
+        return {"status": "error", "message": msg}
+
+    handler(f"Promoviendo '{adhoc_name}' → nueva categoría '{new_name}'")
+    log.info("promote_adhoc_to_category: %s → %s (delete_source=%s)",
+             adhoc_name, new_name, delete_source)
+
+    # ── Crear estructura en el destino ────────────────────────────────────
+    ensure_project_dirs(new_name)
+
+    # ── Copiar artefactos (incluye embeddings) ────────────────────────────
+    _COPY_SUBDIRS = ["pdfs", "md_clean", "summaries", "chunks", "metadata", "embeddings"]
+    totals: Dict[str, Dict[str, int]] = {}
+
+    for subdir in _COPY_SUBDIRS:
+        src = adhoc_dir / subdir
+        dst = new_dir / subdir
+        cp, sk = _copy_files_skip_existing(src, dst)
+        totals[subdir] = {"copied": cp, "skipped": sk}
+        if cp or sk:
+            handler(f"  {subdir}/: {cp} copiados, {sk} ya existían")
+
+    copied_pdfs = totals.get("pdfs", {}).get("copied", 0)
+
+    # ── Actualizar keywords.yml ───────────────────────────────────────────
+    kw_added = 0
+    try:
+        existing_data: dict = {}
+        if _KEYWORDS_PATH.exists():
+            existing_data = yaml.safe_load(_KEYWORDS_PATH.read_text(encoding="utf-8")) or {}
+
+        # Backup antes de modificar
+        if _KEYWORDS_PATH.exists():
+            bak = _KEYWORDS_PATH.with_suffix(".yml.bak")
+            bak.write_text(_KEYWORDS_PATH.read_text(encoding="utf-8"), encoding="utf-8")
+
+        clean_kw = [k.strip() for k in keywords if k.strip()]
+        existing_data[new_name] = clean_kw
+        _KEYWORDS_PATH.write_text(
+            yaml.safe_dump(existing_data, allow_unicode=True, default_flow_style=False,
+                           sort_keys=True),
+            encoding="utf-8",
+        )
+        kw_added = len(clean_kw)
+        handler(f"  keywords.yml: {kw_added} keywords añadidas para '{new_name}'")
+    except Exception as e:
+        handler(f"  ⚠️ No se pudo actualizar keywords.yml: {e}")
+        log.warning("promote_adhoc_to_category: error actualizando keywords.yml: %s", e)
+
+    # ── Borrar fuente si se pidió ─────────────────────────────────────────
+    if delete_source:
+        shutil.rmtree(adhoc_dir, ignore_errors=True)
+        handler(f"🗑  Proyecto ad-hoc '{adhoc_name}' eliminado.")
+        log.info("promote_adhoc_to_category: borrado %s", adhoc_dir)
+
+    handler(f"\n✓ Nueva categoría '{new_name}' creada con {copied_pdfs} PDFs")
+
+    return {
+        "status":         "ok",
+        "new_category":   new_name,
+        "copied_pdfs":    copied_pdfs,
+        "totals":         totals,
+        "keywords_added": kw_added,
+        "deleted_source": delete_source,
+    }
 
 
 # ---------------------------------------------------------------------------

@@ -33,6 +33,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Set
+
+import yaml
 from dotenv import load_dotenv
 
 # ── Cargar config/.env ────────────────────────────────────────────────────────
@@ -42,7 +44,8 @@ if _ENV_FILE.exists():
 else:
     load_dotenv()
 
-DEFAULT_BASE = "/Volumes/research/categorias"
+DEFAULT_BASE   = "/Volumes/research/categorias"
+_KEYWORDS_PATH = Path(__file__).parent.parent / "config" / "keywords.yml"
 
 @dataclass
 class Paper:
@@ -59,6 +62,55 @@ def safe(s: Optional[str]) -> str:
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def year_from_paper_id(paper_id: str) -> Optional[int]:
+    """Extrae el año de un paper_id buscando el primer patrón YYYY (1900-2039)."""
+    m = re.search(r'(?<!\d)(19\d{2}|20[0-3]\d)(?!\d)', paper_id)
+    return int(m.group(1)) if m else None
+
+
+def load_keywords_for_category(category: str, max_kw: int = 6) -> List[str]:
+    """Devuelve las primeras max_kw keywords de keywords.yml para la categoría dada."""
+    try:
+        data = yaml.safe_load(_KEYWORDS_PATH.read_text(encoding="utf-8"))
+        return ((data or {}).get(category) or [])[:max_kw]
+    except Exception:
+        return []
+
+
+def format_corpus_header(project: str, papers: List[Paper], keywords: List[str]) -> str:
+    """Cabecera de corpus que se prepende al FULLTEXT package."""
+    years: List[int] = []
+    for p in papers:
+        y: Optional[int] = None
+        try:
+            meta = load_json(p.meta_path)
+            raw_y = meta.get("year")
+            if isinstance(raw_y, int) and 1900 < raw_y < 2100:
+                y = raw_y
+        except Exception:
+            pass
+        if y is None:
+            y = year_from_paper_id(p.paper_id)
+        if y is not None:
+            years.append(y)
+
+    period  = f"{min(years)}-{max(years)}" if years else "?"
+    today   = datetime.now().strftime("%Y-%m-%d")
+    kw_str  = ", ".join(keywords) if keywords else "—"
+
+    lines = [
+        f"# Corpus: {project}",
+        f"## Papers incluidos: {len(papers)}",
+        f"## Periodo: {period}",
+        f"## Última actualización: {today}",
+        f"## Temas principales: {kw_str}",
+        "",
+        "---",
+        "",
+    ]
+    return "\n".join(lines)
 
 
 def paper_id_from_md_clean(md_path: Path) -> str:
@@ -146,40 +198,34 @@ def fmt_source_line(journal: str, year: Optional[int]) -> str:
     return ""
 
 
-def format_fulltext_md(paper: Paper) -> str:
-    meta       = load_json(paper.meta_path)
-    title      = safe(meta.get("title")) or paper.paper_id
-    doi        = safe(meta.get("doi"))
-    journal    = safe(meta.get("journal"))
-    year       = meta.get("year")
-    authors    = meta.get("authors") or []
-    phase      = safe(meta.get("phase")) or paper.phase
-    authors_str = ", ".join([a.get("full", "").strip() for a in authors if a.get("full")]).strip()
-    abstract   = safe(meta.get("abstract"))
-    body       = paper.md_clean_path.read_text(encoding="utf-8", errors="ignore").strip()
+def format_fulltext_md(paper: Paper, project_dir: Path) -> str:
+    meta = load_json(paper.meta_path)
+    doi  = safe(meta.get("doi"))
+    year: Optional[int] = meta.get("year")
+    if not isinstance(year, int):
+        year = year_from_paper_id(paper.paper_id)
 
-    lines = []
-    lines.append(f"# [{paper.paper_id}] {title}")
-    lines.append("")
+    summary_path = project_dir / "summaries" / f"{paper.paper_id}.summary.md"
+    summary = (
+        summary_path.read_text(encoding="utf-8", errors="ignore").strip()
+        if summary_path.exists()
+        else ""
+    )
+    body = paper.md_clean_path.read_text(encoding="utf-8", errors="ignore").strip()
+
+    lines = [f"# Paper: {paper.paper_id}"]
     if doi:
         lines.append(f"**DOI:** {doi}")
-    if phase:
-        lines.append(f"**Phase:** {phase}")
-    src = fmt_source_line(journal, year)
-    if src:
-        lines.append(src)
-    if authors_str:
-        if len(authors_str) > 800:
-            authors_str = authors_str[:800] + "…"
-        lines.append(f"**Authors:** {authors_str}")
+    if year:
+        lines.append(f"**Año:** {year}")
     lines.append("")
-    if abstract:
-        lines.append("## Abstract")
+    if summary:
+        lines.append("**Resumen:**")
+        lines.append(summary)
         lines.append("")
-        lines.append(abstract)
+        lines.append("---")
         lines.append("")
-    lines.append("## Full text")
-    lines.append("")
+    lines.append("**Texto completo:**")
     lines.append(body)
     lines.append("")
     return "\n".join(lines)
@@ -279,9 +325,12 @@ def write_package(
     index_name     = f"{pkg_id}_INDEX.md"
     manifest_name  = f"{pkg_id}_manifest.json"
 
-    fulltext_parts = []
+    project_dir = pkgs_dir.parent
+    keywords    = load_keywords_for_category(project)
+
+    fulltext_parts = [format_corpus_header(project, papers, keywords)]
     for p in papers:
-        fulltext_parts.append(format_fulltext_md(p))
+        fulltext_parts.append(format_fulltext_md(p, project_dir))
         fulltext_parts.append("\n\n---\n\n")
     (pkg_folder / fulltext_name).write_text(
         "".join(fulltext_parts).rstrip() + "\n", encoding="utf-8"

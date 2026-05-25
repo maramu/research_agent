@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import Optional
 
 import fitz  # PyMuPDF
-import requests
+import ollama
 import yaml
 from dotenv import load_dotenv
 
@@ -275,7 +275,7 @@ def classify_with_keywords(
 def classify_with_ollama(
     titulo: str,
     abstract: str,
-    ollama_host: str,
+    client: ollama.Client,
     model: str,
     logger: logging.Logger,
 ) -> tuple[str, float]:
@@ -298,18 +298,9 @@ def classify_with_ollama(
         '{"clasificacion": "biological_gas_odor_treatment", "confianza": 0.95}'
     )
 
-    payload = {
-        "model": model,
-        "prompt": prompt,
-        "format": "json",
-        "stream": False,
-        "options": {"temperature": 0.1},
-    }
-
-    r = requests.post(f"{ollama_host}/api/generate", json=payload, timeout=120)
-    r.raise_for_status()
-    data = r.json()
-    response_text = data.get("response", "{}")
+    resp = client.generate(model=model, prompt=prompt, format="json", stream=False,
+                           options={"temperature": 0.1})
+    response_text = resp["response"]
 
     parsed = json.loads(response_text)
     clasificacion = str(parsed.get("clasificacion", "irrelevante")).lower().strip()
@@ -349,7 +340,7 @@ def collect_pdfs(folders: list[Path]) -> list[Path]:
 def process_pdf(
     pdf_path: Path,
     doi_registry: dict[str, str],
-    ollama_host: str,
+    client: ollama.Client,
     ollama_model: str,
     logger: logging.Logger,
     keywords: dict[str, list[str]],
@@ -432,7 +423,7 @@ def process_pdf(
     # Etapa 2: Ollama (sin coincidencia clara por keywords)
     try:
         clasificacion, confianza = classify_with_ollama(
-            titulo, abstract, ollama_host, ollama_model, logger
+            titulo, abstract, client, ollama_model, logger
         )
         result["clasificacion"] = clasificacion
         result["confianza"] = f"{confianza:.2f}"
@@ -578,6 +569,7 @@ def main() -> int:
     config = load_config()
     ollama_host = config["ollama_host"]
     ollama_model = config["ollama_model"]
+    client = ollama.Client(host=ollama_host, timeout=120)
 
     keywords = load_keywords(PROJECT_ROOT / "config" / "keywords.yml")
 
@@ -637,7 +629,7 @@ def main() -> int:
         print(f"[{i}/{total}] {pdf_path.name} ...", end=" ", flush=True)
         logger.info(f"[{i}/{total}] {pdf_path}")
 
-        row = process_pdf(pdf_path, doi_registry, ollama_host, ollama_model, logger, keywords)
+        row = process_pdf(pdf_path, doi_registry, client, ollama_model, logger, keywords)
         rows.append(row)
 
         estado = row["estado"]

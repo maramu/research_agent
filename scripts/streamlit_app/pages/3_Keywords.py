@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 """
-3_🔑_Keywords.py — Editor estructurado de config/keywords.yml.
+3_Keywords.py — Editor de config/keywords.yml.
 
-Usa st.data_editor para edición tabular (añadir/borrar filas, edición inline).
-Al guardar, hace backup .bak previo del fichero original.
+Un st.text_area por categoría (una keyword por línea).
+Al guardar crea backup .bak previo (via save_yaml de app_utils).
 """
 
 from __future__ import annotations
@@ -11,10 +11,9 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-import pandas as pd
 import streamlit as st
+import yaml as _yaml
 
-# Permitir import de utils.py de la carpeta padre
 STREAMLIT_APP_DIR = Path(__file__).resolve().parent.parent
 if str(STREAMLIT_APP_DIR) not in sys.path:
     sys.path.insert(0, str(STREAMLIT_APP_DIR))
@@ -25,14 +24,10 @@ st.set_page_config(page_title="Keywords", page_icon="🔑", layout="wide")
 st.title("🔑 Editor de keywords.yml")
 
 st.markdown(
-    "Palabras clave para el cribado de PDFs sueltos (flujo **inbox**). "
-    "El cribado por keywords es la primera etapa; si hay ambigüedad o ninguna coincidencia, "
-    "se pasa a Ollama como fallback."
+    "Palabras clave para el cribado de PDFs (flujo **inbox**). "
+    "Primera etapa del clasificador; si hay ambigüedad o ninguna coincidencia, "
+    "se pasa a Ollama como fallback. **Una keyword por línea.**"
 )
-
-# ---------------------------------------------------------------------------
-# Carga del fichero
-# ---------------------------------------------------------------------------
 
 YAML_PATH = CONFIG_DIR / "keywords.yml"
 st.caption(f"Fichero: `{YAML_PATH}`")
@@ -43,122 +38,117 @@ if not YAML_PATH.exists():
 
 data = load_yaml(YAML_PATH)
 
-# Asegurar que las 8 categorías canónicas estén presentes (aunque vacías)
-for cat in CANONICAL_CATEGORIES + ["irrelevante"]:
+ALL_CATS = CANONICAL_CATEGORIES + ["irrelevante"]
+for cat in ALL_CATS:
     if cat not in data:
         data[cat] = []
 
-# Convertir a DataFrame para st.data_editor
-rows = []
-for cat, kws in data.items():
-    if not kws:  # categoría vacía -> fila placeholder visible
-        rows.append({"categoria": cat, "keyword": ""})
-        continue
-    for kw in kws:
-        rows.append({"categoria": cat, "keyword": kw})
-
-df = pd.DataFrame(rows)
 
 # ---------------------------------------------------------------------------
-# Editor
+# Helper
 # ---------------------------------------------------------------------------
 
-# Categorías disponibles para el dropdown de la columna 'categoria'
-categories_available = sorted(set(list(data.keys()) + CANONICAL_CATEGORIES + ["irrelevante"]))
+def parse_area(text: str) -> list[str]:
+    """Split lines, strip, deduplicate, filter empties. Preserves order."""
+    seen: set[str] = set()
+    result: list[str] = []
+    for line in text.splitlines():
+        kw = line.strip()
+        if kw and kw not in seen:
+            seen.add(kw)
+            result.append(kw)
+    return result
 
-edited = st.data_editor(
-    df,
-    num_rows="dynamic",
-    use_container_width=True,
-    hide_index=True,
-    column_config={
-        "categoria": st.column_config.SelectboxColumn(
-            "Categoría",
-            options=categories_available,
-            required=True,
-            width="medium",
-        ),
-        "keyword": st.column_config.TextColumn(
-            "Keyword",
-            required=False,
-            width="large",
-            help="Palabra o expresión (case-insensitive). Las filas vacías se ignoran al guardar.",
-        ),
-    },
-    key="keywords_editor",
-)
 
 # ---------------------------------------------------------------------------
-# Resumen + guardar
+# Botón SUPERIOR
 # ---------------------------------------------------------------------------
 
-# Reconstruir dict {categoria: [keywords]}
-new_data: dict[str, list[str]] = {}
-for cat in categories_available:
-    new_data[cat] = []
-for _, row in edited.iterrows():
-    cat = str(row.get("categoria", "")).strip()
-    kw  = str(row.get("keyword", "")).strip()
-    if not cat or not kw:
-        continue
-    new_data.setdefault(cat, [])
-    if kw not in new_data[cat]:  # deduplicar
-        new_data[cat].append(kw)
-
-# Eliminar categorías sin keywords salvo 'irrelevante' que se conserva siempre
-clean_data = {
-    cat: kws for cat, kws in new_data.items()
-    if kws or cat == "irrelevante"
-}
-
-# Resumen
+save_top = st.button("💾 Guardar todo (crea .bak)", type="primary", key="save_top")
 st.divider()
-col1, col2 = st.columns([2, 1])
 
-with col1:
-    st.subheader("Resumen")
-    summary = pd.DataFrame([
-        {"Categoría": cat, "Nº keywords": len(kws)}
-        for cat, kws in clean_data.items()
-    ])
-    st.dataframe(summary, hide_index=True, use_container_width=True)
+# ---------------------------------------------------------------------------
+# Un text_area por categoría
+# ---------------------------------------------------------------------------
 
-with col2:
-    st.subheader("Acciones")
+textarea_values: dict[str, str] = {}
 
-    # Diff: solo permitimos guardar si hay cambios
-    has_changes = clean_data != data
+for cat in ALL_CATS:
+    kws = data.get(cat, [])
+    n = len(kws)
+    st.subheader(f"{cat}  ·  {n} keyword{'s' if n != 1 else ''}")
+    textarea_values[cat] = st.text_area(
+        label=cat,
+        value="\n".join(kws),
+        height=max(120, min(n * 28 + 48, 340)),
+        key=f"ta_{cat}",
+        label_visibility="collapsed",
+        placeholder="Una keyword por línea…",
+    )
 
-    if has_changes:
-        st.info("Hay cambios pendientes de guardar.")
-    else:
-        st.success("Sin cambios respecto al fichero original.")
+# ---------------------------------------------------------------------------
+# Botón INFERIOR
+# ---------------------------------------------------------------------------
 
-    if st.button(
-        "💾 Guardar (crea .bak)",
-        type="primary",
-        disabled=not has_changes,
-        use_container_width=True,
-    ):
-        try:
-            save_yaml(YAML_PATH, clean_data)
-            st.success(f"Guardado en `{YAML_PATH}` (backup en `{YAML_PATH}.bak`)")
-            st.rerun()
-        except Exception as e:
-            st.error(f"Error guardando: {e}")
+st.divider()
+col_save, col_reset = st.columns([1, 1])
 
-    if st.button("↻ Descartar cambios y recargar", use_container_width=True):
+with col_save:
+    save_bot = st.button(
+        "💾 Guardar todo (crea .bak)", type="primary",
+        key="save_bot", use_container_width=True,
+    )
+
+with col_reset:
+    if st.button("↻ Descartar cambios y recargar", key="reset", use_container_width=True):
         st.rerun()
 
 # ---------------------------------------------------------------------------
-# Vista previa del YAML resultante
+# Guardar
 # ---------------------------------------------------------------------------
 
-with st.expander("👀 Previsualizar YAML que se guardará"):
-    import yaml as _yaml
-    yaml_str = _yaml.safe_dump(
-        clean_data,
-        allow_unicode=True, sort_keys=False,
-        default_flow_style=False, indent=2,
-    )
-    st.code(yaml_str, language="yaml")
+if save_top or save_bot:
+    new_data: dict[str, list[str]] = {
+        cat: parse_area(textarea_values[cat]) for cat in ALL_CATS
+    }
+    try:
+        save_yaml(YAML_PATH, new_data)
+        total = sum(len(v) for v in new_data.values())
+        st.success(
+            f"Guardado: {total} keywords en {len(ALL_CATS)} categorías · "
+            f"backup en `{YAML_PATH}.bak`"
+        )
+        st.rerun()
+    except Exception as e:
+        st.error(f"Error guardando: {e}")
+
+# ---------------------------------------------------------------------------
+# Resumen + preview YAML (colapsados por defecto)
+# ---------------------------------------------------------------------------
+
+with st.expander("📊 Resumen y previsualización YAML"):
+    new_data_preview = {cat: parse_area(textarea_values[cat]) for cat in ALL_CATS}
+
+    col1, col2 = st.columns([1, 2])
+
+    with col1:
+        st.markdown("**Keywords en el editor** (pendientes de guardar si hay cambios)")
+        for cat in ALL_CATS:
+            current_n = len(new_data_preview[cat])
+            saved_n   = len(data.get(cat, []))
+            delta = current_n - saved_n
+            if delta > 0:
+                badge = f" `+{delta}`"
+            elif delta < 0:
+                badge = f" `{delta}`"
+            else:
+                badge = ""
+            st.write(f"- `{cat}`: **{current_n}**{badge}")
+
+    with col2:
+        yaml_str = _yaml.safe_dump(
+            new_data_preview,
+            allow_unicode=True, sort_keys=False,
+            default_flow_style=False, indent=2,
+        )
+        st.code(yaml_str, language="yaml")

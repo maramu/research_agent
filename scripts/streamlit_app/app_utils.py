@@ -36,6 +36,8 @@ CONFIG_DIR        = PROJECT_ROOT / "config"
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
+from utils.constants import OLLAMA_MODEL_EMBED  # noqa: E402
+
 _ENV_FILE = CONFIG_DIR / ".env"
 if _ENV_FILE.exists():
     load_dotenv(_ENV_FILE)
@@ -91,7 +93,7 @@ CANONICAL_CATEGORIES = [
 
 OLLAMA_MODELS_LLM     = ["qwen3:14b", "qwen3:8b", "gemma3:4b"]
 OLLAMA_EMBED_MODELS   = ["nomic-embed-text", "bge-m3", "snowflake-arctic-embed:l"]
-OLLAMA_MODEL_EMBED    = "bge-m3" # antes era "nomic-embed-text"  # default histórico
+# OLLAMA_MODEL_EMBED imported from utils.constants
 
 ANTHROPIC_MODELS = [
     "claude-haiku-4-5",
