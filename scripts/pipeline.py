@@ -50,6 +50,10 @@ INBOX_CSV_DIR = NAS_ROOT / "inbox_csv"
 KNOWN_DOIS_FILE  = NAS_ROOT / "metadatos" / "doi_registry.txt"
 _KEYWORDS_PATH   = SCRIPTS_DIR.parent / "config" / "keywords.yml"
 
+if str(SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS_DIR))
+from utils.constants import OLLAMA_MODEL_EMBED  # noqa: E402
+
 log = logging.getLogger("pipeline")
 
 # Estructura de subcarpetas que debe tener cada proyecto/categoría
@@ -173,7 +177,15 @@ def process_category(
     Returns:
         {"status": "ok"|"error", "steps": {script: result_dict}}
     """
-    extra = extra_args or {}
+    # Defaults: todos los flujos usan el modelo de embedding canónico
+    _default_extra: Dict[str, List[str]] = {
+        "5_build_embeddings.py": ["--model", OLLAMA_MODEL_EMBED],
+    }
+    # Merge: primero defaults, luego args del caller (así --force se añade, no reemplaza)
+    extra: Dict[str, List[str]] = {k: list(v) for k, v in _default_extra.items()}
+    for script, caller_args in (extra_args or {}).items():
+        extra[script] = extra.get(script, []) + caller_args
+
     steps_results: Dict[str, Any] = {}
     status = "ok"
 
@@ -674,6 +686,16 @@ def run_adhoc(
     if on_output:
         on_output(msg)
 
+    # Renombrar por DOI antes de procesar para que paper_id == nombre final del PDF
+    rename_result = run_step(
+        "1_rename_papers_by_doi.py",
+        ["--folder", str(dest_pdfs), "--apply"],
+        on_output=on_output,
+        label=f"rename [{name}]",
+    )
+    if rename_result["returncode"] != 0:
+        log.warning("run_adhoc: renombrado falló — continuando con nombres originales")
+
     # Cadena de procesado
     proc_result = process_category(name, on_output=on_output)
 
@@ -744,37 +766,44 @@ def integrate_adhoc(
     # ── Asegurar estructura en el destino ─────────────────────────────────
     ensure_project_dirs(target_category)
 
-    # ── Copiar artefactos subdir por subdir ───────────────────────────────
-    _COPY_SUBDIRS = ["pdfs", "md_clean", "summaries", "chunks", "metadata"]
-    totals: Dict[str, Dict[str, int]] = {}
+    # ── Copiar solo PDFs (artefactos se regeneran con nombre correcto tras renombrado) ──
+    cp_pdfs, sk_pdfs = _copy_files_skip_existing(
+        adhoc_dir / "pdfs", target_dir / "pdfs"
+    )
+    totals: Dict[str, Dict[str, int]] = {
+        "pdfs": {"copied": cp_pdfs, "skipped": sk_pdfs}
+    }
+    handler(f"  pdfs/: {cp_pdfs} copiados, {sk_pdfs} ya existían")
 
-    for subdir in _COPY_SUBDIRS:
-        src = adhoc_dir / subdir
-        dst = target_dir / subdir
-        cp, sk = _copy_files_skip_existing(src, dst)
-        totals[subdir] = {"copied": cp, "skipped": sk}
-        if cp or sk:
-            handler(f"  {subdir}/: {cp} copiados, {sk} ya existían")
+    copied_pdfs  = cp_pdfs
+    skipped_pdfs = sk_pdfs
 
-    copied_pdfs  = totals.get("pdfs", {}).get("copied",  0)
-    skipped_pdfs = totals.get("pdfs", {}).get("skipped", 0)
-
-    # ── Re-indexar FAISS del target ───────────────────────────────────────
-    handler(f"\nRe-indexando FAISS para '{target_category}'…")
-    embed_result = run_step(
-        "5_build_embeddings.py",
-        ["--project", target_category],
+    # ── Renombrar por DOI antes de procesar ───────────────────────────────
+    handler(f"\nRenombrando PDFs por DOI en '{target_category}'…")
+    rename_result = run_step(
+        "1_rename_papers_by_doi.py",
+        ["--folder", str(target_dir / "pdfs"), "--apply"],
         on_output=handler,
-        label=f"5_build_embeddings [{target_category}]",
+        label=f"rename [{target_category}]",
+    )
+    if rename_result["returncode"] != 0:
+        log.warning("integrate_adhoc: renombrado falló — continuando con nombres originales")
+
+    # ── Cadena de procesado completa (skip logic protege artefactos existentes) ──
+    handler(f"\nProcesando cadena completa para '{target_category}'…")
+    proc_result = process_category(
+        target_category,
+        on_output=handler,
+        extra_args={"5_build_embeddings.py": ["--force"]},
     )
 
-    if embed_result["returncode"] != 0:
-        log.error("integrate_adhoc: falló 5_build_embeddings para '%s'", target_category)
+    if proc_result["status"] != "ok":
+        log.error("integrate_adhoc: falló process_category para '%s'", target_category)
         return {
-            "status":    "error",
-            "message":   "Falló la re-indexación FAISS",
-            "totals":    totals,
-            "embed":     embed_result,
+            "status":  "error",
+            "message": "Falló el procesado de la categoría",
+            "totals":  totals,
+            "proc":    proc_result,
         }
 
     # ── Borrar fuente si se pidió ─────────────────────────────────────────

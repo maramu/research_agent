@@ -1,40 +1,68 @@
 # Notas pendientes — research_agent
 
-## 🔴 Bugs pendientes
-
-### Fix integrate_adhoc() — renombrado antes de copiar
-
-`integrate_adhoc()` copia PDFs y luego el renombrado por DOI crea ficheros `_2`
-porque el original ya existe en el destino. Orden correcto:
-1. Copiar PDFs a destino
-2. Renombrar por DOI (`1_rename_papers_by_doi.py`)
-3. Procesar cadena completa (`process_category()`)
-
-Hasta que se implemente: tras `integrate_adhoc()` hay que reprocesar manualmente
-con `3_process_corpus → 3b_summarize → 4_extract → 5_build_embeddings`.
-
-### Fix run_adhoc() — mismo problema de raíz
-
-Los PDFs del ad-hoc se procesan con nombres originales. Al renombrarlos después,
-los chunks/summaries/metadata quedan huérfanos. Renombrar por DOI debe ir
-antes de `process_category()` también en `run_adhoc()`.
-
-### Bug #1 — integrate_adhoc() crea ficheros _2 (duplicados)
-
-`integrate_adhoc()` copia PDFs y luego `1_rename_papers_by_doi.py` crea `_2`
-porque el original ya existe en el destino.
-Orden correcto: copiar PDFs → renombrar por DOI → `process_category()`.
-**Workaround actual:** borrar `_2` manualmente + reprocesar con `--force`.
-
-### Bug #2 — Streamlit cachea índice FAISS tras re-indexado
-
-Tras regenerar el índice FAISS, la web sigue usando el anterior hasta reiniciar
-el servicio launchd. Añadir botón "Recargar índices" en sidebar de `2_RAG.py`
-o invalidar cache automáticamente detectando cambio en `mtime` del `index.faiss`.
-
 ---
 
 ## Verificaciones completadas
+
+### ✅ Bug caché FAISS Streamlit (resuelto 2026-05-27)
+
+`2_RAG.py` — `load_index()` recibe `index_mtime: float` como tercer parámetro del
+cache key de `@st.cache_resource`. La caché se invalida automáticamente cuando cambia
+el `mtime` del `index.faiss` en disco — sin necesidad de reiniciar launchd.
+`st_mtime` se calcula antes de llamar a `load_index()`; si el fichero no existe
+devuelve `0.0` (capturado por el bloque `index is None`).
+
+---
+
+### ✅ pipeline.py — modelo de embedding de producción (resuelto 2026-05-27)
+
+`pipeline.py` — dos cambios:
+- Línea 53-55: import de `OLLAMA_MODEL_EMBED` desde `utils/constants.py` con path guard,
+  siguiendo el mismo patrón que `app_utils.py`.
+- Línea 183-189: `process_category()` define `_default_extra` con `--model bge-m3`
+  para `5_build_embeddings.py` y lo mergea con el `extra_args` del caller. Todos los
+  flujos (adhoc, inbox, scopus, integrate) usan bge-m3 automáticamente.
+
+---
+
+### ✅ Bug #1 y #2 — renombrado antes de procesar en run_adhoc() e integrate_adhoc() (resuelto 2026-05-27)
+
+**Problema:** los PDFs se procesaban con sus nombres originales. Al renombrar por DOI
+después, los artefactos (md_clean, chunks, summaries, metadata) quedaban huérfanos,
+y `integrate_adhoc()` generaba ficheros `_2` al encontrar el PDF original ya presente
+en el destino.
+
+**Solución implementada en `pipeline.py`:**
+
+`run_adhoc()` (línea 677): insertado rename step entre copia de PDFs y `process_category()`.
+Si Crossref falla (rc != 0) se loguea warning y continúa con nombre original — el pipeline
+no se interrumpe.
+
+`integrate_adhoc()` (línea 757): antes copiaba 5 subdirs + re-indexaba solo FAISS.
+Ahora: copia solo `pdfs/` → rename → `process_category()` completa. Los artefactos
+existentes en el target están protegidos por el skip logic de cada script.
+El contrato de retorno (`status`, `copied_pdfs`, `skipped_pdfs`, `totals`) es idéntico
+— `1_Ingestar.py` no se toca.
+
+**Consecuencia importante:** `integrate_adhoc()` ahora necesita GROBID y Ollama
+disponibles (antes bastaba FAISS). Si la VPN UCA no está activa al integrar, GROBID
+fallará y `process_category()` devolverá `status: "error"`. La UI lo muestra correctamente.
+
+**Fix adicional (2026-05-27):** `integrate_adhoc()` pasa `--force` a `5_build_embeddings.py`
+via `extra_args` para que el índice FAISS se regenere siempre tras integrar, incluyendo
+los papers nuevos.
+
+**Nota para proyectos ad-hoc anteriores al fix:** `integrate_adhoc()` ya no copia
+md_clean/summaries/chunks/metadata del ad-hoc (se regeneran con nombre correcto).
+Si se integra un ad-hoc procesado antes del fix, los artefactos con nombres viejos
+quedarán huérfanos en el target — borrarlos manualmente o reprocesar con `--force`.
+
+**Duplicados por nombre:** si el paper ya existe en la categoría destino con un nombre
+ligeramente distinto (mayúsculas, guiones vs guiones bajos), el rename genera una segunda
+copia. Detectar y limpiar manualmente hasta que el item 19 (detección avanzada de
+duplicados) esté implementado.
+
+---
 
 ### ✅ PDFs manuales en categorías (verificado 2026-05-16)
 
@@ -72,7 +100,6 @@ o invalidar cache automáticamente detectando cambio en `mtime` del `index.faiss
 - Pre-estimación de coste antes de cada consulta
 - bge-m3 disponible como índice alternativo a nomic para `anoxic_biogas_biodesulfurization`
 
-
 ### ✅ Tab Pendientes para reprocesado selectivo (completado 2026-05-21)
 
 **Problema:** si una ingesta se corta (Streamlit reiniciado, VPN caída, timeout), no había forma sencilla de reanudar desde la web — había que lanzar comandos manuales por categoría.
@@ -85,6 +112,32 @@ o invalidar cache automáticamente detectando cambio en `mtime` del `index.faiss
 - Salida en vivo igual que los otros flujos
 
 **Caso de uso real:** `bioplastics_microplastics` con 64 PDFs, 64 MD, pero solo 50 resúmenes y 8 metadata → detectado correctamente como incompleto y reprocesado desde la web sin comandos manuales.
+
+---
+
+### ✅ 9_cleanup_duplicates.py — desempate por nombre limpio + apply (resuelto 2026-05-28)
+
+**Problema:** `choose_keep_intra()` ordenaba por stem alfabético en caso de empate en completeness.
+Los stems viejos con inicial de autor (`_J_`, `_J_J_`, `_A_`) caen antes que la primera
+palabra del nombre limpio Crossref → el script conservaba el nombre sucio en 3 de 7 casos:
+Das 2022, González Cortés 2023, Lenis 2026.
+
+**Solución implementada en `9_cleanup_duplicates.py`:**
+- `_is_clean_stem(stem)`: devuelve `True` si el stem es todo minúsculas y no contiene
+  DOI embebido (`_10_\d{4,5}_`).
+- Sort key en `choose_keep_intra()` y `choose_keep_cross()`:
+  `(not _is_clean_stem, -completeness, stem.lower(), line_no)`.
+  Los nombres limpios Crossref siempre ganan sobre nombres con mayúsculas o DOI embebido.
+- `print_reindex_commands()` actualizado: muestra `--model bge-m3 --force` en lugar de nomic.
+
+**Ejecutado:**
+- `--apply`: 7 duplicados eliminados, 28 ficheros borrados en `anoxic_biogas_biodesulfurization`
+  y `biogas_upgrading_biomethanation`. Metadata reescrita con backup `.bak`.
+- Re-indexado FAISS con bge-m3 --force: anoxic (1704 chunks), biogas (171 chunks).
+
+**Nota de uso:** `9_cleanup_duplicates.py --preview` debe ejecutarse periódicamente
+(especialmente tras ingestas masivas o renombrados). Al hacer `--apply`, el propio script
+indica qué categorías necesitan `5_build_embeddings.py --model bge-m3 --force`.
 
 ---
 
@@ -155,15 +208,9 @@ Pendiente. Ejemplo de LaunchAgent o cron:
 
 ### 5. Pequeñas mejoras UX en la web (baja prioridad)
 
-- **Toggle síntesis OFF**: cuando el toggle de "Sintetizar respuesta con LLM"
-  está desactivado, mostrar un aviso visible en el área principal
-  (ej. "Síntesis desactivada — activa el toggle en la sidebar para obtener
-  una respuesta con citas") en lugar de pasar silenciosamente a mostrar solo chunks.
-  Evita confusión de "¿por qué no responde?".
-- **Botones por fila en portada**: acción "Procesar pendientes" directa por categoría
-  en la tabla principal, sin tener que ir a la tab de Ingestar.
-- **Página de logs en vivo**: `tail -f` de `~/Library/Logs/research_agent/*.log`
-  directamente en la web.
+- **Toggle síntesis OFF**: mostrar aviso visible en el área principal cuando la síntesis está desactivada.
+- **Botones por fila en portada**: acción "Procesar pendientes" directa por categoría en la tabla principal.
+- **Página de logs en vivo**: `tail -f` de `~/Library/Logs/research_agent/*.log` directamente en la web.
 - **Editor doi_manual.xlsx** con `st.data_editor` — actualmente solo visor.
 
 ### 6. Actualizar precios en app_utils.py
@@ -177,18 +224,17 @@ periódicamente en:
 
 Documentación final del proyecto: README de primer nivel con visión general,
 y docstrings en los scripts numerados que aún no los tienen.
+Incluir: qué es research_agent, qué puede hacer, cómo acceder, qué categorías
+existen, cómo hacer consultas RAG, cómo añadir PDFs, limitaciones, buenas
+prácticas. **Prioritario si se comparte con el grupo.**
 
 ### ✅ 8. Decisión final nomic vs bge-m3 (completado 2026-05-25)
 
 bge-m3 adoptado como modelo de producción. `utils/constants.py` centraliza el valor; `app_utils.py` y `8_query_rag.py` importan de ahí. Los índices nomic se conservan en el NAS pero no son el default.
 
-### 9. Fix integrate_adhoc() y run_adhoc() — renombrado antes de procesar
+### ✅ 9. Fix integrate_adhoc() y run_adhoc() — renombrado antes de procesar (resuelto 2026-05-27)
 
-Ver sección "🔴 Bugs pendientes" arriba.
-Requiere modificar `pipeline.py`: llamar a `1_rename_papers_by_doi.py`
-como paso previo al procesado en ambas funciones.
-Hasta que se implemente: tras `integrate_adhoc()` reprocesar manualmente con
-`3_process_corpus → 3b_summarize → 4_extract → 5_build_embeddings --force`.
+Ver sección "Verificaciones completadas" — Bug #1 y #2.
 
 ### 10. Instancia RAG pública (puerto 8502)
 
@@ -202,7 +248,7 @@ Tras consulta RAG, botón "Exportar papers relacionados" que genera ZIP descarga
 con PDFs + md_clean (+ opcional summaries) de los `paper_id`s recuperados.
 Implementar con `zipfile` en memoria + `st.download_button` en `2_RAG.py`.
 
-### 12. Validar nombre proyecto en run_adhoc() (revision.md — mejora C)
+### 12. Validar nombre proyecto en run_adhoc()
 
 ```python
 import re
@@ -210,21 +256,189 @@ if not re.match(r'^[a-z0-9_-]+$', name):
     raise ValueError(f"Nombre de proyecto inválido: {name}")
 ```
 
-### 13. Validar API keys con llamada real (revision.md — mejora F)
+### 13. Validar API keys con llamada real
 
 `check_anthropic_api()` y `check_openai_api()` solo validan formato.
 Hacer una llamada barata (`list models`) para verificar que la key no está revocada.
 
+### ✅ 13b. Actualizar DEFAULT_MODEL en 5_build_embeddings.py (resuelto 2026-05-28)
 
-### C. Validar el nombre de proyecto en `run_adhoc()`
+`5_build_embeddings.py` — añadido `import sys`, path guard y
+`from utils.constants import OLLAMA_MODEL_EMBED`. `DEFAULT_MODEL = OLLAMA_MODEL_EMBED`.
+Ahora lanzar el script directamente por CLI sin `--model` usa bge-m3 por defecto.
 
-Evitar caracteres peligrosos como `/`, `..`, espacios:
+---
 
-```python
-import re
-if not re.match(r'^[a-z0-9_-]+$', name):
-    raise ValueError(f"Nombre de proyecto inválido: {name}")
+## Nuevas mejoras (2026-05-26)
+
+### ✅ 14. Registro de procedencia de PDFs (completado 2026-05-26)
+
+`4_extract_metadata.py` — campos añadidos a cada registro de `papers_metadata.jsonl`:
+- `stable_id` — slug DOI si hay DOI, else `paper_id` (item 16)
+- `processed_date` — `date.today().isoformat()` en el momento de procesar
+- `source_type` — arg `--source-type` o auto-detect (`adhoc` si project starts with "adhoc")
+- `download_source` — mapeado desde `descarga_cache.json["method"]` por DOI
+- `download_url` — `pdf_url` del cache entry
+- `access_type` — `open_access` / `institutional` / `unknown` según método
+- `download_date` — `cached_at[:10]` del cache entry
+
+Constantes `_CACHE_PATH` y `_METHOD_TO_SOURCE` añadidas tras `DEFAULT_BASE`.
+Helpers: `_doi_slug()`, `_load_prov_cache()`, `_norm_doi()`, `_infer_provenance()`.
+`pipeline.py` no modificado: la auto-detección es suficiente. `paper_id` sin cambios (compatibilidad).
+
+### 15. Registro de DOI pendientes de descarga — MEDIA-ALTA prioridad
+
+Crear y mantener:
 ```
-### F. Validar API keys con una llamada real
+/Volumes/research/metadatos/pendientes_descarga.csv
+```
 
-`check_anthropic_api()` y `check_openai_api()` solo comprueban que la key existe y tiene el formato esperado. Una key revocada pasaría el check y fallaría al generar. Idealmente hacer una llamada barata (ej. list models) para verificar que la key es válida.
+Campos: `doi`, `title`, `year`, `category`, `landing_url`, `status`, `reason`, `last_checked`, `notes`
+
+Estados: `pending | downloaded | manual | blocked | no_pdf_found | duplicate | wrong_document`
+
+Prerequisito para el subagente navegador (item 28).
+
+### ✅ 16. Normalización estable de paper_id (completado 2026-05-26)
+
+`stable_id` añadido a metadata (ver item 14). `paper_id` NO cambiado — sigue siendo el
+stem del fichero TEI y es la clave de todos los artefactos (md_clean, chunks, embeddings).
+`stable_id = _doi_slug(doi)` cuando hay DOI, else `paper_id`. Permite enlazar el mismo
+paper procesado con distintos nombres de fichero a lo largo del tiempo.
+
+### 17. Panel de calidad del corpus + quality_score — MEDIA prioridad
+
+**Panel (portada o página nueva "Calidad"):** métricas por categoría:
+% PDFs con DOI, con título, con año, con resumen, con referencias, duplicados, con warnings.
+
+**`quality_score` en metadata** (calcular en `4_extract_metadata.py`):
+```json
+{
+  "quality_score": 0.86,
+  "warnings": ["no_references_extracted", "short_md_clean", "missing_doi"]
+}
+```
+
+Una vez implementado, el informe mensual de calidad (revisión mensual) sale
+gratis como agregación de estos campos.
+
+### 18. Carpeta de cuarentena — MEDIA prioridad
+
+Crear `/Volumes/research/quarantine/` para documentos dudosos:
+PDF sin texto extraíble, muy corto, sin DOI ni título fiable, material
+suplementario, duplicado dudoso.
+
+Desde Streamlit: aceptar / rechazar / mover a categoría / borrar.
+
+### 19. Detección avanzada de duplicados — MEDIA prioridad
+
+Ampliar `9_cleanup_duplicates.py` con criterios adicionales:
+mismo título normalizado, mismo primer autor + año + título similar, mismo hash PDF.
+
+Generar informe `/Volumes/research/metadatos/duplicate_report.xlsx` con columnas:
+`paper_id_1`, `paper_id_2`, `category_1`, `category_2`, `match_type`, `confidence`, `recommended_action`.
+
+### 20. Log completo de consultas RAG — MEDIA-ALTA prioridad
+
+Ampliar el registro existente en `rag_usage/` para guardar también la pregunta,
+los papers recuperados y la respuesta generada:
+
+```json
+{
+  "date": "YYYY-MM-DD HH:MM",
+  "category": "...",
+  "question": "...",
+  "provider": "ollama | openai | anthropic",
+  "model": "...",
+  "top_k": 12,
+  "retrieved_papers": ["...", "..."],
+  "answer_md": "...",
+  "estimated_cost": 0.0,
+  "real_cost": 0.0
+}
+```
+
+Ruta: `/Volumes/research/metadatos/rag_queries/rag_queries_YYYY-MM.jsonl`
+
+Permite reproducir respuestas usadas en proyectos o artículos.
+
+### 21. Guardar respuesta RAG como nota — MEDIA prioridad
+
+Botón en `2_RAG.py` tras consulta: "Guardar como nota Markdown".
+
+Ruta: `/Volumes/research/notas_rag/<categoria>/YYYY-MM-DD_<categoria>_<slug>.md`
+
+Convierte el RAG en herramienta de escritura científica. Relacionado con item 11
+(exportar papers) — pueden implementarse juntos.
+
+### 22. Modo revisión bibliográfica — MEDIA-ALTA prioridad
+
+Nueva página Streamlit `📚 Revisión bibliográfica` con prompts especializados:
+estado del arte, tabla de artículos clave, lagunas de conocimiento, comparativa
+de mecanismos, introducción preliminar.
+
+Entradas: categoría, rango de años, keywords de enfoque, modelo de síntesis.
+Salidas: Markdown, Word, ZIP con papers utilizados, BibTeX.
+
+### 23. Exportar BibTeX/RIS — MEDIA prioridad
+
+A partir de metadata y DOI, generar `selected_papers.bib` / `.ris` / `.csv`
+para integración con Zotero y escritura de artículos y tesis.
+
+### 24. Colecciones para colaboradores — MEDIA prioridad
+
+Paquetes exportables por tema:
+```
+/Volumes/research/exports/proyecto_<nombre>_<fecha>/
+    papers.zip
+    references.bib
+    resumen_estado_arte.md
+    index.xlsx
+```
+
+Facilita trabajo de grupo y dirección de alumnos.
+
+### 25. corpus_manifest.json — MEDIA prioridad
+
+Manifiesto por categoría con: nº PDFs, nº chunks, modelo de embedding,
+modelo de resumen, URL GROBID, hash de keywords, commit git, mtime del índice FAISS.
+
+Útil para reproducibilidad y para detectar cuándo un índice está desactualizado.
+
+### 26. Health checks extendidos — MEDIA prioridad
+
+Añadir a la portada además de NAS/GROBID/Ollama:
+espacio libre en NAS, latencia GROBID y Ollama, modelo bge-m3 disponible,
+permisos de escritura, estado FAISS por categoría.
+
+### 27. Backup config extendido — MEDIA prioridad
+
+Extender los backups `.bak` actuales a:
+`keywords.yml`, `scopus_queries.yml`, `.env.example` (sin claves), `doi_manual.xlsx`, manifests.
+
+Ruta: `/Volumes/research/metadatos/backups_config/`
+
+### 28. Subagente navegador OpenClaw — Bloque C
+
+Para resolver descargas fallidas donde Unpaywall/Elsevier no encuentran PDF
+pero la landing page tiene botón accesible.
+
+**OpenClaw** (antes Clawdbot/Moltbot) es un agente autónomo open-source
+self-hosted que puede navegar la web y ejecutar acciones. Actualmente bajo
+fundación independiente con apoyo de OpenAI (MIT license).
+
+Entrada: `pendientes_descarga.csv` (item 15, prerequisito).
+Reglas: sin saltarse paywalls, sin captchas, pausas entre accesos, límite por sesión,
+parar ante 403/429.
+
+### 29. Página de actividad — BAJA-MEDIA prioridad
+
+Mostrar en Streamlit: últimas ingestas, últimos errores, últimas consultas RAG,
+uso mensual de modelos. Parte de los datos ya existen en `rag_usage/`.
+
+### 30. Documentación para el grupo — ALTA si se comparte
+
+- **Guía rápida**: cómo buscar artículos, cómo hacer buenas preguntas RAG,
+  cómo exportar papers, cómo citar correctamente.
+- **Política de uso**: no descargas masivas, no saltarse paywalls, no compartir
+  PDFs fuera del grupo si la licencia no lo permite, respetar acceso institucional.

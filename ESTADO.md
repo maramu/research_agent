@@ -105,7 +105,7 @@ research_agent/
 | `3_process_corpus.py` | PDF → TEI (GROBID) → MD clean → chunks JSONL | ✅ |
 | `3a_download_pdfs.py` | Descarga PDFs desde CSV Scopus via Unpaywall + Elsevier API | ✅ |
 | `3b_summarize.py` | Genera resúmenes con qwen3:14b | ✅ |
-| `4_extract_metadata.py` | Extrae metadatos de TEI XML (título, DOI, autores, refs) | ✅ |
+| `4_extract_metadata.py` | Extrae metadatos de TEI XML (título, DOI, autores, refs). Añade `stable_id`, `processed_date`, `source_type`, `download_source`, `download_url`, `access_type`, `download_date`. Arg `--source-type`. | ✅ |
 | `5_build_embeddings.py` | Genera índice FAISS con bge-m3 via Ollama | ✅ |
 | `6_make_packages.py` | Crea paquetes NotebookLM (FULLTEXT, REFERENCES, INDEX) | ✅ |
 | `7_make_master_index.py` | Genera MASTER_INDEX.md por categoría | ✅ |
@@ -274,7 +274,8 @@ Editor visual disponible en la página **📚 Scopus_queries** de la web.
    0 6 * * 1  cd /Volumes/Disco/proyectos/research_agent/scripts && \
               /Users/martinramirez/venvs/rag_papers/bin/python run_pipeline.py scopus --recent-days 7
    ```
-8. **README.md global + docstrings** — documentación final de todos los scripts
+8. ~~**Procedencia PDFs + stable_id**~~ ✅ — `4_extract_metadata.py` con campos de provenance e identificador estable
+9. **README.md global + docstrings** — documentación final de todos los scripts
 9. **Mejoras UX menores** (según rozaduras de uso real):
    - ~~Editor `keywords.yml` — textarea por categoría (una keyword por línea)~~ ✅ (completado 2026-05-25)
    - Aviso visible cuando toggle síntesis RAG está OFF
@@ -296,6 +297,8 @@ Editor visual disponible en la página **📚 Scopus_queries** de la web.
 - FAISS para embeddings (no ChromaDB), manteniendo scripts originales
 - Argumentos inconsistentes entre scripts: `--phase` (3_process, 3b_summarize) vs `--project` (4–8). El orquestador absorbe la diferencia.
 - `_CANONICAL_CATEGORIES` en `pipeline.py` es una copia deliberada de `app_utils.CANONICAL_CATEGORIES` — se duplica para evitar el import circular `app_utils → pipeline`. Si se añade una categoría, actualizar **ambos** sitios.
+- `stable_id` en metadata: slug del DOI si existe, `paper_id` original si no. Campo estable independiente del nombre de fichero (item 16).
+- Procedencia en metadata: `source_type` (scopus/inbox/adhoc/manual), `download_source`, `access_type`, `download_url`, `download_date`, `processed_date`. Leído automáticamente de `descarga_cache.json` por DOI; arg `--source-type` para forzarlo (item 14).
 - `_copy_files_skip_existing(src, dst)` en `pipeline.py`: copia recursiva con `rglob`, skip por existencia de fichero, preserva subdirectorios. Usada por `integrate_adhoc()` y `promote_adhoc_to_category()`.
 - `integrate_adhoc(adhoc, target, delete_source)` en `pipeline.py`: copia pdfs/, md_clean/, summaries/, chunks/, metadata/ de un proyecto ad-hoc a una categoría canónica existente y re-indexa FAISS del destino. Los ficheros ya existentes se saltan.
 - `promote_adhoc_to_category(adhoc, new_name, keywords, delete_source)` en `pipeline.py`: crea una nueva categoría canónica desde un ad-hoc copiando también embeddings/ y registrando keywords en `config/keywords.yml`. Valida nombre (`^[a-z0-9_]+$`) y que la categoría no exista previamente.

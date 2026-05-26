@@ -71,7 +71,7 @@ st.divider()
 # ---------------------------------------------------------------------------
 
 @st.cache_resource(show_spinner="Cargando índice FAISS…")
-def load_index(project: str, phase: str):
+def load_index(project: str, phase: str, index_mtime: float):
     emb_dir = CATEGORIAS_DIR / project / "embeddings" / phase
     if not emb_dir.exists():
         return None, None, None
@@ -226,7 +226,9 @@ with st.sidebar:
 # Main
 # ---------------------------------------------------------------------------
 
-index, meta, cfg = load_index(project, phase)
+_idx_path = CATEGORIAS_DIR / project / "embeddings" / phase / "index.faiss"
+_idx_mtime = _idx_path.stat().st_mtime if _idx_path.exists() else 0.0
+index, meta, cfg = load_index(project, phase, _idx_mtime)
 if index is None:
     st.error("No se pudo cargar el índice. ¿Existen index.faiss y metadata.jsonl?")
     st.stop()

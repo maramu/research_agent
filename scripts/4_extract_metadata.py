@@ -33,6 +33,7 @@ import hashlib
 import json
 import os
 import re
+from datetime import date
 from pathlib import Path
 from typing import Dict, List, Optional
 import xml.etree.ElementTree as ET
@@ -46,6 +47,19 @@ else:
     load_dotenv()
 
 DEFAULT_BASE = "/Volumes/research/categorias"
+
+_CACHE_PATH = Path("/Volumes/research/metadatos/descarga_cache.json")
+_METHOD_TO_SOURCE: Dict[str, tuple] = {
+    "semantic_scholar":  ("semantic_scholar",  "open_access"),
+    "unpaywall":         ("unpaywall",          "open_access"),
+    "elsevier_api":      ("elsevier_api",       "institutional"),
+    "elsevier_specific": ("elsevier_scraping",  "institutional"),
+    "wiley_specific":    ("wiley_scraping",     "institutional"),
+    "mdpi_specific":     ("mdpi_scraping",      "open_access"),
+    "landing_page_pdf":  ("publisher_scraping", "unknown"),
+    "doi_accept_pdf":    ("doi_direct",         "open_access"),
+}
+
 
 def sha1_short(s: str, n: int = 10) -> str:
     return hashlib.sha1(s.encode("utf-8", errors="ignore")).hexdigest()[:n]
@@ -290,16 +304,67 @@ def infer_paper_id(p: Path) -> str:
     return name
 
 
+def _doi_slug(doi: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "_", doi.lower()).strip("_")
+
+
+def _load_prov_cache(path: Path) -> dict:
+    try:
+        if path.exists():
+            return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    return {}
+
+
+def _norm_doi(doi: str) -> str:
+    doi = doi.strip().lower()
+    for prefix in ("https://doi.org/", "http://doi.org/", "https://dx.doi.org/", "http://dx.doi.org/"):
+        doi = doi.replace(prefix, "")
+    return doi.rstrip("/")
+
+
+def _infer_provenance(doi: Optional[str], project: str, cache: dict, source_type: str = "") -> dict:
+    base = {
+        "source_type":     source_type or "manual",
+        "download_source": "unknown",
+        "download_url":    None,
+        "access_type":     "unknown",
+        "download_date":   None,
+    }
+    if not source_type:
+        if project.startswith("adhoc"):
+            base["source_type"] = "adhoc"
+    if not doi:
+        return base
+    entry = cache.get(_norm_doi(doi)) or {}
+    if not entry:
+        return base
+    method = entry.get("method", "")
+    dl_src, acc = _METHOD_TO_SOURCE.get(method, ("unknown", "unknown"))
+    cached_at = entry.get("cached_at", "")
+    return {
+        "source_type":     source_type or "scopus_or_inbox",
+        "download_source": dl_src,
+        "download_url":    entry.get("pdf_url") or None,
+        "access_type":     acc,
+        "download_date":   cached_at[:10] if cached_at else None,
+    }
+
+
 def main():
     ap = argparse.ArgumentParser(description="Extrae metadatos de TEI XML (recursivo por fases)")
     ap.add_argument("--project", required=True, help="Nombre del proyecto (subcarpeta bajo --base)")
     ap.add_argument("--base",    default=DEFAULT_BASE, help=f"Directorio raíz (defecto: {DEFAULT_BASE})")
-    ap.add_argument("--tei-dir", default="", help="Ruta TEI; si no, usa <base>/<project>/tei")
+    ap.add_argument("--tei-dir",     default="", help="Ruta TEI; si no, usa <base>/<project>/tei")
+    ap.add_argument("--source-type", default="", help="Fuente de los PDFs: scopus, inbox, adhoc, manual (defecto: auto)")
     args = ap.parse_args()
 
-    base    = Path(args.base)
-    project = args.project
-    tei_dir = Path(args.tei_dir) if args.tei_dir else (base / project / "tei")
+    base        = Path(args.base)
+    project     = args.project
+    tei_dir     = Path(args.tei_dir) if args.tei_dir else (base / project / "tei")
+    source_type = args.source_type or ""
+    prov_cache  = _load_prov_cache(_CACHE_PATH)
 
     if not tei_dir.exists():
         raise SystemExit(f"No existe TEI dir: {tei_dir}")
@@ -349,20 +414,28 @@ def main():
             highlights = extract_highlights(root, ns)
             refs       = extract_references(root, ns)
 
+            prov = _infer_provenance(doi, project, prov_cache, source_type)
             meta = {
-                "project":      project,
-                "phase":        phase,
-                "paper_id":     paper_id,
-                "title":        title,
-                "doi":          doi,
-                "journal":      journal,
-                "year":         year,
-                "authors":      authors,
-                "abstract":     abstract,
-                "highlights":   highlights,
-                "n_references": len(refs),
-                "tei_file":     str(tei_file),
-                "source_pdf":   None,
+                "project":         project,
+                "phase":           phase,
+                "paper_id":        paper_id,
+                "stable_id":       _doi_slug(doi) if doi else paper_id,
+                "title":           title,
+                "doi":             doi,
+                "journal":         journal,
+                "year":            year,
+                "authors":         authors,
+                "abstract":        abstract,
+                "highlights":      highlights,
+                "n_references":    len(refs),
+                "tei_file":        str(tei_file),
+                "source_pdf":      None,
+                "processed_date":  date.today().isoformat(),
+                "source_type":     prov["source_type"],
+                "download_source": prov["download_source"],
+                "download_url":    prov["download_url"],
+                "access_type":     prov["access_type"],
+                "download_date":   prov["download_date"],
             }
 
             f_meta.write(json.dumps(meta, ensure_ascii=False) + "\n")

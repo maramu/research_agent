@@ -205,6 +205,15 @@ def file_key(stem: str) -> str:
     return re.sub(r"[^a-z0-9]+", "_", stem.lower()).strip("_")
 
 
+def _is_clean_stem(stem: str) -> bool:
+    """True si el stem es nombre limpio Crossref: todo minúsculas y sin DOI embebido."""
+    if stem != stem.lower():
+        return False
+    if re.search(r"_10_\d{4,5}_", stem):
+        return False
+    return True
+
+
 def category_dirs(base: Path, selected: Optional[list[str]]) -> list[str]:
     cats = selected or CATEGORIES
     return sorted(dict.fromkeys(cats))
@@ -260,11 +269,14 @@ def build_registry(categories: list[str], base: Path) -> dict[str, list[PaperRec
 
 
 def choose_keep_intra(records: list[PaperRecord]) -> tuple[PaperRecord, str]:
-    ordered = sorted(records, key=lambda r: (-metadata_completeness(r), r.stem.lower(), r.line_no))
+    ordered = sorted(
+        records,
+        key=lambda r: (not _is_clean_stem(r.stem), -metadata_completeness(r), r.stem.lower(), r.line_no),
+    )
     keep = ordered[0]
     reason = (
         f"metadata más completa ({metadata_completeness(keep)} campos no vacíos); "
-        "desempate por stem alfabético"
+        "desempate: nombre limpio Crossref > mayúsculas/DOI embebido > stem alfabético"
     )
     return keep, reason
 
@@ -277,7 +289,10 @@ def choose_keep_cross(records: list[PaperRecord]) -> tuple[PaperRecord, str]:
         keep = best[0]
         return keep, f"categoría más específica por keywords ({best_score} coincidencias)"
 
-    ordered = sorted(records, key=lambda r: (r.category.lower(), -metadata_completeness(r), r.stem.lower(), r.line_no))
+    ordered = sorted(
+        records,
+        key=lambda r: (not _is_clean_stem(r.stem), r.category.lower(), -metadata_completeness(r), r.stem.lower(), r.line_no),
+    )
     keep = ordered[0]
     return keep, "sin categoría específica obvia; primera por orden alfabético de categoría"
 
@@ -489,9 +504,7 @@ def print_reindex_commands(categories: list[str], base: Path) -> None:
     print("")
     print("Categorías afectadas que necesitan re-indexar:")
     for category in categories:
-        print(f"  python 5_build_embeddings.py --project {category} --model nomic-embed-text")
-        if has_bge_m3_index(category, base):
-            print(f"  python 5_build_embeddings.py --project {category} --model bge-m3")
+        print(f"  python 5_build_embeddings.py --project {category} --model bge-m3 --force")
 
 
 def apply_cleanup(decisions: list[DuplicateDecision], base: Path) -> list[Path]:

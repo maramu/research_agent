@@ -28,6 +28,7 @@ Variables de entorno (config/.env):
 import argparse
 import json
 import os
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -42,8 +43,13 @@ if _ENV_FILE.exists():
 else:
     load_dotenv()
 
+_SCRIPTS_DIR = Path(__file__).parent
+if str(_SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS_DIR))
+from utils.constants import OLLAMA_MODEL_EMBED  # noqa: E402
+
 DEFAULT_BASE       = "/Volumes/research/categorias"
-DEFAULT_MODEL      = "nomic-embed-text"
+DEFAULT_MODEL      = OLLAMA_MODEL_EMBED
 DEFAULT_BATCH_SIZE = 64
 
 
