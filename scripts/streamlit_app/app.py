@@ -20,7 +20,8 @@ from app_utils import (
     CANONICAL_CATEGORIES, CATEGORIAS_DIR, CONFIG_DIR, INBOX_DIR, INBOX_CSV_DIR,
     METADATOS_DIR, NAS_ROOT, OLLAMA_HOST, GROBID_URL,
     PIPELINE_AVAILABLE, PIPELINE_IMPORT_ERROR,
-    check_grobid, check_nas, check_ollama,
+    check_grobid, check_nas, check_nas_space, check_nas_writable,
+    check_ollama, check_ollama_model,
     get_category_stats, human_status_icon, list_existing_categories,
 )
 
@@ -55,13 +56,14 @@ if not PIPELINE_AVAILABLE:
 
 st.subheader("Estado de servicios")
 
+# Fila 1 — servicios base
 col1, col2, col3 = st.columns(3)
 
 with col1:
-    ok, msg = check_nas()
-    icon = human_status_icon(ok)
-    st.metric("NAS", f"{icon} {'OK' if ok else 'KO'}")
-    st.caption(msg)
+    nas_ok, nas_msg = check_nas()
+    icon = human_status_icon(nas_ok)
+    st.metric("NAS", f"{icon} {'OK' if nas_ok else 'KO'}")
+    st.caption(nas_msg)
 
 with col2:
     ok, msg = check_ollama()
@@ -74,6 +76,35 @@ with col3:
     icon = human_status_icon(ok)
     st.metric("GROBID", f"{icon} {'OK' if ok else 'KO'}")
     st.caption(f"`{GROBID_URL}` — {msg}")
+
+# Fila 2 — checks adicionales
+col4, col5, col6 = st.columns(3)
+
+with col4:
+    space_ok, free_gb, total_gb = check_nas_space(threshold_gb=10.0)
+    icon = human_status_icon(space_ok)
+    if nas_ok:
+        st.metric("NAS — espacio libre", f"{icon} {free_gb:.1f} GB")
+        label = f"de {total_gb:.1f} GB total"
+        if not space_ok:
+            st.caption(f"⚠️ {label} — menos de 10 GB libres")
+        else:
+            st.caption(label)
+    else:
+        st.metric("NAS — espacio libre", "🔴 —")
+        st.caption("NAS no montado")
+
+with col5:
+    model_ok, model_msg = check_ollama_model("bge-m3")
+    icon = human_status_icon(model_ok)
+    st.metric("bge-m3 (Ollama)", f"{icon} {'OK' if model_ok else 'KO'}")
+    st.caption(model_msg)
+
+with col6:
+    write_ok, write_msg = check_nas_writable()
+    icon = human_status_icon(write_ok)
+    st.metric("NAS — escritura", f"{icon} {'OK' if write_ok else 'KO'}")
+    st.caption(write_msg)
 
 # Refresh manual
 if st.button("🔄 Re-comprobar estado", use_container_width=False):

@@ -213,12 +213,12 @@ Pendiente. Ejemplo de LaunchAgent o cron:
 - **Página de logs en vivo**: `tail -f` de `~/Library/Logs/research_agent/*.log` directamente en la web.
 - **Editor doi_manual.xlsx** con `st.data_editor` — actualmente solo visor.
 
-### 6. Actualizar precios en app_utils.py
+### ✅ 6. Actualizar precios en app_utils.py (completado 2026-05-27)
 
-Los precios en `LLM_PRICING` son aproximados a fecha 2026-05-20. Verificar
-periódicamente en:
-- Anthropic: https://docs.claude.com/en/docs/about-claude/pricing
-- OpenAI: https://openai.com/api/pricing
+`LLM_PRICING` verificado a 2026-05-27. Único cambio:
+`claude-opus-4-7`: $15/$75 → **$5/$25** (precio del Opus 4.7, no del antiguo Opus 4.1).
+Resto de modelos ya eran correctos. Comentario de fecha añadido encima del dict.
+Fuentes: platform.claude.com/docs/en/docs/about-claude/models · developers.openai.com/api/docs/pricing
 
 ### 7. README.md global + docstrings
 
@@ -248,13 +248,14 @@ Tras consulta RAG, botón "Exportar papers relacionados" que genera ZIP descarga
 con PDFs + md_clean (+ opcional summaries) de los `paper_id`s recuperados.
 Implementar con `zipfile` en memoria + `st.download_button` en `2_RAG.py`.
 
-### 12. Validar nombre proyecto en run_adhoc()
+### ✅ 12. Validar nombre proyecto en run_adhoc() (completado 2026-05-27)
 
+`pipeline.py` — `run_adhoc()`, justo antes de `check_nas()`:
 ```python
-import re
-if not re.match(r'^[a-z0-9_-]+$', name):
-    raise ValueError(f"Nombre de proyecto inválido: {name}")
+if not re.fullmatch(r'^[a-z0-9_-]+$', name):
+    raise ValueError(f"Nombre de proyecto inválido '{name}': solo minúsculas, dígitos, '_' y '-'")
 ```
+`re` ya estaba importado. La validación rechaza nombres con espacios, mayúsculas o caracteres especiales antes de crear ningún directorio.
 
 ### 13. Validar API keys con llamada real
 
@@ -271,7 +272,7 @@ Ahora lanzar el script directamente por CLI sin `--model` usa bge-m3 por defecto
 
 ## Nuevas mejoras (2026-05-26)
 
-### ✅ 14. Registro de procedencia de PDFs (completado 2026-05-26)
+### ✅ 14. Registro de procedencia de PDFs (completado 2026-05-26, verificado 2026-05-27)
 
 `4_extract_metadata.py` — campos añadidos a cada registro de `papers_metadata.jsonl`:
 - `stable_id` — slug DOI si hay DOI, else `paper_id` (item 16)
@@ -283,8 +284,9 @@ Ahora lanzar el script directamente por CLI sin `--model` usa bge-m3 por defecto
 - `download_date` — `cached_at[:10]` del cache entry
 
 Constantes `_CACHE_PATH` y `_METHOD_TO_SOURCE` añadidas tras `DEFAULT_BASE`.
-Helpers: `_doi_slug()`, `_load_prov_cache()`, `_norm_doi()`, `_infer_provenance()`.
+Helpers: `_doi_slug()`, `_load_prov_cache()`, `_norm_doi()`, `_infer_provenance()`. Arg `--source-type`.
 `pipeline.py` no modificado: la auto-detección es suficiente. `paper_id` sin cambios (compatibilidad).
+Verificado en producción 2026-05-27: campos presentes en JSONL de `anoxic_biogas_biodesulfurization` y `biogas_upgrading_biomethanation`.
 
 ### 15. Registro de DOI pendientes de descarga — MEDIA-ALTA prioridad
 
@@ -299,12 +301,14 @@ Estados: `pending | downloaded | manual | blocked | no_pdf_found | duplicate | w
 
 Prerequisito para el subagente navegador (item 28).
 
-### ✅ 16. Normalización estable de paper_id (completado 2026-05-26)
+### ✅ 16. Normalización estable de paper_id (completado 2026-05-26, verificado 2026-05-27)
 
 `stable_id` añadido a metadata (ver item 14). `paper_id` NO cambiado — sigue siendo el
 stem del fichero TEI y es la clave de todos los artefactos (md_clean, chunks, embeddings).
 `stable_id = _doi_slug(doi)` cuando hay DOI, else `paper_id`. Permite enlazar el mismo
 paper procesado con distintos nombres de fichero a lo largo del tiempo.
+Verificado en producción 2026-05-27. Página 6_Mantenimiento.py incluye sección "Backfill metadata"
+que detecta y rellenar papers sin `stable_id` (los procesados antes de este ítem).
 
 ### 17. Panel de calidad del corpus + quality_score — MEDIA prioridad
 
@@ -405,11 +409,14 @@ modelo de resumen, URL GROBID, hash de keywords, commit git, mtime del índice F
 
 Útil para reproducibilidad y para detectar cuándo un índice está desactualizado.
 
-### 26. Health checks extendidos — MEDIA prioridad
+### ✅ 26. Health checks extendidos (completado 2026-05-27)
 
-Añadir a la portada además de NAS/GROBID/Ollama:
-espacio libre en NAS, latencia GROBID y Ollama, modelo bge-m3 disponible,
-permisos de escritura, estado FAISS por categoría.
+`app.py` — segunda fila de columnas bajo NAS/Ollama/GROBID:
+- **Espacio libre NAS**: `shutil.disk_usage(NAS_ROOT)` → libre / total en GB; aviso si < 10 GB.
+- **bge-m3 disponible**: GET `{OLLAMA_HOST}/api/tags` → busca "bge-m3" en nombres de modelos.
+- **Permisos escritura NAS**: `os.access(CATEGORIAS_DIR, os.W_OK)`.
+- **Latencia**: `check_ollama()` y `check_grobid()` miden tiempo de respuesta con `time.time()` e incluyen N ms en el mensaje. Funciones en `app_utils.py`; `(bool, str)` sin cambio de firma.
+Estado FAISS por categoría: pendiente (requiere lógica por fila en tabla de categorías).
 
 ### 27. Backup config extendido — MEDIA prioridad
 

@@ -652,6 +652,8 @@ def run_adhoc(
     Returns:
         {"status": "ok"|"error", "project": name, "steps": {script: result}}
     """
+    if not re.fullmatch(r'^[a-z0-9_-]+$', name):
+        raise ValueError(f"Nombre de proyecto inválido '{name}': solo minúsculas, dígitos, '_' y '-'")
     check_nas()
     source = Path(pdf_dir)
 

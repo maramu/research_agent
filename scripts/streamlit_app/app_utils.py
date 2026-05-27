@@ -15,7 +15,9 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -115,14 +117,17 @@ OPENAI_MODELS = [
 #   - OpenAI:    https://openai.com/api/pricing
 # ---------------------------------------------------------------------------
 
+# Precios verificados: 2026-05-27
+# Anthropic: https://platform.claude.com/docs/en/docs/about-claude/models
+# OpenAI:    https://developers.openai.com/api/docs/pricing
 LLM_PRICING: Dict[str, Dict[str, float]] = {
     # Anthropic
-    "claude-haiku-4-5":  {"input": 1.00,  "output": 5.00},
-    "claude-sonnet-4-6": {"input": 3.00,  "output": 15.00},
-    "claude-opus-4-7":   {"input": 15.00, "output": 75.00},
+    "claude-haiku-4-5":  {"input": 1.00, "output":  5.00},
+    "claude-sonnet-4-6": {"input": 3.00, "output": 15.00},
+    "claude-opus-4-7":   {"input": 5.00, "output": 25.00},
     # OpenAI
-    "gpt-4o-mini":       {"input": 0.15,  "output": 0.60},
-    "gpt-4o":            {"input": 2.50,  "output": 10.00},
+    "gpt-4o-mini":       {"input": 0.15, "output":  0.60},
+    "gpt-4o":            {"input": 2.50, "output": 10.00},
     # Ollama — local, sin coste
     "qwen3:14b":         {"input": 0.0,   "output": 0.0},
     "qwen3:8b":          {"input": 0.0,   "output": 0.0},
@@ -273,9 +278,12 @@ def check_nas() -> Tuple[bool, str]:
 
 def check_ollama(timeout: float = 2.0) -> Tuple[bool, str]:
     try:
+        t0 = time.time()
         r = requests.get(f"{OLLAMA_HOST}/api/tags", timeout=timeout)
+        ms = int((time.time() - t0) * 1000)
         if r.ok:
-            return True, f"OK ({len(r.json().get('models', []))} modelos disponibles)"
+            n = len(r.json().get("models", []))
+            return True, f"OK ({n} modelos) — {ms} ms"
         return False, f"HTTP {r.status_code}"
     except requests.exceptions.ConnectionError:
         return False, "Conexión rechazada (¿VPN UCA activa?)"
@@ -287,9 +295,11 @@ def check_ollama(timeout: float = 2.0) -> Tuple[bool, str]:
 
 def check_grobid(timeout: float = 2.0) -> Tuple[bool, str]:
     try:
+        t0 = time.time()
         r = requests.get(f"{GROBID_URL}/api/isalive", timeout=timeout)
+        ms = int((time.time() - t0) * 1000)
         if r.ok and r.text.strip().lower() == "true":
-            return True, "OK (isalive=true)"
+            return True, f"OK (isalive=true) — {ms} ms"
         return False, f"HTTP {r.status_code}"
     except requests.exceptions.ConnectionError:
         return False, "Conexión rechazada (¿VPN UCA activa?)"
@@ -297,6 +307,44 @@ def check_grobid(timeout: float = 2.0) -> Tuple[bool, str]:
         return False, f"Timeout ({timeout}s)"
     except Exception as e:
         return False, f"Error: {e}"
+
+
+def check_nas_space(threshold_gb: float = 10.0) -> Tuple[bool, float, float]:
+    """Devuelve (ok, libre_gb, total_gb). ok=True si libre >= threshold_gb."""
+    if not NAS_ROOT.exists():
+        return False, 0.0, 0.0
+    try:
+        usage = shutil.disk_usage(str(NAS_ROOT))
+        free_gb  = usage.free  / 1e9
+        total_gb = usage.total / 1e9
+        return free_gb >= threshold_gb, free_gb, total_gb
+    except Exception:
+        return False, 0.0, 0.0
+
+
+def check_ollama_model(model: str = "bge-m3", timeout: float = 2.0) -> Tuple[bool, str]:
+    """Comprueba si un modelo concreto está disponible en Ollama."""
+    try:
+        r = requests.get(f"{OLLAMA_HOST}/api/tags", timeout=timeout)
+        if r.ok:
+            names = [m.get("name", "") for m in r.json().get("models", [])]
+            found = any(model in n for n in names)
+            return found, ("Disponible" if found else "No encontrado en Ollama")
+        return False, f"HTTP {r.status_code}"
+    except requests.exceptions.ConnectionError:
+        return False, "Conexión rechazada (¿VPN UCA activa?)"
+    except requests.exceptions.Timeout:
+        return False, f"Timeout ({timeout}s)"
+    except Exception as e:
+        return False, f"Error: {e}"
+
+
+def check_nas_writable() -> Tuple[bool, str]:
+    """Comprueba permisos de escritura en categorias/."""
+    if not CATEGORIAS_DIR.exists():
+        return False, f"No existe {CATEGORIAS_DIR}"
+    ok = os.access(str(CATEGORIAS_DIR), os.W_OK)
+    return ok, ("Escritura OK" if ok else "Sin permisos de escritura")
 
 
 def check_anthropic_api() -> Tuple[bool, str]:

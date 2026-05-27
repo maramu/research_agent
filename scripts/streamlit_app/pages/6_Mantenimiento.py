@@ -2,13 +2,17 @@
 """
 6_Mantenimiento.py — Tareas de administración del pipeline.
 
-Incluye:
-  - Limpiar duplicados (9_cleanup_duplicates.py)
-  - Re-indexar embeddings (5_build_embeddings.py)
+Secciones:
+  1. Backfill metadata (stable_id)
+  2. Re-indexar FAISS
+  3. Limpieza de duplicados
+  4. Reconstruir doi_registry
 """
 
 from __future__ import annotations
 
+import json
+import re
 import sys
 from pathlib import Path
 
@@ -19,9 +23,9 @@ if str(STREAMLIT_APP_DIR) not in sys.path:
     sys.path.insert(0, str(STREAMLIT_APP_DIR))
 
 from app_utils import (
-    CANONICAL_CATEGORIES, OLLAMA_EMBED_MODELS, OLLAMA_MODEL_EMBED,
-    check_nas, list_existing_categories,
+    CATEGORIAS_DIR,
     PIPELINE_AVAILABLE, PIPELINE_IMPORT_ERROR,
+    check_nas, list_existing_categories,
 )
 
 st.set_page_config(page_title="Mantenimiento", page_icon="🔧", layout="wide")
@@ -31,7 +35,7 @@ if not PIPELINE_AVAILABLE:
     st.error(f"No se puede importar `pipeline.py`: {PIPELINE_IMPORT_ERROR}")
     st.stop()
 
-from pipeline import run_step
+from pipeline import build_doi_registry_from_nas, run_step  # noqa: E402
 
 nas_ok, nas_msg = check_nas()
 st.markdown(f"**NAS**: {'🟢' if nas_ok else '🔴'} {nas_msg}")
@@ -42,8 +46,8 @@ if not nas_ok:
 st.divider()
 
 
-def execute_script_live(script: str, args: list[str], label: str):
-    """Ejecuta un script capturando salida en directo."""
+def execute_script_live(script: str, args: list[str], label: str) -> dict | None:
+    """Ejecuta un script del pipeline volcando salida en directo."""
     log_lines: list[str] = []
     status_box = st.status(f"Ejecutando {label}…", expanded=True)
     output_box = status_box.empty()
@@ -51,8 +55,7 @@ def execute_script_live(script: str, args: list[str], label: str):
 
     def on_output(line: str) -> None:
         log_lines.append(line)
-        visible = log_lines[-MAX_LINES:]
-        output_box.code("\n".join(visible), language="text")
+        output_box.code("\n".join(log_lines[-MAX_LINES:]), language="text")
 
     try:
         result = run_step(script, args, on_output=on_output, label=label)
@@ -66,111 +69,165 @@ def execute_script_live(script: str, args: list[str], label: str):
         status_box.update(label=f"✓ {label} completado", state="complete")
     else:
         status_box.update(label=f"✗ {label} falló (rc={rc})", state="error")
-
     return result
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# SECCIÓN 1 — Limpiar duplicados
+# SECCIÓN 1 — Backfill metadata (stable_id)
 # ═══════════════════════════════════════════════════════════════════════════
 
-st.header("🗑️ Limpiar duplicados")
-st.markdown(
-    "Detecta y elimina artículos duplicados (mismo DOI) ya procesados. "
-    "Primero ejecuta **Preview** para revisar qué se eliminará, luego **Apply** "
-    "para hacer la limpieza real."
-)
-
-col_cleanup1, col_cleanup2 = st.columns(2)
-with col_cleanup1:
-    if st.button("👁️ Preview — ver duplicados", key="btn_cleanup_preview"):
-        execute_script_live("9_cleanup_duplicates.py", ["--preview"], "Cleanup Preview")
-
-with col_cleanup2:
-    if st.button(
-        "🗑️ Apply — eliminar duplicados",
-        type="primary",
-        help="⚠️ Esto BORRARÁ archivos. Ejecuta Preview primero.",
-        key="btn_cleanup_apply",
-    ):
-        if not st.session_state.get("cleanup_confirm", False):
-            st.warning("Marca la confirmación para continuar.")
-        else:
-            result = execute_script_live("9_cleanup_duplicates.py", ["--apply"], "Cleanup Apply")
-            if result and result.get("returncode") == 0:
-                st.success(
-                    "✓ Duplicados eliminados. Las categorías afectadas necesitan "
-                    "re-indexar (ve a la sección de abajo)."
-                )
-
-st.checkbox(
-    "✅ Confirmo que revisé el Preview y quiero proceder",
-    key="cleanup_confirm",
-)
-
-st.divider()
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# SECCIÓN 2 — Re-indexar embeddings
-# ═══════════════════════════════════════════════════════════════════════════
-
-st.header("🔄 Re-indexar embeddings")
-st.markdown(
-    "Re-construye los índices FAISS para las categorías seleccionadas. "
-    "Útil tras limpiar duplicados o cambiar de modelo de embeddings."
-)
-
-existing_cats = list_existing_categories()
-if not existing_cats:
-    st.info("No hay categorías en el NAS.")
-else:
-    model_index = (
-        OLLAMA_EMBED_MODELS.index(OLLAMA_MODEL_EMBED)
-        if OLLAMA_MODEL_EMBED in OLLAMA_EMBED_MODELS
-        else 0
+with st.expander("🗂️ Backfill metadata (stable_id)", expanded=False):
+    st.markdown(
+        "Detecta papers en `categorias/<cat>/metadata/papers_metadata.jsonl` "
+        "que no tienen el campo `stable_id` (procesados antes del ítem 14/16). "
+        "Re-ejecuta `4_extract_metadata.py` para rellenarlo."
     )
 
-    with st.form("reindex_form"):
-        selected_cats = st.multiselect(
+    existing_cats = list_existing_categories()
+    backfill_rows: list[dict] = []
+    for cat in existing_cats:
+        jsonl = CATEGORIAS_DIR / cat / "metadata" / "papers_metadata.jsonl"
+        if not jsonl.exists():
+            continue
+        missing = 0
+        with jsonl.open(encoding="utf-8") as fh:
+            for raw in fh:
+                raw = raw.strip()
+                if not raw:
+                    continue
+                try:
+                    if "stable_id" not in json.loads(raw):
+                        missing += 1
+                except json.JSONDecodeError:
+                    pass
+        if missing:
+            backfill_rows.append({"Categoría": cat, "Sin stable_id": missing})
+
+    if not backfill_rows:
+        st.success("Todas las categorías tienen `stable_id` en su metadata.")
+    else:
+        import pandas as pd
+
+        st.dataframe(pd.DataFrame(backfill_rows), hide_index=True, use_container_width=True)
+
+        cats_with_missing = [r["Categoría"] for r in backfill_rows]
+        selected_backfill = st.multiselect(
+            "Categorías a reprocesar",
+            options=cats_with_missing,
+            default=cats_with_missing,
+            key="backfill_cats",
+        )
+
+        if st.button("▶ Re-ejecutar 4_extract_metadata.py", type="primary", key="btn_backfill"):
+            if not selected_backfill:
+                st.warning("Selecciona al menos una categoría.")
+            else:
+                for cat in selected_backfill:
+                    execute_script_live(
+                        "4_extract_metadata.py",
+                        ["--project", cat],
+                        f"extract_metadata [{cat}]",
+                    )
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# SECCIÓN 2 — Re-indexar FAISS
+# ═══════════════════════════════════════════════════════════════════════════
+
+with st.expander("🔄 Re-indexar FAISS", expanded=False):
+    st.markdown(
+        "Re-construye los índices FAISS de las categorías seleccionadas con "
+        "`bge-m3` y `--force`. Útil tras limpiar duplicados o hacer backfill de metadata."
+    )
+
+    existing_cats_faiss = list_existing_categories()
+    if not existing_cats_faiss:
+        st.info("No hay categorías en el NAS.")
+    else:
+        selected_faiss = st.multiselect(
             "Categorías a re-indexar",
-            options=existing_cats,
-            default=[],
-            help="Vacío = todas las categorías existentes",
+            options=existing_cats_faiss,
+            default=existing_cats_faiss,
+            key="faiss_cats",
         )
 
-        model = st.selectbox(
-            "Modelo de embeddings",
-            options=OLLAMA_EMBED_MODELS,
-            index=model_index,
-            help=f"Default actual: {OLLAMA_MODEL_EMBED}",
-        )
+        if st.button("▶ Re-indexar seleccionadas", type="primary", key="btn_reindex"):
+            if not selected_faiss:
+                st.warning("Selecciona al menos una categoría.")
+            else:
+                for cat in selected_faiss:
+                    result = execute_script_live(
+                        "5_build_embeddings.py",
+                        ["--project", cat, "--model", "bge-m3", "--force"],
+                        f"build_embeddings [{cat}]",
+                    )
+                    if not result or result.get("returncode") != 0:
+                        st.error(f"✗ Falló para **{cat}**. Revisar salida.")
+                        break
+                else:
+                    st.success(
+                        f"✓ Re-indexado completado para {len(selected_faiss)} categoría(s)."
+                    )
 
-        force = st.checkbox(
-            "Forzar re-indexado (sobreescribir índices existentes)",
-            value=False,
-            help="Sin esto, 5_build_embeddings.py salta categorías ya indexadas.",
-        )
 
-        submit = st.form_submit_button("▶ Re-indexar", type="primary")
+# ═══════════════════════════════════════════════════════════════════════════
+# SECCIÓN 3 — Limpieza de duplicados
+# ═══════════════════════════════════════════════════════════════════════════
 
-    if submit:
-        cats_to_process = selected_cats if selected_cats else existing_cats
+with st.expander("🗑️ Limpieza de duplicados", expanded=False):
+    st.markdown(
+        "Detecta artículos duplicados (mismo DOI) ya procesados. "
+        "Ejecuta **Preview** primero para revisar qué se eliminaría; "
+        "el botón **Aplicar** aparece solo si hay duplicados."
+    )
 
-        st.info(f"Re-indexando {len(cats_to_process)} categoría(s) con modelo **{model}**…")
-
-        for cat in cats_to_process:
-            args = ["--project", cat, "--model", model]
-            if force:
-                args.append("--force")
-
-            result = execute_script_live(
-                "5_build_embeddings.py",
-                args,
-                f"Embeddings [{cat}]",
-            )
-            if not result or result.get("returncode") != 0:
-                st.error(f"✗ Falló para {cat}. Revisar logs.")
-                break
+    if st.button("👁️ Preview duplicados", key="btn_cleanup_preview"):
+        result = execute_script_live("9_cleanup_duplicates.py", ["--preview"], "Cleanup Preview")
+        if result is not None:
+            output_text = "\n".join(result.get("output", []))
+            counts = re.findall(r"Duplicados[\w\s\-]+:\s*(\d+)", output_text)
+            has_dupes = any(int(c) > 0 for c in counts) if counts else False
+            st.session_state["cleanup_has_dupes"] = has_dupes
+            st.session_state["cleanup_preview_done"] = True
         else:
-            st.success(f"✓ Re-indexado completado para {len(cats_to_process)} categoría(s).")
+            st.session_state.pop("cleanup_preview_done", None)
+
+    if st.session_state.get("cleanup_preview_done"):
+        if st.session_state.get("cleanup_has_dupes"):
+            st.warning(
+                "⚠️ Se detectaron duplicados. Usa **Aplicar limpieza** para eliminarlos. "
+                "Tras aplicar, re-indexa FAISS de las categorías afectadas."
+            )
+            if st.button("🗑️ Aplicar limpieza", type="primary", key="btn_cleanup_apply"):
+                result = execute_script_live(
+                    "9_cleanup_duplicates.py", ["--apply"], "Cleanup Apply"
+                )
+                if result and result.get("returncode") == 0:
+                    st.success(
+                        "✓ Limpieza completada. Recuerda **re-indexar FAISS** de las "
+                        "categorías afectadas (sección ↑ Re-indexar FAISS)."
+                    )
+                    st.session_state.pop("cleanup_preview_done", None)
+                    st.session_state.pop("cleanup_has_dupes", None)
+        else:
+            st.success("No se encontraron duplicados.")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# SECCIÓN 4 — Reconstruir doi_registry
+# ═══════════════════════════════════════════════════════════════════════════
+
+with st.expander("📋 Reconstruir doi_registry", expanded=False):
+    st.markdown(
+        "Escanea `categorias/*/pdfs/` y reconstruye `doi_registry.txt` desde cero. "
+        "Útil antes del cribado para detectar duplicados contra artículos ya procesados."
+    )
+
+    if st.button("▶ Reconstruir doi_registry", type="primary", key="btn_doi_registry"):
+        with st.spinner("Escaneando PDFs en el NAS…"):
+            try:
+                n_dois = build_doi_registry_from_nas()
+                st.success(f"✓ doi_registry reconstruido — **{n_dois}** DOIs registrados.")
+            except Exception as e:
+                st.error(f"Error al reconstruir doi_registry: {e}")
+                st.exception(e)
