@@ -97,18 +97,55 @@ def build_papers_zip(
     include_md: bool = True,
 ) -> bytes:
     """ZIP en memoria con PDFs y/o md_clean de los paper_ids dados."""
-    import io
-    import zipfile
+    import io, json, zipfile
     from pathlib import Path
     categorias_dir = Path(categorias_dir)
     pdfs_dir = categorias_dir / project / "pdfs"
     md_dir   = categorias_dir / project / "md_clean"
+
+    # Mapa paper_id → stable_id desde papers_metadata.jsonl
+    _pid_to_stable: dict = {}
+    jsonl = categorias_dir / project / "metadata" / "papers_metadata.jsonl"
+    if jsonl.exists():
+        with jsonl.open(encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    m = json.loads(line)
+                    pid = m.get("paper_id", "")
+                    sid = m.get("stable_id", "")
+                    if pid and sid and pid != sid:
+                        _pid_to_stable[pid] = sid
+                except Exception:
+                    pass
+
+    # Índice de todos los PDFs por stem (para fallback glob)
+    _pdf_by_stem: dict = {}
+    if pdfs_dir.exists():
+        for p in pdfs_dir.glob("*.pdf"):
+            _pdf_by_stem[p.stem] = p
+
+    def _find_pdf(pid: str):
+        """Devuelve Path del PDF o None. Prueba pid → stable_id → glob prefijo."""
+        if pid in _pdf_by_stem:
+            return _pdf_by_stem[pid]
+        sid = _pid_to_stable.get(pid, "")
+        if sid and sid in _pdf_by_stem:
+            return _pdf_by_stem[sid]
+        # último recurso: primer PDF cuyo stem empiece por pid
+        for stem, path in _pdf_by_stem.items():
+            if stem.startswith(pid[:20]):
+                return path
+        return None
+
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         for pid in paper_ids:
             if include_pdf:
-                pdf = pdfs_dir / f"{pid}.pdf"
-                if pdf.exists():
+                pdf = _find_pdf(pid)
+                if pdf:
                     zf.write(pdf, f"pdfs/{pdf.name}")
             if include_md:
                 md = md_dir / f"{pid}.clean.md"

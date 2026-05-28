@@ -7,6 +7,7 @@ Secciones:
   2. Re-indexar FAISS
   3. Limpieza de duplicados
   4. Reconstruir doi_registry
+  5. Coherencia PDF / MD
 """
 
 from __future__ import annotations
@@ -213,6 +214,28 @@ with st.expander("🗑️ Limpieza de duplicados", expanded=False):
             st.success("No se encontraron duplicados.")
 
 
+def _get_pdf_md_mismatches(cat: str) -> dict:
+    """
+    Devuelve:
+      orphan_mds:  stems de md_clean sin PDF con el mismo nombre
+      missing_mds: stems de PDF sin md_clean con el mismo nombre
+    """
+    cat_dir  = CATEGORIAS_DIR / cat
+    pdfs_dir = cat_dir / "pdfs"
+    md_dir   = cat_dir / "md_clean"
+
+    pdf_stems = {p.stem for p in pdfs_dir.glob("*.pdf")} if pdfs_dir.exists() else set()
+    md_stems  = set()
+    if md_dir.exists():
+        for m in md_dir.glob("*.clean.md"):
+            md_stems.add(m.name.replace(".clean.md", ""))
+
+    return {
+        "orphan_mds":  sorted(md_stems  - pdf_stems),
+        "missing_mds": sorted(pdf_stems - md_stems),
+    }
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # SECCIÓN 4 — Reconstruir doi_registry
 # ═══════════════════════════════════════════════════════════════════════════
@@ -231,3 +254,108 @@ with st.expander("📋 Reconstruir doi_registry", expanded=False):
             except Exception as e:
                 st.error(f"Error al reconstruir doi_registry: {e}")
                 st.exception(e)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# SECCIÓN 5 — Coherencia PDF / MD
+# ═══════════════════════════════════════════════════════════════════════════
+
+with st.expander("🔗 Coherencia PDF / MD", expanded=False):
+    st.markdown(
+        "Detecta PDFs sin `md_clean` (pendientes de procesar) y `md_clean` "
+        "huérfanos sin PDF (artefactos con nombre viejo tras renombrado Crossref). "
+        "La corrección elimina los artefactos huérfanos y relanza "
+        "`3_process_corpus.py` para generar los md_clean con nombre correcto."
+    )
+
+    import pandas as pd
+
+    if st.button("🔍 Analizar coherencia", key="btn_coherence_scan"):
+        rows = []
+        for cat in list_existing_categories():
+            mm = _get_pdf_md_mismatches(cat)
+            if mm["orphan_mds"] or mm["missing_mds"]:
+                rows.append({
+                    "Categoría":    cat,
+                    "MD huérfanos": len(mm["orphan_mds"]),
+                    "PDFs sin MD":  len(mm["missing_mds"]),
+                    "_orphans":     mm["orphan_mds"],
+                    "_missing":     mm["missing_mds"],
+                })
+        st.session_state["_coherence_rows"] = rows
+
+    rows = st.session_state.get("_coherence_rows")
+    if rows is None:
+        st.info("Pulsa 'Analizar coherencia' para escanear.")
+    elif not rows:
+        st.success("✓ Todas las categorías tienen coherencia PDF / MD.")
+    else:
+        display_rows = [
+            {k: v for k, v in r.items() if not k.startswith("_")}
+            for r in rows
+        ]
+        st.dataframe(pd.DataFrame(display_rows), hide_index=True,
+                     use_container_width=True)
+
+        for r in rows:
+            cat = r["Categoría"]
+            with st.expander(f"Detalle — {cat}", expanded=False):
+                if r["_orphans"]:
+                    st.markdown("**MD huérfanos** (se eliminarán):")
+                    for stem in r["_orphans"]:
+                        st.code(stem)
+                if r["_missing"]:
+                    st.markdown("**PDFs sin MD** (se procesarán):")
+                    for stem in r["_missing"]:
+                        st.code(stem)
+
+        cats_to_fix = [r["Categoría"] for r in rows]
+        selected_fix = st.multiselect(
+            "Categorías a corregir",
+            options=cats_to_fix,
+            default=cats_to_fix,
+            key="coherence_fix_cats",
+        )
+
+        st.warning(
+            "⚠️ La corrección elimina permanentemente md_clean, chunks, "
+            "summaries y metadata per-paper huérfanos y luego reprocesa."
+        )
+
+        if st.button("🔧 Corregir seleccionadas", type="primary",
+                     key="btn_coherence_fix"):
+            if not selected_fix:
+                st.warning("Selecciona al menos una categoría.")
+            else:
+                for r in rows:
+                    cat = r["Categoría"]
+                    if cat not in selected_fix:
+                        continue
+                    cat_dir = CATEGORIAS_DIR / cat
+                    orphans = r["_orphans"]
+                    if orphans:
+                        st.markdown(f"**{cat}** — eliminando {len(orphans)} huérfanos…")
+                        for stem in orphans:
+                            for path in [
+                                cat_dir / "md_clean"  / f"{stem}.clean.md",
+                                cat_dir / "summaries" / f"{stem}.summary.md",
+                                cat_dir / "metadata"  / "per_paper" / f"{stem}.metadata.json",
+                            ]:
+                                if path.exists():
+                                    path.unlink()
+                            chunks_dir = cat_dir / "chunks"
+                            if chunks_dir.exists():
+                                for cf in chunks_dir.glob(f"{stem}*.jsonl"):
+                                    cf.unlink()
+
+                    execute_script_live(
+                        "3_process_corpus.py",
+                        ["--phase", cat],
+                        f"process_corpus [{cat}]",
+                    )
+
+                st.session_state.pop("_coherence_rows", None)
+                st.success(
+                    "✓ Corrección completada. Recuerda **re-indexar FAISS** "
+                    "de las categorías afectadas."
+                )
