@@ -463,3 +463,26 @@ uso mensual de modelos. Parte de los datos ya existen en `rag_usage/`.
   cómo exportar papers, cómo citar correctamente.
 - **Política de uso**: no descargas masivas, no saltarse paywalls, no compartir
   PDFs fuera del grupo si la licencia no lo permite, respetar acceso institucional.
+
+### 31. Pipeline para libros de docencia — futuro
+
+Pipeline paralelo a categorias/ para 30+ libros de bioprocesos (texto
+extraíble, inglés). Estructura propuesta: libros_docencia/bioprocesos/.
+
+Diferencias con el pipeline actual:
+- Parser: pymupdf en lugar de GROBID (libros no son papers)
+- TOC del PDF → metadata jerárquica (capítulo, sección, páginas) por chunk
+- Sin 4_extract_metadata.py ni 3b_summarize.py (no aplican a libros)
+- Reutiliza: bge-m3, FAISS, infraestructura Streamlit
+
+Casos de uso:
+- RAG con citas precisas (libro, capítulo, página) para preparar clases
+- Comparar tratamiento de un mismo concepto en varios libros
+- Página "Preparar clase" que consulta libros + papers de las categorías
+  relevantes (microalgae, biogas_upgrading, etc.) y sintetiza
+  "manual dice X, papers recientes matizan Y"
+
+MVP: 2-3 libros como proyecto ad-hoc adaptado, validar utilidad antes
+de productizar.
+
+Considerar primero: terminar items 4, 7, 15, 17-25, 30.
