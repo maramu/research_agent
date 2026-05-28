@@ -30,8 +30,10 @@ import streamlit as st
 
 # Permitir import de app_utils.py de la carpeta padre
 STREAMLIT_APP_DIR = Path(__file__).resolve().parent.parent
-if str(STREAMLIT_APP_DIR) not in sys.path:
-    sys.path.insert(0, str(STREAMLIT_APP_DIR))
+SCRIPTS_DIR = STREAMLIT_APP_DIR.parent
+for d in (str(STREAMLIT_APP_DIR), str(SCRIPTS_DIR)):
+    if d not in sys.path:
+        sys.path.insert(0, d)
 
 from app_utils import (
     ANTHROPIC_MODELS, OPENAI_MODELS, OLLAMA_MODELS_LLM, OLLAMA_MODEL_EMBED,
@@ -42,6 +44,7 @@ from app_utils import (
     fmt_cost, get_monthly_usage, list_embedding_phases, list_existing_categories,
     record_rag_query, record_rag_query_full,
 )
+from utils.export_refs import build_papers_zip
 
 st.set_page_config(page_title="RAG", page_icon="🔍", layout="wide")
 st.title("🔍 Consultas RAG")
@@ -297,11 +300,6 @@ if st.session_state.pop("_do_save", False):
         (notes_dir / note_filename).write_text(note_content, encoding="utf-8")
         st.success(f"Nota guardada: `notas_rag/{_project}/{note_filename}`")
 
-if st.session_state.get("_last_answer_md"):
-    if st.button("💾 Guardar como nota", key="save_note"):
-        st.session_state["_do_save"] = True
-        st.rerun()
-
 if not go:
     st.stop()
 
@@ -334,6 +332,8 @@ if not results:
 retrieved_papers = list(dict.fromkeys(
     m.get("paper_id", "") for _, _, m in results if m.get("paper_id")
 ))
+st.session_state["_last_retrieved_papers"] = retrieved_papers
+st.session_state["_last_project"]          = project
 
 # ---------------------------------------------------------------------------
 # Síntesis
@@ -419,25 +419,19 @@ Respuesta:"""
     try:
         if provider == "Ollama (local)":
             answer_md = st.write_stream(stream_ollama())
-            st.session_state["_last_answer_md"]        = answer_md
-            st.session_state["_last_retrieved_papers"] = retrieved_papers
-            st.session_state["_last_query"]            = query
-            st.session_state["_last_project"]          = project
-            st.session_state["_last_model"]            = synth_model
+            st.session_state["_last_answer_md"] = answer_md
+            st.session_state["_last_query"]     = query
+            st.session_state["_last_model"]     = synth_model
         elif provider == "Anthropic (Claude)":
             answer_md = st.write_stream(stream_anthropic())
-            st.session_state["_last_answer_md"]        = answer_md
-            st.session_state["_last_retrieved_papers"] = retrieved_papers
-            st.session_state["_last_query"]            = query
-            st.session_state["_last_project"]          = project
-            st.session_state["_last_model"]            = synth_model
+            st.session_state["_last_answer_md"] = answer_md
+            st.session_state["_last_query"]     = query
+            st.session_state["_last_model"]     = synth_model
         elif provider == "OpenAI (GPT)":
             answer_md = st.write_stream(stream_openai())
-            st.session_state["_last_answer_md"]        = answer_md
-            st.session_state["_last_retrieved_papers"] = retrieved_papers
-            st.session_state["_last_query"]            = query
-            st.session_state["_last_project"]          = project
-            st.session_state["_last_model"]            = synth_model
+            st.session_state["_last_answer_md"] = answer_md
+            st.session_state["_last_query"]     = query
+            st.session_state["_last_model"]     = synth_model
     except Exception as e:
         st.error(f"Error al generar respuesta con {provider}: {e}")
         with st.expander("Prompt enviado (debug)"):
@@ -478,6 +472,12 @@ Respuesta:"""
         real_cost=cost,
     )
 
+    col_save1, col_save2 = st.columns([3, 1])
+    with col_save2:
+        if st.button("💾 Guardar como nota", key="save_note"):
+            st.session_state["_do_save"] = True
+            st.rerun()
+
     st.divider()
 
 # ---------------------------------------------------------------------------
@@ -499,3 +499,24 @@ for rank, (dist, idx, m) in enumerate(results, start=1):
     ):
         st.caption(f"Fase: `{phase_tag}` · Tipo: `{chunk_type}` · Distancia: {dist:.4f}")
         st.markdown(snippet)
+
+st.divider()
+with st.expander("📦 Exportar papers recuperados", expanded=False):
+    _inc_pdf = st.checkbox("Incluir PDFs",    value=True, key="zip_pdf")
+    _inc_md  = st.checkbox("Incluir MD limpio", value=True, key="zip_md")
+    if _inc_pdf or _inc_md:
+        _zip = build_papers_zip(
+            retrieved_papers, project, CATEGORIAS_DIR,
+            include_pdf=_inc_pdf, include_md=_inc_md,
+        )
+        st.download_button(
+            f"⬇️ Descargar ZIP ({len(retrieved_papers)} papers)",
+            data=_zip,
+            file_name=f"{project}_papers_RAG.zip",
+            mime="application/zip",
+            key="dl_papers_zip",
+        )
+        st.caption(
+            "Contiene los PDFs y/o Markdown de los papers con chunks "
+            "recuperados en esta búsqueda."
+        )

@@ -18,6 +18,7 @@ for d in (str(STREAMLIT_APP_DIR), str(SCRIPTS_DIR)):
     if d not in sys.path:
         sys.path.insert(0, d)
 
+from utils.export_refs import build_papers_zip, load_papers, to_bibtex
 from app_utils import (
     ANTHROPIC_MODELS, OPENAI_MODELS, OLLAMA_MODELS_LLM, OLLAMA_MODEL_EMBED,
     OLLAMA_HOST, ANTHROPIC_API_KEY, OPENAI_API_KEY,
@@ -350,6 +351,45 @@ with col2:
     if st.button("💾 Guardar en NAS", key="save_revision"):
         st.session_state["_rev_do_save"] = True
         st.rerun()
+
+# ── Exportar papers usados ───────────────────────────────────────────────────
+st.divider()
+with st.expander("📦 Exportar papers usados en esta revisión", expanded=False):
+    _rev_papers = list(dict.fromkeys(
+        m.get("paper_id", "") for _, _, m in results if m.get("paper_id")
+    ))
+    st.caption(f"{len(_rev_papers)} papers únicos recuperados.")
+
+    # ZIP
+    _col1, _col2 = st.columns(2)
+    _inc_pdf = _col1.checkbox("PDF",       value=True, key="rev_zip_pdf")
+    _inc_md  = _col2.checkbox("MD limpio", value=True, key="rev_zip_md")
+    if _inc_pdf or _inc_md:
+        _zip = build_papers_zip(
+            _rev_papers, project, CATEGORIAS_DIR,
+            include_pdf=_inc_pdf, include_md=_inc_md,
+        )
+        st.download_button(
+            f"⬇️ ZIP papers ({len(_rev_papers)})",
+            data=_zip,
+            file_name=f"{project}_revision_papers.zip",
+            mime="application/zip",
+            key="rev_dl_zip",
+        )
+
+    # BibTeX desde metadata
+    _jsonl = CATEGORIAS_DIR / project / "metadata" / "papers_metadata.jsonl"
+    if _jsonl.exists():
+        _all = load_papers(_jsonl)
+        _sel = [m for m in _all if m.get("paper_id") in set(_rev_papers)]
+        if _sel:
+            st.download_button(
+                f"📚 BibTeX ({len(_sel)} papers)",
+                data=to_bibtex(_sel),
+                file_name=f"{project}_revision.bib",
+                mime="text/plain",
+                key="rev_dl_bib",
+            )
 
 # ── Fragmentos usados ─────────────────────────────────────────────────────────
 st.divider()

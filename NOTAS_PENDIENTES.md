@@ -256,7 +256,7 @@ Segunda instancia Streamlit solo con página RAG, sin ingesta ni configuración,
 limitada a Ollama (gratuito). Para compartir con colaboradores.
 Requiere segundo plist launchd en puerto 8502 y control de acceso (VPN o similar).
 
-### 11. Exportar papers desde RAG
+### ✅ 11. Exportar papers desde RAG (completado 2026-05-28)
 
 Tras consulta RAG, botón "Exportar papers relacionados" que genera ZIP descargable
 con PDFs + md_clean (+ opcional summaries) de los `paper_id`s recuperados.

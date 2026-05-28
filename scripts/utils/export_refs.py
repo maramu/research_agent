@@ -89,6 +89,34 @@ def to_ris(papers: List[Dict]) -> str:
     return "\n".join(lines)
 
 
+def build_papers_zip(
+    paper_ids: list,
+    project: str,
+    categorias_dir,
+    include_pdf: bool = True,
+    include_md: bool = True,
+) -> bytes:
+    """ZIP en memoria con PDFs y/o md_clean de los paper_ids dados."""
+    import io
+    import zipfile
+    from pathlib import Path
+    categorias_dir = Path(categorias_dir)
+    pdfs_dir = categorias_dir / project / "pdfs"
+    md_dir   = categorias_dir / project / "md_clean"
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for pid in paper_ids:
+            if include_pdf:
+                pdf = pdfs_dir / f"{pid}.pdf"
+                if pdf.exists():
+                    zf.write(pdf, f"pdfs/{pdf.name}")
+            if include_md:
+                md = md_dir / f"{pid}.clean.md"
+                if md.exists():
+                    zf.write(md, f"md_clean/{md.name}")
+    return buf.getvalue()
+
+
 def to_csv_str(papers: List[Dict]) -> str:
     buf = io.StringIO()
     fields = ["paper_id", "stable_id", "title", "authors",
