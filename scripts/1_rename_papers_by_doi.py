@@ -139,7 +139,7 @@ def slugify(text: str) -> str:
 
 def shorten_title(title: str, max_words: int = 8) -> str:
     clean = strip_accents(title).lower()
-    clean = re.sub(r"[^a-z0-9\s\-]", " ", clean)
+    clean = re.sub(r"[^a-z0-9\s]", " ", clean)
     words = [w for w in clean.split() if w and w not in STOPWORDS]
     if not words:
         words = clean.split()
@@ -148,6 +148,7 @@ def shorten_title(title: str, max_words: int = 8) -> str:
 
 def sanitize_filename(name: str, max_len: int = 180) -> str:
     name = re.sub(r'[<>:"/\\|?*]', "_", name)
+    name = re.sub(r"\s+", "_", name)
     name = re.sub(r"_+", "_", name).strip("._ ")
     if len(name) > max_len:
         stem = Path(name).stem[: max_len - 4]

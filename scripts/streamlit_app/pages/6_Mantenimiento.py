@@ -220,6 +220,9 @@ def _get_pdf_md_mismatches(cat: str) -> dict:
       orphan_mds:  stems de md_clean sin PDF con el mismo nombre
       missing_mds: stems de PDF sin md_clean con el mismo nombre
     """
+    def _norm(s: str) -> str:
+        return re.sub(r"[\s\-]+", "_", s).lower()
+
     cat_dir  = CATEGORIAS_DIR / cat
     pdfs_dir = cat_dir / "pdfs"
     md_dir   = cat_dir / "md_clean"
@@ -230,10 +233,14 @@ def _get_pdf_md_mismatches(cat: str) -> dict:
         for m in md_dir.glob("*.clean.md"):
             md_stems.add(m.name.replace(".clean.md", ""))
 
-    return {
-        "orphan_mds":  sorted(md_stems  - pdf_stems),
-        "missing_mds": sorted(pdf_stems - md_stems),
-    }
+    # Comparar por stem normalizado
+    pdf_norm = {_norm(s): s for s in pdf_stems}
+    md_norm  = {_norm(s): s for s in md_stems}
+
+    orphan_mds  = sorted(v for k, v in md_norm.items()  if k not in pdf_norm)
+    missing_mds = sorted(v for k, v in pdf_norm.items() if k not in md_norm)
+
+    return {"orphan_mds": orphan_mds, "missing_mds": missing_mds}
 
 
 # ═══════════════════════════════════════════════════════════════════════════
