@@ -38,8 +38,6 @@ CONFIG_DIR        = PROJECT_ROOT / "config"
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-from utils.constants import OLLAMA_MODEL_EMBED  # noqa: E402
-
 _ENV_FILE = CONFIG_DIR / ".env"
 if _ENV_FILE.exists():
     load_dotenv(_ENV_FILE)
@@ -78,16 +76,7 @@ OPENAI_API_KEY    = os.getenv("OPENAI_API_KEY", "")
 # Categorías canónicas
 # ---------------------------------------------------------------------------
 
-CANONICAL_CATEGORIES = [
-    "biological_gas_odor_treatment",
-    "anoxic_biogas_biodesulfurization",
-    "bioplastics_microplastics",
-    "biogas_upgrading_biomethanation",
-    "microalgae",
-    "single_cell_protein",
-    "advanced_oxidation_processes",
-    "bioleaching_critical_materials",
-]
+from utils.constants import OLLAMA_MODEL_EMBED, CANONICAL_CATEGORIES  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Modelos disponibles por provider

@@ -62,18 +62,20 @@ _PROJECT_SUBDIRS = [
     "embeddings", "metadata", "notebooklm_packages", "logs",
 ]
 
-# Categorías canónicas del proyecto (espejo de app_utils.CANONICAL_CATEGORIES;
-# se duplica aquí para evitar importación circular con app_utils → pipeline).
-_CANONICAL_CATEGORIES = [
-    "biological_gas_odor_treatment",
-    "anoxic_biogas_biodesulfurization",
-    "bioplastics_microplastics",
-    "biogas_upgrading_biomethanation",
-    "microalgae",
-    "single_cell_protein",
-    "advanced_oxidation_processes",
-    "bioleaching_critical_materials",
-]
+try:
+    sys.path.insert(0, str(SCRIPTS_DIR))
+    from utils.constants import CANONICAL_CATEGORIES as _CANONICAL_CATEGORIES
+except ImportError:
+    _CANONICAL_CATEGORIES = [
+        "biological_gas_odor_treatment",
+        "anoxic_biogas_biodesulfurization",
+        "bioplastics_microplastics",
+        "biogas_upgrading_biomethanation",
+        "microalgae",
+        "single_cell_protein",
+        "advanced_oxidation_processes",
+        "bioleaching_critical_materials",
+    ]
 
 
 # ---------------------------------------------------------------------------
