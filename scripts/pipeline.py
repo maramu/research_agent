@@ -472,7 +472,7 @@ def run_scopus(
         # Descargar directamente a categorias/<cat>/pdfs/
         dl_result = run_step(
             "3a_download_pdfs.py",
-            ["--csv", str(csv_path), "--out-dir", str(pdfs_dir)],
+            ["--csv", str(csv_path), "--out-dir", str(pdfs_dir), "--category", cat],
             on_output=handler,
             label=f"download [{cat}]",
         )

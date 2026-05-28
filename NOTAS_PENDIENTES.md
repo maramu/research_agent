@@ -302,7 +302,7 @@ Helpers: `_doi_slug()`, `_load_prov_cache()`, `_norm_doi()`, `_infer_provenance(
 `pipeline.py` no modificado: la auto-detección es suficiente. `paper_id` sin cambios (compatibilidad).
 Verificado en producción 2026-05-27: campos presentes en JSONL de `anoxic_biogas_biodesulfurization` y `biogas_upgrading_biomethanation`.
 
-### 15. Registro de DOI pendientes de descarga — MEDIA-ALTA prioridad
+### ✅ 15. Registro de DOI pendientes de descarga (completado 2026-05-28)
 
 Crear y mantener:
 ```
@@ -324,7 +324,7 @@ paper procesado con distintos nombres de fichero a lo largo del tiempo.
 Verificado en producción 2026-05-27. Página 6_Mantenimiento.py incluye sección "Backfill metadata"
 que detecta y rellenar papers sin `stable_id` (los procesados antes de este ítem).
 
-### 17. Panel de calidad del corpus + quality_score — MEDIA prioridad
+### ✅ 17. Panel de calidad del corpus + quality_score (completado 2026-05-28)
 
 **Panel (portada o página nueva "Calidad"):** métricas por categoría:
 % PDFs con DOI, con título, con año, con resumen, con referencias, duplicados, con warnings.
@@ -356,7 +356,7 @@ mismo título normalizado, mismo primer autor + año + título similar, mismo ha
 Generar informe `/Volumes/research/metadatos/duplicate_report.xlsx` con columnas:
 `paper_id_1`, `paper_id_2`, `category_1`, `category_2`, `match_type`, `confidence`, `recommended_action`.
 
-### 20. Log completo de consultas RAG — MEDIA-ALTA prioridad
+### ✅ 20. Log completo de consultas RAG (completado 2026-05-28)
 
 Ampliar el registro existente en `rag_usage/` para guardar también la pregunta,
 los papers recuperados y la respuesta generada:
@@ -380,7 +380,7 @@ Ruta: `/Volumes/research/metadatos/rag_queries/rag_queries_YYYY-MM.jsonl`
 
 Permite reproducir respuestas usadas en proyectos o artículos.
 
-### 21. Guardar respuesta RAG como nota — MEDIA prioridad
+### ✅ 21. Guardar respuesta RAG como nota (completado 2026-05-28)
 
 Botón en `2_RAG.py` tras consulta: "Guardar como nota Markdown".
 
@@ -389,7 +389,7 @@ Ruta: `/Volumes/research/notas_rag/<categoria>/YYYY-MM-DD_<categoria>_<slug>.md`
 Convierte el RAG en herramienta de escritura científica. Relacionado con item 11
 (exportar papers) — pueden implementarse juntos.
 
-### 22. Modo revisión bibliográfica — MEDIA-ALTA prioridad
+### ✅ 22. Modo revisión bibliográfica (completado 2026-05-28)
 
 Nueva página Streamlit `📚 Revisión bibliográfica` con prompts especializados:
 estado del arte, tabla de artículos clave, lagunas de conocimiento, comparativa
@@ -398,7 +398,7 @@ de mecanismos, introducción preliminar.
 Entradas: categoría, rango de años, keywords de enfoque, modelo de síntesis.
 Salidas: Markdown, Word, ZIP con papers utilizados, BibTeX.
 
-### 23. Exportar BibTeX/RIS — MEDIA prioridad
+### ✅ 23. Exportar BibTeX/RIS (completado 2026-05-28)
 
 A partir de metadata y DOI, generar `selected_papers.bib` / `.ris` / `.csv`
 para integración con Zotero y escritura de artículos y tesis.

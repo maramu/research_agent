@@ -111,6 +111,13 @@ try:
 except ImportError:
     _HAS_PYMUPDF = False
 
+try:
+    sys.path.insert(0, str(Path(__file__).parent))
+    from utils.download_registry import upsert as _registry_upsert, mark_downloaded as _registry_mark_downloaded
+    _HAS_REGISTRY = True
+except Exception:
+    _HAS_REGISTRY = False
+
 # ---------------------------------------------------------------------------
 # NAS — raíz y estructura esperada
 # ---------------------------------------------------------------------------
@@ -202,6 +209,7 @@ class Config:
     keep_suspect_pdfs: bool = False
 
     dry_run: bool = False
+    category: str = ""
     use_cache: bool = True
     no_elsevier_api: bool = False
 
@@ -1576,6 +1584,23 @@ class DownloadManager:
             pend_report.to_csv(str(csv_pend), index=False, encoding="utf-8-sig")
             log.info("CSV pendientes en %s", csv_pend.resolve())
 
+        # --- Actualizar registro persistente de pendientes ---
+        if _HAS_REGISTRY and not self.cfg.dry_run:
+            try:
+                pending_rows = pend_report.to_dict("records")
+                added = _registry_upsert(pending_rows, category=self.cfg.category)
+                log.info("Registro pendientes: %d entradas nuevas añadidas", added)
+
+                # Marcar como descargados los que sí se resolvieron
+                downloaded_dois = [
+                    r.get("doi", "") for r in results
+                    if r.get("status") in DONE_STATUSES and r.get("doi")
+                ]
+                if downloaded_dois:
+                    _registry_mark_downloaded(downloaded_dois)
+            except Exception as e:
+                log.warning("No se pudo actualizar registro de pendientes: %s", e)
+
 
 # ---------------------------------------------------------------------------
 # CLI
@@ -1680,6 +1705,10 @@ def parse_args() -> argparse.Namespace:
         "--pending-csv", default=None, metavar="CSV",
         help=f"Ruta al CSV de pendientes (por defecto {METADATOS_DIR}/pendientes_manual_<stem>.csv)",
     )
+    parser.add_argument(
+        "--category", default="",
+        help="Categoría del pipeline (para registro de pendientes)",
+    )
     return parser.parse_args()
 
 
@@ -1718,6 +1747,7 @@ def main() -> None:
         pending_csv        = args.pending_csv  or str(METADATOS_DIR / f"pendientes_manual_{stem}.csv"),
         max_articles              = args.max,
         dry_run                   = args.dry_run,
+        category                  = args.category,
         use_cache                 = not args.no_cache,
         cache_max_age_days        = args.cache_age,
         max_seconds_per_article   = args.max_seconds_per_article,

@@ -22,7 +22,7 @@ from app_utils import (
     PIPELINE_AVAILABLE, PIPELINE_IMPORT_ERROR,
     check_grobid, check_nas, check_nas_space, check_nas_writable,
     check_ollama, check_ollama_model,
-    get_category_stats, human_status_icon, list_existing_categories,
+    get_category_quality, get_category_stats, human_status_icon, list_existing_categories,
 )
 
 st.set_page_config(
@@ -181,6 +181,39 @@ else:
     totals_cols[4].metric("Con FAISS",       int((df["FAISS"] == "✓").sum()))
 
     st.divider()
+
+    with st.expander("📊 Calidad del corpus", expanded=False):
+        q_rows = []
+        for cat in CANONICAL_CATEGORIES:
+            q = get_category_quality(cat)
+            if not q:
+                continue
+            score_str = f"{q['avg_score']:.2f}" if q["avg_score"] is not None else "—"
+            coverage = f"{q['n_with_score']}/{q['n_total']}"
+            top_w = ", ".join(w for w, _ in q["top_warnings"][:3]) or "—"
+            q_rows.append({
+                "Categoría":   cat,
+                "Papers":      q["n_total"],
+                "Score medio": score_str,
+                "Cobertura":   coverage,
+                "% DOI":       q["pct_doi"],
+                "% Título":    q["pct_title"],
+                "% Año":       q["pct_year"],
+                "% Abstract":  q["pct_abstract"],
+                "% Refs≥5":    q["pct_refs"],
+                "Warnings más frecuentes": top_w,
+            })
+        if q_rows:
+            st.caption(
+                "Score 0–1 calculado sobre papers con `quality_score` en metadata. "
+                "Papers procesados antes del item 17 muestran '—' en Score — "
+                "re-ejecuta `4_extract_metadata.py` para rellenarlos (página Mantenimiento)."
+            )
+            st.dataframe(pd.DataFrame(q_rows), hide_index=True,
+                         use_container_width=True)
+        else:
+            st.info("No hay metadata con quality_score aún. "
+                    "Ejecuta `4_extract_metadata.py` en al menos una categoría.")
 
     # ---------------------------------------------------------------------------
     # NAS — carpetas auxiliares

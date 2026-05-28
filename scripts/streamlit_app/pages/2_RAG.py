@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -35,11 +36,11 @@ if str(STREAMLIT_APP_DIR) not in sys.path:
 from app_utils import (
     ANTHROPIC_MODELS, OPENAI_MODELS, OLLAMA_MODELS_LLM, OLLAMA_MODEL_EMBED,
     OLLAMA_HOST, ANTHROPIC_API_KEY, OPENAI_API_KEY,
-    CATEGORIAS_DIR, LLM_PRICING,
+    CATEGORIAS_DIR, NAS_ROOT, LLM_PRICING,
     check_anthropic_api, check_nas, check_ollama, check_openai_api,
     embedding_phase_model, estimate_cost_pre_query, estimate_cost_usd,
     fmt_cost, get_monthly_usage, list_embedding_phases, list_existing_categories,
-    record_rag_query,
+    record_rag_query, record_rag_query_full,
 )
 
 st.set_page_config(page_title="RAG", page_icon="🔍", layout="wide")
@@ -266,6 +267,41 @@ if do_synth and synth_model:
 
 go = st.button("🔍 Buscar", type="primary", disabled=not query.strip())
 
+if st.session_state.pop("_do_save", False):
+    _ans     = st.session_state.get("_last_answer_md", "")
+    _papers  = st.session_state.get("_last_retrieved_papers", [])
+    _query   = st.session_state.get("_last_query", "")
+    _project = st.session_state.get("_last_project", "")
+    _model   = st.session_state.get("_last_model", "")
+    if _ans:
+        _date = datetime.now().strftime("%Y-%m-%d")
+        _slug = re.sub(r"[^\w]+", "_", _query.strip()[:40], flags=re.ASCII).strip("_").lower()
+        note_filename = f"{_date}_{_project}_{_slug}.md"
+        note_content  = f"""# {_query}
+
+**Categoría**: {_project}
+**Fecha**: {_date}
+**Modelo**: {_model}
+**Papers recuperados**: {', '.join(_papers)}
+
+---
+
+{_ans}
+
+---
+
+*Generado con research_agent RAG*
+"""
+        notes_dir = NAS_ROOT / "notas_rag" / _project
+        notes_dir.mkdir(parents=True, exist_ok=True)
+        (notes_dir / note_filename).write_text(note_content, encoding="utf-8")
+        st.success(f"Nota guardada: `notas_rag/{_project}/{note_filename}`")
+
+if st.session_state.get("_last_answer_md"):
+    if st.button("💾 Guardar como nota", key="save_note"):
+        st.session_state["_do_save"] = True
+        st.rerun()
+
 if not go:
     st.stop()
 
@@ -294,6 +330,10 @@ for dist, idx in zip(D[0].tolist(), I[0].tolist()):
 if not results:
     st.warning("Sin resultados con esos filtros. Prueba aflojando filtros o cambia la consulta.")
     st.stop()
+
+retrieved_papers = list(dict.fromkeys(
+    m.get("paper_id", "") for _, _, m in results if m.get("paper_id")
+))
 
 # ---------------------------------------------------------------------------
 # Síntesis
@@ -375,13 +415,29 @@ Respuesta:"""
                 usage_capture["input_tokens"]  = chunk.usage.prompt_tokens
                 usage_capture["output_tokens"] = chunk.usage.completion_tokens
 
+    answer_md = ""
     try:
         if provider == "Ollama (local)":
-            st.write_stream(stream_ollama())
+            answer_md = st.write_stream(stream_ollama())
+            st.session_state["_last_answer_md"]        = answer_md
+            st.session_state["_last_retrieved_papers"] = retrieved_papers
+            st.session_state["_last_query"]            = query
+            st.session_state["_last_project"]          = project
+            st.session_state["_last_model"]            = synth_model
         elif provider == "Anthropic (Claude)":
-            st.write_stream(stream_anthropic())
+            answer_md = st.write_stream(stream_anthropic())
+            st.session_state["_last_answer_md"]        = answer_md
+            st.session_state["_last_retrieved_papers"] = retrieved_papers
+            st.session_state["_last_query"]            = query
+            st.session_state["_last_project"]          = project
+            st.session_state["_last_model"]            = synth_model
         elif provider == "OpenAI (GPT)":
-            st.write_stream(stream_openai())
+            answer_md = st.write_stream(stream_openai())
+            st.session_state["_last_answer_md"]        = answer_md
+            st.session_state["_last_retrieved_papers"] = retrieved_papers
+            st.session_state["_last_query"]            = query
+            st.session_state["_last_project"]          = project
+            st.session_state["_last_model"]            = synth_model
     except Exception as e:
         st.error(f"Error al generar respuesta con {provider}: {e}")
         with st.expander("Prompt enviado (debug)"):
@@ -409,6 +465,17 @@ Respuesta:"""
         query=query,
         project=project,
         is_estimated=usage_capture["is_estimated"],
+    )
+    record_rag_query_full(
+        category=project,
+        question=query,
+        provider=provider.split(" ")[0].lower(),
+        model=synth_model,
+        top_k=k,
+        retrieved_papers=retrieved_papers,
+        answer_md=answer_md,
+        estimated_cost=est_cost if 'est_cost' in dir() else 0.0,
+        real_cost=cost,
     )
 
     st.divider()

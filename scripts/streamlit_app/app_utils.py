@@ -204,6 +204,39 @@ def record_rag_query(
         pass
 
 
+def record_rag_query_full(
+    *,
+    category: str,
+    question: str,
+    provider: str,
+    model: str,
+    top_k: int,
+    retrieved_papers: list[str],
+    answer_md: str,
+    estimated_cost: float,
+    real_cost: float,
+) -> None:
+    """Guarda log completo en rag_queries/rag_queries_YYYY-MM.jsonl"""
+    now = datetime.now()
+    record = {
+        "date":             now.strftime("%Y-%m-%d %H:%M"),
+        "category":         category,
+        "question":         question,
+        "provider":         provider,
+        "model":            model,
+        "top_k":            top_k,
+        "retrieved_papers": retrieved_papers,
+        "answer_md":        answer_md,
+        "estimated_cost":   estimated_cost,
+        "real_cost":        real_cost,
+    }
+    out_dir = NAS_ROOT / "metadatos" / "rag_queries"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_file = out_dir / f"rag_queries_{now.strftime('%Y-%m')}.jsonl"
+    with out_file.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+
 def get_monthly_usage(month: Optional[str] = None) -> Dict[str, Any]:
     """Devuelve totales del mes pedido (defecto: actual).
 
@@ -407,6 +440,60 @@ def get_category_stats(category: str) -> Dict[str, Any]:
         "embeddings": has_embeddings,
         "packages":   count("notebooklm_packages", "*"),
         "pending":    pending,
+    }
+
+
+def get_category_quality(category: str) -> dict:
+    """
+    Lee papers_metadata.jsonl y agrega métricas de calidad.
+    Devuelve dict con:
+      n_total, n_with_score, avg_score,
+      pct_doi, pct_title, pct_year, pct_abstract, pct_refs,
+      top_warnings: list[(warning, count)] (top 5)
+    """
+    from collections import Counter
+    jsonl = CATEGORIAS_DIR / category / "metadata" / "papers_metadata.jsonl"
+    if not jsonl.exists():
+        return {}
+
+    scores, warnings_all = [], []
+    has_doi = has_title = has_year = has_abstract = has_refs = n = 0
+    try:
+        with jsonl.open(encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    m = json.loads(line)
+                except Exception:
+                    continue
+                n += 1
+                if m.get("doi"):       has_doi      += 1
+                if m.get("title"):     has_title    += 1
+                if m.get("year"):      has_year     += 1
+                if m.get("abstract"):  has_abstract += 1
+                if (m.get("n_references") or 0) >= 5: has_refs += 1
+                qs = m.get("quality_score")
+                if qs is not None:
+                    scores.append(float(qs))
+                warnings_all.extend(m.get("warnings") or [])
+    except Exception:
+        return {}
+
+    if n == 0:
+        return {}
+
+    return {
+        "n_total":      n,
+        "n_with_score": len(scores),
+        "avg_score":    round(sum(scores) / len(scores), 2) if scores else None,
+        "pct_doi":      round(100 * has_doi      / n),
+        "pct_title":    round(100 * has_title    / n),
+        "pct_year":     round(100 * has_year     / n),
+        "pct_abstract": round(100 * has_abstract / n),
+        "pct_refs":     round(100 * has_refs     / n),
+        "top_warnings": Counter(warnings_all).most_common(5),
     }
 
 

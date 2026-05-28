@@ -115,6 +115,8 @@ research_agent/
 | `run_pipeline.py` | CLI del orquestador con subcomandos | ✅ |
 | `streamlit_app/` | Interfaz web sobre el pipeline (ver sección dedicada) | ✅ |
 | `utils/pdf_utils.py` | Funciones comunes (DOI, slugify, texto) | ✅ |
+| `utils/download_registry.py` | Registro persistente de DOIs pendientes de descarga (pendientes_descarga.csv) | ✅ |
+| `utils/export_refs.py` | Genera BibTeX, RIS y CSV desde lista de dicts de `papers_metadata.jsonl`. Funciones: `load_papers`, `to_bibtex`, `to_ris`, `to_csv_str` | ✅ |
 
 ## Tres flujos del pipeline
 
@@ -175,11 +177,13 @@ herramientas adicionales (RAG, editores de configuración, visor de DOIs).
 |---|---|
 | `app.py` (portada) | Health checks en 2 filas: NAS / Ollama (+ latencia) / GROBID (+ latencia) + espacio libre NAS / bge-m3 disponible / permisos escritura NAS. Tabla de categorías con conteos (PDFs, pendientes, MD, resúmenes, chunks, metadata, FAISS, paquetes). |
 | `1_Ingestar` | 4 tabs: **Scopus** / **Inbox** / **Pendientes** / **Ad-hoc**. Progreso en directo vía `on_output`. Pendientes: tabla de brechas por categoría con reprocesado selectivo. Ad-hoc: formulario + sección **🔗 Integrar ad-hoc en categoría** (selectbox origen/destino, checkbox borrar fuente, llama a `integrate_adhoc()`). Auto-recuperación de estado Inbox al inicio: si `cribado_pendiente.csv` existe en disco (p.ej. tras reinicio launchd), restaura `session_state` y muestra toast. |
-| `2_RAG` | Búsqueda FAISS sobre cualquier proyecto+fase. Filtros por tipo y paper_id. Selector de provider (Ollama / Anthropic / OpenAI) y modelo. Toggle síntesis LLM con streaming. Pre-estimación de coste pre-query. Coste real post-query. Contador acumulado mensual en sidebar. |
+| `2_RAG` | Búsqueda FAISS sobre cualquier proyecto+fase. Filtros por tipo y paper_id. Selector de provider (Ollama / Anthropic / OpenAI) y modelo. Toggle síntesis LLM con streaming. Pre-estimación de coste pre-query. Coste real post-query. Contador acumulado mensual en sidebar. Log completo de consultas en `metadatos/rag_queries/rag_queries_YYYY-MM.jsonl` (10 campos: pregunta, papers recuperados, respuesta, costes). Botón "💾 Guardar como nota" → `notas_rag/<proyecto>/YYYY-MM-DD_<proyecto>_<slug>.md`. Patrón flag+`st.rerun()` para persistencia entre reruns de Streamlit. |
 | `3_Keywords` | Editor por textarea de `config/keywords.yml` (una keyword por línea, backup .bak automático) |
 | `4_Scopus_queries` | Editor por categoría de `config/scopus_queries.yml` (multilínea, añadir/duplicar/borrar queries) |
 | `5_DOI_manual` | Visor con filtros de `doi_manual.xlsx`, descarga CSV de vista filtrada |
 | `6_Mantenimiento` | 4 secciones expandibles: **Backfill metadata** (detecta papers sin `stable_id`, re-ejecuta `4_extract_metadata.py` por categoría) / **Re-indexar FAISS** (multiselect categorías, todas por defecto, `--force bge-m3`) / **Limpieza de duplicados** (preview → apply condicional, con aviso de re-indexado) / **Reconstruir doi_registry** (llama a `build_doi_registry_from_nas()` directamente). Probada en producción 2026-05-27. |
+| `7_Revision` | Revisión bibliográfica con 5 prompts especializados (estado del arte, tabla de artículos clave, lagunas, comparativa, introducción). RAG sobre categoría+fase, streaming en 3 providers. Descarga Markdown + guardar en NAS (`notas_rag/`). Patrón flag+`st.rerun()`. Fragmentos usados en expander colapsado. |
+| `8_Exportar` | Exporta bibliografía de una categoría a BibTeX / RIS / CSV. Filtros: rango de años, solo-DOI, quality score mínimo. Vista previa de papers seleccionados + 3 botones de descarga. |
 
 Importa directamente `pipeline.py` (no subprocess separado). Watchdog instalado
 para auto-recarga al editar ficheros.
@@ -302,8 +306,10 @@ Editor visual disponible en la página **📚 Scopus_queries** de la web.
 - Procedencia en metadata: `source_type` (scopus/inbox/adhoc/manual), `download_source`, `access_type`, `download_url`, `download_date`, `processed_date`. Leído automáticamente de `descarga_cache.json` por DOI; arg `--source-type` para forzarlo (item 14). Verificado en producción 2026-05-27.
 - `_copy_files_skip_existing(src, dst)` en `pipeline.py`: copia recursiva con `rglob`, skip por existencia de fichero, preserva subdirectorios. Usada por `integrate_adhoc()` y `promote_adhoc_to_category()`.
 - `run_adhoc()` en `pipeline.py`: valida el nombre del proyecto con `re.fullmatch(r'^[a-z0-9_-]+$', name)` antes de crear directorios. Lanza `ValueError` si el nombre contiene espacios, mayúsculas o caracteres no permitidos.
+- `pendientes_descarga.csv` en `/Volumes/research/metadatos/`: registro persistente acumulado de DOIs fallidos entre lotes. Actualizado automáticamente por `3a_download_pdfs.py --category <cat>`. Helper en `utils/download_registry.py` (`upsert`, `mark_downloaded`, `load`). Prerequisito del item 28.
 - `integrate_adhoc(adhoc, target, delete_source)` en `pipeline.py`: copia pdfs/, md_clean/, summaries/, chunks/, metadata/ de un proyecto ad-hoc a una categoría canónica existente y re-indexa FAISS del destino. Los ficheros ya existentes se saltan.
 - `promote_adhoc_to_category(adhoc, new_name, keywords, delete_source)` en `pipeline.py`: crea una nueva categoría canónica desde un ad-hoc copiando también embeddings/ y registrando keywords en `config/keywords.yml`. Valida nombre (`^[a-z0-9_]+$`) y que la categoría no exista previamente.
+- `quality_score` (0–1) y `warnings` añadidos a cada registro de `papers_metadata.jsonl` por `4_extract_metadata.py`. 7 criterios: título, DOI, abstract, año, autores, refs<5, md_clean corto. Papers procesados antes del item 17 no tienen el campo — rellenar con **Mantenimiento → Backfill metadata**. Panel "📊 Calidad del corpus" en portada Streamlit (expander, solo categorías con metadata existente).
 
 ### Streamlit / launchd — gotchas aprendidos durante el despliegue
 

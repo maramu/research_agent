@@ -352,6 +352,38 @@ def _infer_provenance(doi: Optional[str], project: str, cache: dict, source_type
     }
 
 
+def compute_quality(
+    title, doi, year, authors, abstract, refs: list,
+    md_clean_path=None,
+) -> dict:
+    """Calcula quality_score (0–1) y lista de warnings para un paper."""
+    warnings = []
+    score = 1.0
+
+    if not title:
+        warnings.append("missing_title");    score -= 0.25
+    if not doi:
+        warnings.append("missing_doi");      score -= 0.20
+    if not abstract:
+        warnings.append("missing_abstract"); score -= 0.15
+    if not year:
+        warnings.append("missing_year");     score -= 0.10
+    if not authors:
+        warnings.append("missing_authors");  score -= 0.10
+    if len(refs) < 5:
+        warnings.append("no_references_extracted"); score -= 0.10
+    if md_clean_path is not None:
+        try:
+            from pathlib import Path as _Path
+            p = _Path(md_clean_path)
+            if not p.exists() or p.stat().st_size < 3000:
+                warnings.append("short_md_clean"); score -= 0.10
+        except Exception:
+            pass
+
+    return {"quality_score": round(max(0.0, score), 2), "warnings": warnings}
+
+
 def main():
     ap = argparse.ArgumentParser(description="Extrae metadatos de TEI XML (recursivo por fases)")
     ap.add_argument("--project", required=True, help="Nombre del proyecto (subcarpeta bajo --base)")
@@ -414,6 +446,10 @@ def main():
             highlights = extract_highlights(root, ns)
             refs       = extract_references(root, ns)
 
+            md_clean_path = base / project / "md_clean" / f"{paper_id}.clean.md"
+            quality = compute_quality(title, doi, year, authors, abstract, refs,
+                                      md_clean_path=md_clean_path)
+
             prov = _infer_provenance(doi, project, prov_cache, source_type)
             meta = {
                 "project":         project,
@@ -436,6 +472,8 @@ def main():
                 "download_url":    prov["download_url"],
                 "access_type":     prov["access_type"],
                 "download_date":   prov["download_date"],
+                "quality_score":   quality["quality_score"],
+                "warnings":        quality["warnings"],
             }
 
             f_meta.write(json.dumps(meta, ensure_ascii=False) + "\n")
