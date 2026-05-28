@@ -4,6 +4,23 @@
 
 ## Verificaciones completadas
 
+### ✅ Coherencia PDF/MD + fix nombres Crossref (2026-05-28)
+
+`1_rename_papers_by_doi.py` — dos fixes en generación de nombres:
+- `shorten_title`: elimina `\-` del regex → guiones se convierten en espacios y luego en `_` igual que el resto (`gas-liquid` → `gas_liquid`)
+- `sanitize_filename`: nuevo `re.sub(r"\s+", "_")` antes del colapso de guiones bajos → espacios residuales nunca llegan al nombre final
+
+`6_Mantenimiento.py` — nueva sección 5 "🔗 Coherencia PDF/MD":
+- Detecta PDFs sin md_clean y md_clean huérfanos sin PDF
+- Comparación normalizada (espacios/guiones → `_`, lowercase) para evitar falsos positivos por diferencias de puntuación
+- Botón "Corregir": elimina artefactos huérfanos (md_clean, chunks, summaries, metadata per-paper) y relanza `3_process_corpus.py`
+
+`utils/export_refs.py` — `build_papers_zip` con fallback año+apellido:
+- Lookup: paper_id exacto → stable_id desde papers_metadata.jsonl → glob por prefijo (primeros 20 chars)
+- Resuelve el caso de paper_ids viejos cuyos PDFs fueron renombrados por Crossref
+
+---
+
 ### ✅ Refactorización constants + resiliencia inbox + limpieza debug prints (2026-05-28)
 
 **`utils/constants.py`** — `CANONICAL_CATEGORIES` añadida como fuente de verdad única (junto con `OLLAMA_MODEL_EMBED`).
