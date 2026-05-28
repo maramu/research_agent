@@ -76,7 +76,7 @@ research_agent/
 │   ├── 8_query_rag.py
 │   ├── utils/
 │   │   ├── pdf_utils.py
-│   │   └── constants.py              ← Constantes compartidas (OLLAMA_MODEL_EMBED)
+│   │   └── constants.py              ← Constantes compartidas (OLLAMA_MODEL_EMBED, CANONICAL_CATEGORIES)
 │   └── streamlit_app/                ← Interfaz web (Streamlit)
 │       ├── app.py                    ← portada: health checks + tabla categorías
 │       ├── app_utils.py              ← helpers compartidos (renombrado para no
@@ -111,7 +111,7 @@ research_agent/
 | `7_make_master_index.py` | Genera MASTER_INDEX.md por categoría | ✅ |
 | `8_query_rag.py` | Consultas RAG sobre índice FAISS (CLI) | ✅ |
 | `9_cleanup_duplicates.py` | Detecta y elimina PDFs duplicados por DOI | ✅ |
-| `pipeline.py` | Orquestador: cinco flujos (`run_scopus`, `run_inbox`, `run_adhoc`, `integrate_adhoc`, `promote_adhoc_to_category`). Helpers: `_copy_files_skip_existing()`, `_CANONICAL_CATEGORIES`. Importable por Streamlit | ✅ |
+| `pipeline.py` | Orquestador: cinco flujos (`run_scopus`, `run_inbox`, `run_adhoc`, `integrate_adhoc`, `promote_adhoc_to_category`). Helpers: `_copy_files_skip_existing()`. `_CANONICAL_CATEGORIES` importado de `utils/constants.py` (fallback inline si `ImportError`). Importable por Streamlit | ✅ |
 | `run_pipeline.py` | CLI del orquestador con subcomandos | ✅ |
 | `streamlit_app/` | Interfaz web sobre el pipeline (ver sección dedicada) | ✅ |
 | `utils/pdf_utils.py` | Funciones comunes (DOI, slugify, texto) | ✅ |
@@ -174,7 +174,7 @@ herramientas adicionales (RAG, editores de configuración, visor de DOIs).
 | Página | Función |
 |---|---|
 | `app.py` (portada) | Health checks en 2 filas: NAS / Ollama (+ latencia) / GROBID (+ latencia) + espacio libre NAS / bge-m3 disponible / permisos escritura NAS. Tabla de categorías con conteos (PDFs, pendientes, MD, resúmenes, chunks, metadata, FAISS, paquetes). |
-| `1_Ingestar` | 4 tabs: **Scopus** / **Inbox** / **Pendientes** / **Ad-hoc**. Progreso en directo vía `on_output`. Pendientes: tabla de brechas por categoría con reprocesado selectivo. Ad-hoc: formulario + sección **🔗 Integrar ad-hoc en categoría** (selectbox origen/destino, checkbox borrar fuente, llama a `integrate_adhoc()`). |
+| `1_Ingestar` | 4 tabs: **Scopus** / **Inbox** / **Pendientes** / **Ad-hoc**. Progreso en directo vía `on_output`. Pendientes: tabla de brechas por categoría con reprocesado selectivo. Ad-hoc: formulario + sección **🔗 Integrar ad-hoc en categoría** (selectbox origen/destino, checkbox borrar fuente, llama a `integrate_adhoc()`). Auto-recuperación de estado Inbox al inicio: si `cribado_pendiente.csv` existe en disco (p.ej. tras reinicio launchd), restaura `session_state` y muestra toast. |
 | `2_RAG` | Búsqueda FAISS sobre cualquier proyecto+fase. Filtros por tipo y paper_id. Selector de provider (Ollama / Anthropic / OpenAI) y modelo. Toggle síntesis LLM con streaming. Pre-estimación de coste pre-query. Coste real post-query. Contador acumulado mensual en sidebar. |
 | `3_Keywords` | Editor por textarea de `config/keywords.yml` (una keyword por línea, backup .bak automático) |
 | `4_Scopus_queries` | Editor por categoría de `config/scopus_queries.yml` (multilínea, añadir/duplicar/borrar queries) |
@@ -297,7 +297,7 @@ Editor visual disponible en la página **📚 Scopus_queries** de la web.
 - Skip automático en todos los scripts: no reprocesa lo ya existente
 - FAISS para embeddings (no ChromaDB), manteniendo scripts originales
 - Argumentos inconsistentes entre scripts: `--phase` (3_process, 3b_summarize) vs `--project` (4–8). El orquestador absorbe la diferencia.
-- `_CANONICAL_CATEGORIES` en `pipeline.py` es una copia deliberada de `app_utils.CANONICAL_CATEGORIES` — se duplica para evitar el import circular `app_utils → pipeline`. Si se añade una categoría, actualizar **ambos** sitios.
+- `CANONICAL_CATEGORIES` y `OLLAMA_MODEL_EMBED` centralizadas en `utils/constants.py` — fuente de verdad única. `pipeline.py` importa `_CANONICAL_CATEGORIES` desde ahí con fallback inline (`except ImportError`); `app_utils.py` usa import fusionado. **Si se añade una categoría, solo actualizar `utils/constants.py`.**
 - `stable_id` en metadata: slug del DOI si existe, `paper_id` original si no. Campo estable independiente del nombre de fichero (item 16). Papers procesados antes del item 16 carecen de este campo — rellenar con página **6_Mantenimiento** → sección Backfill metadata.
 - Procedencia en metadata: `source_type` (scopus/inbox/adhoc/manual), `download_source`, `access_type`, `download_url`, `download_date`, `processed_date`. Leído automáticamente de `descarga_cache.json` por DOI; arg `--source-type` para forzarlo (item 14). Verificado en producción 2026-05-27.
 - `_copy_files_skip_existing(src, dst)` en `pipeline.py`: copia recursiva con `rglob`, skip por existencia de fichero, preserva subdirectorios. Usada por `integrate_adhoc()` y `promote_adhoc_to_category()`.
