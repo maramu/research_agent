@@ -84,6 +84,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import logging
 import re
 import time
 import unicodedata
@@ -102,6 +103,8 @@ DEFAULT_CSV = Path("/Volumes/research/metadatos/renombrado.csv")
 DEFAULT_EMAIL = "martin.ramirez@uca.es"
 DEFAULT_DOI_MANUAL = Path("/Volumes/research/metadatos/doi_manual.xlsx")
 FAILED_SUBFOLDER_NAME = "fallidos"
+
+log = logging.getLogger(__name__)
 
 CROSSREF_API = "https://api.crossref.org/works/"
 DOI_REGEX = re.compile(r"\b(10\.\d{4,9}/[-._;()/:A-Z0-9]+)\b", re.IGNORECASE)
@@ -218,12 +221,9 @@ def append_doi_not_found(xlsx_path: Path, filenames: list[str]) -> int:
     No sobreescribe filas existentes (tengan DOI o no).
     Devuelve el número de filas añadidas.
     """
-    print(f"[DEBUG] append_doi_not_found llamada | xlsx={xlsx_path} | filenames={filenames}")
     if not filenames:
-        print("[DEBUG] filenames vacío, nada que añadir")
         return 0
     if not xlsx_path.exists():
-        print(f"[DEBUG] el fichero no existe todavía: {xlsx_path}")
         return 0
     import openpyxl
     try:
@@ -234,22 +234,17 @@ def append_doi_not_found(xlsx_path: Path, filenames: list[str]) -> int:
             for row in ws.iter_rows(min_row=2, values_only=True):
                 if row and row[0] is not None:
                     existing.add(str(row[0]).strip())
-        print(f"[DEBUG] nombres ya en Excel: {existing}")
         added = 0
         for name in filenames:
-            print(f"[DEBUG] procesando '{name}' — {'YA EXISTE' if name in existing else 'NUEVO'}")
             if name not in existing:
                 ws.append([name, ""])
                 existing.add(name)
                 added += 1
         if added:
             wb.save(xlsx_path)
-            print(f"[DEBUG] guardado OK — {added} fila(s) nueva(s)")
-        else:
-            print("[DEBUG] sin filas nuevas, no se guarda")
         return added
     except Exception as e:
-        print(f"[DEBUG] excepción en append_doi_not_found: {type(e).__name__}: {e}")
+        log.warning("append_doi_not_found: %s: %s", type(e).__name__, e)
         return 0
 
 
@@ -265,12 +260,9 @@ def update_renamed_in_excel(
     - Si nombre_nuevo ya existe → no hace nada (evita duplicados).
     Devuelve el número de filas modificadas o añadidas.
     """
-    print(f"[DEBUG update_excel] xlsx={xlsx_path} | exists={xlsx_path.exists()} | entries={len(renamed) if renamed else 0}")
     if not renamed:
-        print("[DEBUG update_excel] lista vacía, nada que hacer")
         return 0
     if not xlsx_path.exists():
-        print(f"[DEBUG update_excel] el fichero no existe: {xlsx_path}")
         return 0
     import openpyxl
     try:
@@ -284,40 +276,32 @@ def update_renamed_in_excel(
                 val = ws.cell(row=row_idx, column=1).value
                 if val is not None:
                     name_to_row[str(val).strip()] = row_idx
-        print(f"[DEBUG update_excel] filas existentes en col A: {list(name_to_row.keys())}")
 
         changed = 0
         for entry in renamed:
             original = entry["original"]
             nuevo = entry["nuevo"]
             doi = entry["doi"]
-            print(f"[DEBUG update_excel] procesando: original='{original}' | nuevo='{nuevo}' | doi='{doi}'")
 
             if nuevo in name_to_row:
-                print(f"[DEBUG update_excel]   → '{nuevo}' ya existe en fila {name_to_row[nuevo]}, omitido")
                 continue
             elif original in name_to_row:
                 row_idx = name_to_row[original]
-                print(f"[DEBUG update_excel]   → original en fila {row_idx}, actualizando nombre")
                 ws.cell(row=row_idx, column=1).value = nuevo
                 if doi and not ws.cell(row=row_idx, column=2).value:
                     ws.cell(row=row_idx, column=2).value = doi
-                    print(f"[DEBUG update_excel]   → DOI rellenado en col B")
                 name_to_row[nuevo] = name_to_row.pop(original)
                 changed += 1
             else:
-                print(f"[DEBUG update_excel]   → ninguno existe, añadiendo fila nueva")
                 ws.append([nuevo, doi])
                 name_to_row[nuevo] = ws.max_row
                 changed += 1
 
-        print(f"[DEBUG update_excel] changed={changed}")
         if changed:
             wb.save(xlsx_path)
-            print(f"[DEBUG update_excel] guardado OK → {xlsx_path}")
         return changed
     except Exception as e:
-        print(f"[DEBUG update_excel] excepción: {type(e).__name__}: {e}")
+        log.warning("update_renamed_in_excel: %s: %s", type(e).__name__, e)
         return 0
 
 
@@ -656,8 +640,6 @@ def main() -> int:
         r["archivo_original"] for r in rows
         if r["estado"] in {"DOI_NO_ENCONTRADO", "MOVIDO_A_FALLIDOS_DOI_NO_ENCONTRADO"}
     ]
-    print(f"[DEBUG] estados finales: {[r['estado'] for r in rows]}")
-    print(f"[DEBUG] not_found: {not_found}")
     added = append_doi_not_found(xlsx_path, not_found)
     if added:
         print(f"Excel DOI manual: {added} fila(s) nueva(s) añadida(s) → {xlsx_path}")
@@ -668,7 +650,6 @@ def main() -> int:
             for r in rows
             if r["estado"] in {"RENOMBRADO", "DOI_MANUAL"}
         ]
-        print(f"[DEBUG] renamed_entries para Excel ({len(renamed_entries)}): {renamed_entries}")
         changed = update_renamed_in_excel(xlsx_path, renamed_entries)
         if changed:
             print(f"Excel DOI manual: {changed} entrada(s) actualizadas tras renombrado → {xlsx_path}")

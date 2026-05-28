@@ -169,6 +169,22 @@ def category_resume_row(category: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Auto-recuperación de estado Inbox desde disco
+# ---------------------------------------------------------------------------
+
+_pending_csv = INBOX_DIR.parent / "metadatos" / "cribado_pendiente.csv"
+if _pending_csv.exists():
+    _was_recovered = not st.session_state.get("inbox_screen_done")
+    st.session_state["inbox_screen_done"] = True
+    st.session_state["inbox_csv_path"] = str(_pending_csv)
+    if "inbox_rows" not in st.session_state:
+        import csv as _csv_restore
+        with _pending_csv.open(encoding="utf-8", newline="") as _f:
+            st.session_state["inbox_rows"] = list(_csv_restore.DictReader(_f))
+    if _was_recovered:
+        st.toast("✅ Estado de Inbox recuperado desde disco")
+
+# ---------------------------------------------------------------------------
 # Tabs por flujo
 # ---------------------------------------------------------------------------
 
