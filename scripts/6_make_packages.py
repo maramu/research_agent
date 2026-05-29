@@ -1,28 +1,56 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-6_make_packages.py
+6_make_packages.py — Paso 6 del pipeline research_agent
 
-Crea paquetes para NotebookLM en modo append-only:
-  PKG_XXX_FULLTEXT.md
-  PKG_XXX_REFERENCES.md
-  PKG_XXX_INDEX.md
-  PKG_XXX_manifest.json
+Crea paquetes para NotebookLM en modo append-only (solo empaqueta papers nuevos
+no presentes en manifests anteriores) o repack-all (rehace todo).
 
-Lee:
-  /Volumes/research/categorias/<project>/md_clean/**/*.clean.md
-  /Volumes/research/categorias/<project>/metadata/per_paper/<id>.metadata.json
-  /Volumes/research/categorias/<project>/metadata/per_paper/<id>.references.json
+Cada paquete (hasta 45 papers por defecto) genera tres ficheros Markdown y un
+manifest JSON en notebooklm_packages/pkg_NNN/:
 
-Salida:
-  /Volumes/research/categorias/<project>/notebooklm_packages/pkg_XXX/
+    PKG_NNN_FULLTEXT.md    ← cabecera de corpus + resumen + texto completo de cada paper
+    PKG_NNN_REFERENCES.md  ← referencias bibliográficas extraídas por paper
+    PKG_NNN_INDEX.md       ← tabla de contenidos del paquete
+    PKG_NNN_manifest.json  ← metadatos del paquete (paper_ids, fechas, rutas)
 
-Uso:
-  python3 6_make_packages.py --project bioleaching_critical_materials --phase bioleaching_critical_materials
-  python3 6_make_packages.py --project microalgae --phase all
+Posición en el pipeline:
+    md_clean/ + metadata/ + summaries/ → 6_make_packages.py → notebooklm_packages/
 
-Variables de entorno (config/.env):
-    OLLAMA_HOST → URL del servidor Ollama (defecto: http://pciq22.uca.es:11434)
+Ficheros leídos:
+    /Volumes/research/categorias/<project>/md_clean/**/*.clean.md
+    /Volumes/research/categorias/<project>/metadata/per_paper/<id>.metadata.json
+    /Volumes/research/categorias/<project>/metadata/per_paper/<id>.references.json
+    /Volumes/research/categorias/<project>/summaries/<id>.summary.md  ← opcional
+    config/keywords.yml                                                ← cabecera de corpus
+    config/.env
+
+Ficheros escritos:
+    /Volumes/research/categorias/<project>/notebooklm_packages/
+        pkg_NNN/PKG_NNN_FULLTEXT.md
+        pkg_NNN/PKG_NNN_REFERENCES.md
+        pkg_NNN/PKG_NNN_INDEX.md
+        pkg_NNN/PKG_NNN_manifest.json
+
+Parámetros CLI:
+    --project PROJECT     Nombre del proyecto/categoría (obligatorio)
+    --base DIR            Directorio raíz (defecto: /Volumes/research/categorias)
+    --phase PHASE         Fase a empaquetar, o 'all' (defecto: all)
+    --package-size N      Máximo de papers por paquete (defecto: 45)
+    --repack-all          Rehace todos los paquetes ignorando manifests previos
+    --order ORDER         Orden de los papers: paper_id (defecto)
+
+Dependencias:
+    pyyaml, python-dotenv
+
+Notas:
+    - En modo append-only, los paper_ids ya presentes en cualquier manifest
+      de la misma fase se saltan automáticamente.
+    - El FULLTEXT incluye una cabecera de corpus con nº de papers, periodo
+      (año min-max extraído de metadata o del paper_id) y primeras 6 keywords
+      de keywords.yml para la categoría.
+    - --repack-all no borra paquetes antiguos automáticamente; hazlo manualmente
+      si quieres un conjunto limpio antes de reempaquetar.
 """
 
 import argparse

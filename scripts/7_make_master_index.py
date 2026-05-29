@@ -1,23 +1,41 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-7_make_master_index.py
+7_make_master_index.py — Paso 7 del pipeline research_agent
 
-Genera MASTER_INDEX.md con resumen por fase y detalle por paquete/paper.
+Genera MASTER_INDEX.md con resumen global, tabla de paquetes y detalle por
+paper para facilitar la navegación del corpus desde NotebookLM o cualquier
+lector Markdown.
 
-Lee:
-  /Volumes/research/categorias/<project>/notebooklm_packages/pkg_XXX/PKG_XXX_manifest.json
-  /Volumes/research/categorias/<project>/metadata/per_paper/<paper_id>.metadata.json
+Posición en el pipeline:
+    notebooklm_packages/pkg_*/PKG_*_manifest.json → 7_make_master_index.py
+    → notebooklm_packages/MASTER_INDEX.md
 
-Salida:
-  /Volumes/research/categorias/<project>/notebooklm_packages/MASTER_INDEX.md
+Secciones del MASTER_INDEX.md generado:
+    1. Resumen global (total paquetes, total papers, papers por fase)
+    2. Packages overview (tabla con pkg_id, fase, nº papers, fecha)
+    3. Packages detail (por paquete: rutas de ficheros + lista detallada de papers
+       con título, DOI, journal, año y nº referencias)
 
-Uso:
-  python3 7_make_master_index.py --project bioleaching_critical_materials
-  python3 7_make_master_index.py --project microalgae --base /Volumes/research/categorias
+Ficheros leídos:
+    /Volumes/research/categorias/<project>/notebooklm_packages/pkg_*/PKG_*_manifest.json
+    /Volumes/research/categorias/<project>/metadata/per_paper/<paper_id>.metadata.json
+    config/.env
 
-Variables de entorno (config/.env):
-    OLLAMA_HOST → URL del servidor Ollama (defecto: http://pciq22.uca.es:11434)
+Ficheros escritos:
+    /Volumes/research/categorias/<project>/notebooklm_packages/MASTER_INDEX.md
+
+Parámetros CLI:
+    --project PROJECT     Nombre del proyecto/categoría (obligatorio)
+    --base DIR            Directorio raíz (defecto: /Volumes/research/categorias)
+
+Dependencias:
+    python-dotenv
+
+Nota:
+    Si un paper_id aparece en un manifest pero no tiene fichero .metadata.json,
+    se muestra en el índice con el aviso '_(no metadata file found)_' sin
+    interrumpir la generación.
 """
 
 import argparse

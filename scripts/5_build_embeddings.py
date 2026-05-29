@@ -1,28 +1,57 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-5_build_embeddings.py
+5_build_embeddings.py — Paso 5 del pipeline research_agent
 
-Genera embeddings FAISS desde chunks JSONL del proyecto usando Ollama
-(modelo nomic-embed-text).
+Genera un índice FAISS de embeddings vectoriales a partir de los chunks JSONL
+del proyecto, usando Ollama (modelo bge-m3 por defecto).
 
-Lee chunks recursivamente desde:
-  /Volumes/research/categorias/<project>/chunks/**/*.jsonl
+Posición en el pipeline:
+    categorias/<project>/chunks/ → 5_build_embeddings.py → embeddings/
 
-Filtra por fase si se indica --phase.
+Estructura del índice de salida:
+    embeddings/<phase>[__<modelo>]/
+        index.faiss      ← índice FAISS (IndexFlatL2, dim=1024 para bge-m3)
+        metadata.jsonl   ← metadatos de cada chunk (paper_id, section, type, text…)
+        config.json      ← project, phase, model, chunks, dimension
 
-Salida:
-  /Volumes/research/categorias/<project>/embeddings/<phase>/
-    index.faiss
-    metadata.jsonl
-    config.json
+Nomenclatura de la carpeta de salida:
+    - Modelo por defecto (bge-m3): embeddings/<phase>/
+    - Modelo alternativo:          embeddings/<phase>__<modelo_sanitizado>/
+    Esto permite coexistir varios índices con distintos modelos.
 
-Uso:
-  python3 5_build_embeddings.py --project bioleaching_critical_materials --phase bioleaching_critical_materials
-  python3 5_build_embeddings.py --project microalgae --phase all
+Skip logic:
+    Si index.faiss ya existe y --force no está activo, el script sale sin hacer nada.
+
+Ficheros leídos:
+    /Volumes/research/categorias/<project>/chunks/**/*.jsonl
+    config/.env
+
+Ficheros escritos:
+    /Volumes/research/categorias/<project>/embeddings/<phase>[__<modelo>]/
+        index.faiss
+        metadata.jsonl
+        config.json
+
+Parámetros CLI:
+    --project PROJECT     Nombre del proyecto/categoría (obligatorio)
+    --base DIR            Directorio raíz (defecto: /Volumes/research/categorias)
+    --phase PHASE         Etiqueta de fase a indexar, o 'all' (defecto: all)
+    --model MODEL         Modelo Ollama de embedding (defecto: bge-m3)
+    --batch-size N        Chunks por lote de progreso (defecto: 64)
+    --force               Sobrescribe el índice aunque ya exista
 
 Variables de entorno (config/.env):
-    OLLAMA_HOST → URL del servidor Ollama (defecto: http://pciq22.uca.es:11434)
+    OLLAMA_HOST           URL del servidor Ollama (defecto: http://pciq22.uca.es:11434)
+
+Dependencias:
+    faiss-cpu, numpy, ollama, python-dotenv
+
+Notas:
+    - bge-m3 produce embeddings de 1024 dimensiones con contexto de 8192 tokens.
+    - El embedding se hace chunk a chunk (Ollama no acepta batch); el parámetro
+      --batch-size solo controla la frecuencia de los mensajes de progreso.
+    - mxbai-embed-large NO es compatible (contexto 512 vs ~1500 chars por chunk).
 """
 
 import argparse

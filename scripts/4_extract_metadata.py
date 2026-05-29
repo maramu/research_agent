@@ -1,31 +1,66 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-4_extract_metadata.py
+4_extract_metadata.py — Paso 4 del pipeline research_agent
 
-Extrae de GROBID TEI:
-- title, doi, journal, year, authors, abstract, highlights
-- referencias (listBibl) con campos (doi, title, journal, year, raw)
-- phase (detectada desde la ruta del TEI)
+Extrae metadatos estructurados de los ficheros TEI XML generados por GROBID
+y escribe los resultados en formato JSONL por proyecto y por paper.
 
-Busca recursivamente todos los .tei.xml y .xml bajo:
-  /Volumes/research/categorias/<project>/tei/
+Posición en el pipeline:
+    categorias/<project>/tei/ → 4_extract_metadata.py → metadata/
 
-Salida:
-  /Volumes/research/categorias/<project>/metadata/
-    papers_metadata.jsonl
-    references.jsonl
-    per_paper/
-      <paper_id>.metadata.json
-      <paper_id>.references.json
+Campos extraídos del TEI:
+    title, doi, journal, year, authors (lista), abstract,
+    highlights, n_references, phase
 
-Uso:
-  python3 4_extract_metadata.py --project bioleaching_critical_materials
-  python3 4_extract_metadata.py --project microalgae --base /Volumes/research/categorias
+Campos de procedencia añadidos (item 14):
+    stable_id        ← slug del DOI si existe, paper_id original si no
+    processed_date   ← fecha de procesado (YYYY-MM-DD)
+    source_type      ← scopus | inbox | adhoc | manual (auto-detectado o --source-type)
+    download_source  ← método de descarga desde descarga_cache.json
+    download_url     ← URL del PDF descargado
+    access_type      ← open_access | institutional | unknown
+    download_date    ← fecha de descarga del PDF
+
+Campos de calidad añadidos (item 17):
+    quality_score    ← float 0–1 (7 criterios: título, DOI, abstract, año,
+                       autores, ≥5 refs, md_clean no corto)
+    warnings         ← lista de strings: missing_doi, no_abstract, etc.
+
+Skip logic:
+    Si <paper_id>.metadata.json ya existe y --force no está activo, el paper
+    se salta. Permite reanudar sin reprocesar lo ya completado.
+
+Ficheros leídos:
+    /Volumes/research/categorias/<project>/tei/**/*.tei.xml
+    /Volumes/research/metadatos/descarga_cache.json      ← procedencia de descargas
+    config/.env
+
+Ficheros escritos:
+    /Volumes/research/categorias/<project>/metadata/
+        papers_metadata.jsonl                 ← todos los papers en un JSONL
+        references.jsonl                      ← todas las referencias en un JSONL
+        per_paper/<paper_id>.metadata.json    ← metadatos por paper
+        per_paper/<paper_id>.references.json  ← referencias por paper
+
+Parámetros CLI:
+    --project PROJECT     Nombre del proyecto/categoría (obligatorio)
+    --base DIR            Directorio raíz (defecto: /Volumes/research/categorias)
+    --force               Reprocesa aunque los metadatos ya existan
+    --source-type TYPE    Fuerza el campo source_type (scopus|inbox|adhoc|manual)
 
 Variables de entorno (config/.env):
-    OLLAMA_HOST → URL del servidor Ollama (defecto: http://pciq22.uca.es:11434)
-    GROBID_URL  → URL del servidor GROBID  (defecto: http://pciq22.uca.es:8070)
+    OLLAMA_HOST           URL del servidor Ollama (defecto: http://pciq22.uca.es:11434)
+    GROBID_URL            URL del servidor GROBID  (defecto: http://pciq22.uca.es:8070)
+
+Dependencias:
+    xml.etree.ElementTree (stdlib), python-dotenv
+
+Notas:
+    - Papers procesados antes del item 16 carecen de stable_id; rellenar con
+      6_Mantenimiento → Backfill metadata.
+    - Papers procesados antes del item 17 carecen de quality_score; rellenar
+      con 6_Mantenimiento → Backfill metadata.
 """
 
 import argparse

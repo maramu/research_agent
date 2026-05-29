@@ -2,82 +2,53 @@
 # -*- coding: utf-8 -*-
 
 """
-1_rename_papers_by_doi.py
+1_rename_papers_by_doi.py — Paso 1 del pipeline research_agent
 
 Renombra artículos PDF científicos usando el DOI y los metadatos de Crossref.
 
-Formato de salida:
+Formato de nombre resultante:
     año_apellidoprimerautor_resumentitulo.pdf
+    Ejemplo: 2024_garcia_anaerobic_biodegradation_pla_pbat_sludge.pdf
 
-Ejemplo:
-    2024_garcia_anaerobic_biodegradation_pla_pbat_sludge.pdf
+Posición en el pipeline:
+    inbox/ → 1_rename_papers_by_doi.py → inbox/ (renombrado) → 2_screen_pdfs.py
 
-Carpeta por defecto:
-    /Volumes/research/inbox
+Estrategia de extracción de DOI (en orden):
+    1. Metadatos PDF (campo /doi, /Subject, /Keywords)
+    2. Regex sobre el texto de las primeras 3 páginas
+    3. Lookup en doi_manual.xlsx si el PDF está registrado manualmente
 
-CSV de salida por defecto:
-    /Volumes/research/metadatos/renombrado.csv
+Ficheros leídos:
+    <folder>/*.pdf                              ← PDFs a renombrar
+    /Volumes/research/metadatos/doi_manual.xlsx ← DOIs manuales (opcional)
+    config/.env                                 ← CROSSREF_EMAIL (opcional)
 
-Correo por defecto para Crossref:
-    martin.ramirez@uca.es
+Ficheros escritos:
+    <folder>/*.pdf                              ← PDFs renombrados (con --apply)
+    /Volumes/research/fallidos/                 ← PDFs sin DOI (con --move-failed)
+    <csv>                                       ← Informe CSV del proceso
+    /Volumes/research/metadatos/doi_manual.xlsx ← Actualizado con DOIs no encontrados
 
-Qué hace:
-1. Busca PDFs en la carpeta indicada.
-2. Intenta extraer el DOI desde metadatos o desde las primeras páginas del PDF.
-3. Consulta Crossref usando ese DOI.
-4. Genera un nombre limpio con este patrón:
-       año_apellidoprimerautor_resumentitulo.pdf
-5. En modo --apply renombra los válidos. Los problemáticos se quedan en su lugar
-   salvo que se añada --move-failed, que los mueve a la subcarpeta 'fallidos'.
-6. Guarda un CSV resumen con el resultado.
+Parámetros CLI:
+    --folder DIR          Carpeta con los PDFs (defecto: /Volumes/research/inbox)
+    --csv PATH            Ruta del CSV de salida
+    --apply               Ejecuta el renombrado (sin esta flag: solo preview)
+    --move-failed         Mueve los PDFs sin DOI a /Volumes/research/fallidos/
+    --max-words N         Máximo de palabras del título en el nombre (defecto: 8)
+    --no-skip-renamed     Procesa también PDFs que ya tienen formato año_autor_...
+    --email EMAIL         Email para la API de Crossref (educado identificarse)
 
-Instalación:
-    python3 -m pip install pymupdf requests
+Variables de entorno (config/.env):
+    CROSSREF_EMAIL        Email para las peticiones a Crossref (opcional)
 
-Vista previa (NO renombra, NO mueve):
-    python3 1_rename_papers_by_doi.py \
-      --folder /Volumes/research/inbox \
-      --csv /Volumes/research/metadatos/renombrado_preview.csv
-
-Renombrado real sin mover fallidos:
-    python3 1_rename_papers_by_doi.py \
-      --folder /Volumes/research/inbox \
-      --csv /Volumes/research/metadatos/renombrado.csv \
-      --apply
-
-Renombrado real moviendo fallidos:
-    python3 1_rename_papers_by_doi.py \
-      --folder /Volumes/research/inbox \
-      --csv /Volumes/research/metadatos/renombrado.csv \
-      --apply --move-failed
-
-Acortar el título a 6 palabras:
-    python3 1_rename_papers_by_doi.py --apply --max-words 6
-
-No ignorar archivos ya renombrados:
-    python3 1_rename_papers_by_doi.py --apply --no-skip-renamed
-
-DOIs manuales desde Excel (útil cuando el PDF no contiene DOI legible):
-    python3 1_rename_papers_by_doi.py \
-      --folder /Volumes/research/inbox \
-      --doi-manual config/doi_manual.xlsx \
-      --apply
-
-El fichero Excel debe tener dos columnas (la primera fila puede ser cabecera):
-    Columna A: nombre exacto del archivo PDF  (ej. articulo_sin_doi.pdf)
-    Columna B: DOI correspondiente            (ej. 10.1016/j.biortech.2021.125000)
-Si el fichero no existe se crea automáticamente con cabecera.
-Los PDFs resueltos por esta vía aparecen con estado DOI_MANUAL en el CSV.
-Al terminar, los PDFs con DOI_NO_ENCONTRADO se añaden solos al Excel (doi vacío)
-para que los rellenes a mano y vuelvas a ejecutar el script.
+Dependencias:
+    pymupdf (fitz), requests, openpyxl, python-dotenv
 
 Notas:
-- En modo preview no modifica nada.
-- En modo --apply renombra los válidos; los fallidos se quedan en su lugar.
-- Con --move-failed los fallidos se mueven a la subcarpeta 'fallidos'.
-- Si dos archivos generan el mismo nombre, añade _2, _3, etc.
-- Si --csv es solo un nombre de archivo, se guarda en la carpeta procesada.
-- Si --csv es una ruta absoluta, se guarda exactamente en esa ruta.
+    - Desde 2026-05-28: guiones y espacios en títulos se convierten en '_'
+      uniformemente (fix en shorten_title y sanitize_filename).
+    - PDFs renombrados antes del fix pueden tener guiones en el stem;
+      usar 6_Mantenimiento → Coherencia PDF/MD para detectar artefactos huérfanos.
 """
 
 from __future__ import annotations

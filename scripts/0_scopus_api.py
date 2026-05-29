@@ -1,36 +1,49 @@
 # -*- coding: utf-8 -*-
 """
-0_scopus_api.py — Paso 0 (alternativo) del pipeline research_agent
+0_scopus_api.py — Paso 0 del pipeline research_agent
 
-Consulta la Scopus Search API para obtener referencias bibliográficas por
-categoría de investigación y genera CSVs listos para ser procesados por
-3a_download_pdfs.py.
+Consulta la Scopus Search API por categoría de investigación y genera CSVs
+listos para ser procesados por 3a_download_pdfs.py.
 
-Flujo en el pipeline:
-  scopus_queries.yml  →  0_scopus_api.py  →  inbox_csv/scopus_<cat>_<fecha>.csv
-                                           →  3a_download_pdfs.py
+Posición en el pipeline:
+    scopus_queries.yml → 0_scopus_api.py → inbox_csv/ → 3a_download_pdfs.py
 
-Requisitos (.env):
-  ELSEVIER_API_KEY=xxxx    (la misma clave usada para la TDM API)
+Ficheros leídos:
+    config/scopus_queries.yml          ← queries Scopus por categoría (YAML)
+    config/.env                        ← ELSEVIER_API_KEY, ELSEVIER_INSTTOKEN
 
-Uso:
-  # Todas las categorías, 200 resultados c/u
-  python 0_scopus_api.py
+Ficheros escritos:
+    /Volumes/research/inbox_csv/
+        scopus_<categoria>_<YYYYMMDD>.csv   ← un CSV por categoría procesada
+        scopus_ALL_<YYYYMMDD>.csv           ← CSV global combinado
+    /Volumes/Disco/proyectos/research_agent/logs/
+        0_scopus_api_<timestamp>.log
 
-  # Solo una categoría, últimos 5 años, máximo 500
-  python 0_scopus_api.py --category microalgae --year-start 2020 --max 500
+Parámetros CLI:
+    --queries YAML        Ruta al YAML de queries (defecto: config/scopus_queries.yml)
+    --category NOMBRE     Categoría a procesar; repetible para varias (defecto: todas)
+    --max N               Máximo de resultados por categoría tras dedup (defecto: 200)
+    --year-start AÑO      Solo artículos desde este año inclusive
+    --year-end AÑO        Solo artículos hasta este año inclusive
+    --doctype TIPO        Filtro tipo Scopus: ar=article, re=review, cp=conference paper
+    --recent-days N       Solo artículos indexados en los últimos N días (RECENT(N))
+    --out-dir DIR         Directorio de salida para los CSVs
+    --log LOG             Ruta al fichero de log
+    --sleep SEG           Pausa entre peticiones a la API en segundos (defecto: 1.0)
+    --dry-run             Muestra totales sin descargar ni guardar nada
 
-  # Dry-run: muestra totales sin guardar nada
-  python 0_scopus_api.py --dry-run
+Variables de entorno (config/.env):
+    ELSEVIER_API_KEY      Clave de la Elsevier Developer API (obligatoria)
+    ELSEVIER_INSTTOKEN    Token institucional opcional para acceso ampliado
 
-  # Solo artículos originales (ar) o reviews (re)
-  python 0_scopus_api.py --doctype ar
+Dependencias:
+    pandas, requests, pyyaml, python-dotenv, urllib3
 
-  # Varias categorías
-  python 0_scopus_api.py --category microalgae --category biogas_upgrading_biomethanation
-
-  # Ingesta incremental: solo lo nuevo de los últimos 7 días
-  python 0_scopus_api.py --recent-days 7
+Ejemplos:
+    python 0_scopus_api.py
+    python 0_scopus_api.py --category microalgae --year-start 2020 --max 500
+    python 0_scopus_api.py --recent-days 7
+    python 0_scopus_api.py --dry-run
 """
 
 from __future__ import annotations

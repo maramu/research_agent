@@ -66,6 +66,47 @@ Ejemplos de uso:
 
   # f) saltar artículos concretos por índice 1-based
   python 3a_download_pdfs.py --csv archivo.csv --skip-rows 15,181,190-195
+
+Ficheros leídos:
+    <csv>                                                ← CSV con columnas DOI, Title, etc.
+    /Volumes/research/metadatos/descarga_cache.json      ← caché de descargas previas
+    config/.env                                          ← claves y proxies
+
+Ficheros escritos:
+    <out-dir>/*.pdf                                      ← PDFs descargados y validados
+    /Volumes/research/metadatos/descarga_cache.json      ← actualizado con cada descarga
+    /Volumes/research/metadatos/pendientes_descarga.csv  ← DOIs fallidos acumulados
+    <report>.xlsx / <report>.csv                         ← informe de resultados
+    logs/3a_download_<timestamp>.log
+
+Parámetros CLI clave:
+    --csv PATH            CSV de entrada con DOIs (obligatorio)
+    --out-dir DIR         Carpeta destino de los PDFs
+    --phase PHASE         Subcarpeta dentro de inbox/ (alternativa a --out-dir)
+    --category CAT        Categoría para registrar en pendientes_descarga.csv
+    --cache PATH          Ruta de la caché JSON
+    --max N               Descarga solo los primeros N artículos
+    --dry-run             Simula sin descargar ni escribir
+    --force               Ignora la caché y reintenta todo
+    --min-pages N         Mínimo de páginas para aceptar un PDF (defecto: 3)
+    --min-words N         Mínimo de palabras extraíbles (defecto: 200)
+    --report PATH         Ruta del XLSX de informe
+    --report-csv PATH     Ruta del CSV de informe
+
+Variables de entorno (config/.env):
+    UNPAYWALL_EMAIL       Email para la API Unpaywall (obligatorio para Unpaywall)
+    ELSEVIER_API_KEY      Clave Elsevier TDM API (opcional)
+    HTTP_PROXY            Proxy HTTP (opcional, para red UCA)
+    HTTPS_PROXY           Proxy HTTPS (opcional, para red UCA)
+
+Dependencias:
+    pymupdf (fitz), requests, pandas, openpyxl, python-dotenv
+
+Notas:
+    - Las descargas Elsevier requieren VPN UCA activa (autenticación por IP).
+    - La caché expira tras cache_max_age_days días; si el PDF en caché no existe
+      en disco se reintenta automáticamente.
+
 """
 
 from __future__ import annotations

@@ -1,34 +1,56 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-3b_summarize.py
+3b_summarize.py — Paso 3b del pipeline research_agent
 
 Genera resúmenes estructurados de artículos científicos usando Ollama.
+Los resúmenes se usan en 6_make_packages.py para enriquecer el FULLTEXT
+de los paquetes NotebookLM.
 
-Lee los Markdown limpios desde:
+Posición en el pipeline:
+    md_clean/<paper_id>.clean.md → 3b_summarize.py → summaries/<paper_id>.summary.md
+
+Estructura del resumen generado (800-1000 palabras en inglés):
+    - Main objective
+    - Methodology (setup, condiciones, escala, técnicas analíticas)
+    - Main results (datos cuantitativos)
+    - Discussion (mecanismos, comparativa con literatura, limitaciones)
+    - Conclusions (implicaciones prácticas, trabajo futuro)
+    - Keywords (8-10 términos técnicos)
+
+Skip logic:
+    Si <paper_id>.summary.md ya existe y --force no está activo, el paper
+    se salta. Permite reanudar sin reprocesar lo ya completado.
+
+Ficheros leídos:
     /Volumes/research/categorias/<phase>/md_clean/*.clean.md
+    config/.env
 
-Escribe los resúmenes en:
+Ficheros escritos:
     /Volumes/research/categorias/<phase>/summaries/<paper_id>.summary.md
-
-Informe:
     /Volumes/research/categorias/<phase>/logs/3b_summarize_report.csv
 
-Uso:
-    python3 3b_summarize.py --phase bioleaching_critical_materials
-    python3 3b_summarize.py --phase microalgae --model qwen3:14b
-    python3 3b_summarize.py --phase advanced_oxidation_processes --force
-    python3 3b_summarize.py --phase microalgae --dry-run
-
-Fases disponibles:
-    biological_gas_odor_treatment | anoxic_biogas_biodesulfurization
-    bioplastics_microplastics     | biogas_upgrading_biomethanation
-    microalgae                    | single_cell_protein
-    advanced_oxidation_processes  | bioleaching_critical_materials
+Parámetros CLI:
+    --phase PHASE         Nombre de la categoría/fase a procesar (obligatorio)
+    --base DIR            Directorio raíz (defecto: /Volumes/research/categorias)
+    --model MODEL         Modelo Ollama (defecto: qwen3:14b)
+    --timeout N           Timeout por llamada a Ollama en segundos (defecto: 300)
+    --limit N             Procesa solo los primeros N artículos
+    --sleep SEG           Pausa entre artículos en segundos
+    --force               Reprocesa aunque el resumen ya exista
+    --dry-run             Lista artículos a procesar sin llamar a Ollama
 
 Variables de entorno (config/.env):
-    OLLAMA_HOST  → URL del servidor Ollama  (defecto: http://pciq22.uca.es:11434)
-    OLLAMA_MODEL → Modelo por defecto       (defecto: qwen3:14b)
+    OLLAMA_HOST           URL del servidor Ollama (defecto: http://pciq22.uca.es:11434)
+
+Dependencias:
+    ollama, python-dotenv
+
+Notas:
+    - Papers con menos de 100 palabras en el .clean.md se saltan
+      automáticamente (marcados como 'skipped_empty' en el CSV).
+    - qwen3:14b es el modelo recomendado para calidad; gemma3:4b es más
+      rápido pero produce resúmenes menos detallados.
 """
 
 import argparse

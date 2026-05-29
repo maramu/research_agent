@@ -251,13 +251,15 @@ Pendiente. Ejemplo de LaunchAgent o cron:
 Resto de modelos ya eran correctos. Comentario de fecha añadido encima del dict.
 Fuentes: platform.claude.com/docs/en/docs/about-claude/models · developers.openai.com/api/docs/pricing
 
-### 7. README.md global + docstrings
+### ✅ 7. README.md global + docstrings (completo 2026-05-29)
 
 Documentación final del proyecto: README de primer nivel con visión general,
 y docstrings en los scripts numerados que aún no los tienen.
 Incluir: qué es research_agent, qué puede hacer, cómo acceder, qué categorías
 existen, cómo hacer consultas RAG, cómo añadir PDFs, limitaciones, buenas
 prácticas. **Prioritario si se comparte con el grupo.**
+
+Nota: Docstrings completos añadidos a los 12 scripts numerados (0–9 + 3a + 3b): nivel completo con parámetros CLI, ficheros leídos/escritos y dependencias.
 
 ### ✅ 8. Decisión final nomic vs bge-m3 (completado 2026-05-25)
 
@@ -288,10 +290,11 @@ if not re.fullmatch(r'^[a-z0-9_-]+$', name):
 ```
 `re` ya estaba importado. La validación rechaza nombres con espacios, mayúsculas o caracteres especiales antes de crear ningún directorio.
 
-### 13. Validar API keys con llamada real
+### ✅ 13. Validar API keys con llamada real (resuelto 2026-05-29)
 
 `check_anthropic_api()` y `check_openai_api()` solo validan formato.
 Hacer una llamada barata (`list models`) para verificar que la key no está revocada.
+Nota: `check_anthropic_api()` y `check_openai_api()` hacen GET `/v1/models`; devuelven `(False, "Key inválida o revocada (401)")` si la key está revocada, `(False, "Timeout (5s)")` si no hay red.
 
 ### ✅ 13b. Actualizar DEFAULT_MODEL en 5_build_embeddings.py (resuelto 2026-05-28)
 

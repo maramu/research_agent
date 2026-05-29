@@ -1,36 +1,56 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-3_process_corpus.py
+3_process_corpus.py — Paso 3 del pipeline research_agent
 
-Pipeline batch: PDF → TEI (GROBID) → Markdown limpio → chunks JSONL
+Pipeline batch: PDF → TEI XML (GROBID) → Markdown limpio → chunks JSONL.
 
-Uso:
-    python3 3_process_corpus.py --phase bioleaching_critical_materials
-    python3 3_process_corpus.py --phase microalgae --force
-    python3 3_process_corpus.py --phase advanced_oxidation_processes --dry-run
+Posición en el pipeline:
+    categorias/<phase>/pdfs/ → 3_process_corpus.py → tei/ + md_clean/ + chunks/
 
-Fases disponibles:
-    biological_gas_odor_treatment | anoxic_biogas_biodesulfurization
-    bioplastics_microplastics     | biogas_upgrading_biomethanation
-    microalgae                    | single_cell_protein
-    advanced_oxidation_processes  | bioleaching_critical_materials
+Etapas por cada PDF:
+    1. GROBID: convierte el PDF a TEI XML (estructura académica completa)
+    2. Extracción: parsea el TEI para obtener secciones, tablas y captions
+    3. Limpieza: elimina ruido, normaliza espacios, descarta secciones vacías
+    4. Chunking: divide el Markdown en fragmentos de ~1500 chars con solapamiento
 
-Carpeta de PDFs por defecto:  /Volumes/research/categorias/<phase>/pdfs/
-Salidas:
-    /Volumes/research/categorias/<phase>/tei/
-    /Volumes/research/categorias/<phase>/md_clean/
-    /Volumes/research/categorias/<phase>/chunks/
-    /Volumes/research/categorias/<phase>/logs/
+Skip logic:
+    Si el .clean.md y el .jsonl correspondientes ya existen y --force no está
+    activo, el PDF se salta. Permite reanudar ingestas interrumpidas sin
+    reprocesar lo ya completado.
+
+Ficheros leídos:
+    /Volumes/research/categorias/<phase>/pdfs/*.pdf   ← PDFs de entrada
+    config/.env                                        ← GROBID_URL, OLLAMA_HOST
+
+Ficheros escritos:
+    /Volumes/research/categorias/<phase>/
+        tei/<paper_id>.tei.xml          ← TEI bruto de GROBID
+        md_clean/<paper_id>.clean.md    ← Markdown limpio
+        chunks/<paper_id>.jsonl         ← Chunks para embeddings
+        logs/3_process_corpus_report.csv
+
+Parámetros CLI:
+    --phase PHASE         Nombre de la categoría/fase a procesar (obligatorio)
+    --base DIR            Directorio raíz (defecto: /Volumes/research/categorias)
+    --force               Reprocesa aunque los artefactos ya existan
+    --dry-run             Lista PDFs a procesar sin ejecutar nada
+    --limit N             Procesa solo los primeros N PDFs
+    --grobid URL          URL del servidor GROBID
+    --input-dir DIR       Carpeta alternativa de PDFs (sobreescribe la ruta por defecto)
 
 Variables de entorno (config/.env):
-    GROBID_URL  → URL del servidor GROBID  (defecto: http://pciq22.uca.es:8070)
-    OLLAMA_HOST → URL del servidor Ollama  (defecto: http://pciq22.uca.es:11434)
+    GROBID_URL            URL del servidor GROBID (defecto: http://pciq22.uca.es:8070)
+    OLLAMA_HOST           URL del servidor Ollama  (defecto: http://pciq22.uca.es:11434)
 
-Nota: si aparecen errores "[Errno 2] No such file or directory" para PDFs que
-existen en el volumen, normalmente es inestabilidad de red/NAS. Solución:
-copiar los PDFs fallidos a /tmp/<fase>_retry y relanzar apuntando --input-dir-a
-a esa carpeta con el mismo --phase.
+Dependencias:
+    requests, python-dotenv, xml.etree.ElementTree (stdlib)
+
+Notas:
+    - GROBID necesita warm-up tras inactividad; la primera llamada puede ser lenta.
+    - Errores "[Errno 2] No such file" en PDFs que sí existen indican inestabilidad
+      de red/NAS. Solución: copiar los PDFs fallidos a /tmp/<fase>_retry y relanzar
+      con --input-dir apuntando a esa carpeta y el mismo --phase.
 """
 
 import argparse

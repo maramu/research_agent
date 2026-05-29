@@ -1,21 +1,57 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-9_cleanup_duplicates.py
+9_cleanup_duplicates.py — Mantenimiento del pipeline research_agent
 
-Detecta y limpia artículos duplicados por DOI en las categorías procesadas.
+Detecta y elimina artículos duplicados por DOI dentro de cada categoría
+y entre categorías. Usa papers_metadata.jsonl como fuente de verdad.
 
-Lee:
-  /Volumes/research/categorias/<categoria>/metadata/papers_metadata.jsonl
+Criterio de desempate para elegir cuál conservar (en orden de prioridad):
+    1. Nombre limpio Crossref (todo minúsculas, sin DOI embebido en el stem)
+    2. Mayor completeness (campos no vacíos en metadata)
+    3. Stem alfabéticamente menor
+    4. Número de línea en el JSONL
 
-En --preview no modifica nada. En --apply elimina los secundarios y reescribe
-papers_metadata.jsonl con backup previo.
+Modos de operación:
+    --preview   Solo muestra duplicados detectados, sin modificar nada (defecto)
+    --apply     Elimina los secundarios y reescribe papers_metadata.jsonl con backup
 
-Uso:
-  python3 9_cleanup_duplicates.py --preview
-  python3 9_cleanup_duplicates.py --apply
-  python3 9_cleanup_duplicates.py --category microalgae --doi 10.1016/j.x
+Ficheros leídos:
+    /Volumes/research/categorias/<categoria>/metadata/papers_metadata.jsonl
+    /Volumes/research/categorias/                      ← estructura completa de artefactos
+
+Ficheros escritos (solo con --apply):
+    /Volumes/research/categorias/<categoria>/metadata/
+        papers_metadata.jsonl          ← reescrito sin duplicados
+        papers_metadata.jsonl.bak      ← backup del original
+    /Volumes/research/categorias/<categoria>/
+        pdfs/<paper_id>.pdf            ← eliminado (duplicado secundario)
+        tei/<paper_id>.tei.xml         ← eliminado
+        md_clean/<paper_id>.clean.md   ← eliminado
+        chunks/<paper_id>.jsonl        ← eliminado
+        summaries/<paper_id>.summary.md← eliminado
+        metadata/per_paper/<paper_id>* ← eliminado
+    logs/9_cleanup_duplicates.log
+
+Parámetros CLI:
+    --preview             Solo muestra duplicados (sin modificar nada)
+    --apply               Elimina duplicados y reescribe JSONL
+    --category CAT        Procesa solo esta categoría (defecto: todas)
+    --doi DOI             Muestra el grupo de duplicados para un DOI concreto
+    --base DIR            Directorio raíz (defecto: /Volumes/research/categorias)
+
+Dependencias:
+    (solo stdlib)
+
+Notas:
+    - Ejecutar --preview periódicamente, especialmente tras ingestas masivas
+      o renombrados por Crossref.
+    - Tras --apply, el script indica qué categorías necesitan re-indexado FAISS:
+      python3 5_build_embeddings.py --project <cat> --model bge-m3 --force
+    - La detección es solo por DOI idéntico. Duplicados por título similar o
+      mismo autor+año se tratan en el item 19 (detección avanzada, pendiente).
 """
+
 from __future__ import annotations
 
 import argparse

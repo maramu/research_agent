@@ -369,20 +369,53 @@ def check_nas_writable() -> Tuple[bool, str]:
     return ok, ("Escritura OK" if ok else "Sin permisos de escritura")
 
 
-def check_anthropic_api() -> Tuple[bool, str]:
+def check_anthropic_api(timeout: float = 5.0) -> Tuple[bool, str]:
+    """Verifica la API key de Anthropic con una llamada real a /v1/models."""
     if not ANTHROPIC_API_KEY:
         return False, "ANTHROPIC_API_KEY no configurada en config/.env"
     if not ANTHROPIC_API_KEY.startswith("sk-ant-"):
-        return False, "API key con formato inesperado"
-    return True, "Configurada"
+        return False, "Formato inesperado"
+    try:
+        r = requests.get(
+            "https://api.anthropic.com/v1/models",
+            headers={
+                "x-api-key": ANTHROPIC_API_KEY,
+                "anthropic-version": "2023-06-01",
+            },
+            timeout=timeout,
+        )
+        if r.status_code == 200:
+            return True, "OK"
+        if r.status_code == 401:
+            return False, "Key inválida o revocada (401)"
+        return False, f"HTTP {r.status_code}"
+    except requests.exceptions.Timeout:
+        return False, f"Timeout ({timeout}s)"
+    except Exception as e:
+        return False, f"Error: {e}"
 
 
-def check_openai_api() -> Tuple[bool, str]:
+def check_openai_api(timeout: float = 5.0) -> Tuple[bool, str]:
+    """Verifica la API key de OpenAI con una llamada real a /v1/models."""
     if not OPENAI_API_KEY:
         return False, "OPENAI_API_KEY no configurada en config/.env"
     if not OPENAI_API_KEY.startswith("sk-"):
-        return False, "API key con formato inesperado"
-    return True, "Configurada"
+        return False, "Formato inesperado"
+    try:
+        r = requests.get(
+            "https://api.openai.com/v1/models",
+            headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
+            timeout=timeout,
+        )
+        if r.status_code == 200:
+            return True, "OK"
+        if r.status_code == 401:
+            return False, "Key inválida o revocada (401)"
+        return False, f"HTTP {r.status_code}"
+    except requests.exceptions.Timeout:
+        return False, f"Timeout ({timeout}s)"
+    except Exception as e:
+        return False, f"Error: {e}"
 
 
 # ---------------------------------------------------------------------------

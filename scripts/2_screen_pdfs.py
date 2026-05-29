@@ -1,15 +1,54 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-2_screen_pdfs.py
+2_screen_pdfs.py — Paso 2 del pipeline research_agent
 
-Clasifica PDFs científicos con Ollama (gemma3:4b) en categorías temáticas,
-detecta duplicados por DOI y puede mover los archivos a carpetas destino.
+Clasifica PDFs científicos en categorías temáticas usando keywords y Ollama,
+detecta duplicados por DOI contra el registro global, y opcionalmente mueve
+los archivos a sus carpetas de destino.
 
-Uso:
-    python3 2_screen_pdfs.py --folders /ruta/pdfs1 /ruta/pdfs2
-    python3 2_screen_pdfs.py --folders /ruta/pdfs --apply
-    python3 2_screen_pdfs.py --folders /ruta/pdfs --output-csv /tmp/resultado.csv
+Posición en el pipeline:
+    inbox/ → 2_screen_pdfs.py → categorias/<cat>/pdfs/  +  fallidos/
+
+Estrategia de clasificación (en orden, se detiene en el primer acierto):
+    1. Keywords exactas del YAML (rápido, sin LLM)
+    2. Ollama gemma3:4b sobre el abstract extraído del PDF
+    3. Marcado como 'irrelevante' o 'low_confidence' si ninguno funciona
+
+Detección de duplicados:
+    Compara el DOI extraído del PDF contra doi_registry.txt. Si ya existe
+    en alguna categoría del NAS, lo marca como 'duplicate' y lo mueve a
+    /Volumes/research/duplicados/ (con --apply).
+
+Ficheros leídos:
+    <folders>/*.pdf                                     ← PDFs a clasificar
+    config/keywords.yml                                 ← keywords por categoría
+    /Volumes/research/metadatos/doi_registry.txt        ← DOIs ya conocidos en el NAS
+    config/.env                                         ← OLLAMA_HOST
+
+Ficheros escritos:
+    /Volumes/research/categorias/<cat>/pdfs/            ← PDFs clasificados (con --apply)
+    /Volumes/research/fallidos/                         ← PDFs irrelevantes o sin clasificar
+    /Volumes/research/duplicados/                       ← PDFs duplicados (con --apply)
+    <output-csv>                                        ← Tabla de resultados del cribado
+    logs/2_screen_pdfs.log
+
+Parámetros CLI:
+    --folders DIR [DIR…]  Carpetas con los PDFs a cribar
+    --apply               Mueve los PDFs a sus destinos (sin esta flag: solo preview)
+    --output-csv PATH     Ruta del CSV de resultados
+    --from-csv PATH       Aplica movimientos desde un CSV de cribado previo
+    --no-ollama           Usa solo keywords, sin llamar a Ollama
+
+Variables de entorno (config/.env):
+    OLLAMA_HOST           URL del servidor Ollama (defecto: http://pciq22.uca.es:11434)
+
+Dependencias:
+    pymupdf (fitz), ollama, pyyaml, python-dotenv
+
+Nota:
+    El cribado NO es necesario en el flujo Scopus (la query ya define la categoría).
+    Solo se usa en el flujo Inbox (PDFs sueltos sin clasificar).
 """
 from __future__ import annotations
 

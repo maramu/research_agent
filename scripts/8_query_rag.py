@@ -1,25 +1,49 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-8_query_rag.py
+8_query_rag.py — Paso 8 del pipeline research_agent (CLI de consulta RAG)
 
-Consulta el índice FAISS de embeddings usando Ollama nomic-embed-text.
+Realiza búsqueda por similitud vectorial sobre el índice FAISS de un proyecto
+usando Ollama (bge-m3 por defecto) e imprime los chunks más relevantes.
 
-Lee embeddings desde:
-  /Volumes/research/categorias/<project>/embeddings/<phase>/
+Posición en el pipeline:
+    embeddings/<phase>/index.faiss → 8_query_rag.py → resultados en stdout
 
-Uso:
-  python3 8_query_rag.py "PLA PBAT anaerobic digestion methane" \
-    --project bioplastics_microplastics \
-    --phase bioplastics_microplastics \
-    --k 10
+Flujo de consulta:
+    1. Embeddea la query con Ollama (mismo modelo que se usó al indexar)
+    2. Busca los k*5 vecinos más cercanos en FAISS (IndexFlatL2)
+    3. Filtra por --type y/o --paper si se especifican
+    4. Devuelve los top-k resultados con distancia, paper_id, sección y snippet
 
-  python3 8_query_rag.py "bioleaching platinum group metals" \
-    --project bioleaching_critical_materials \
-    --phase all
+Ficheros leídos:
+    /Volumes/research/categorias/<project>/embeddings/<phase>/index.faiss
+    /Volumes/research/categorias/<project>/embeddings/<phase>/metadata.jsonl
+    /Volumes/research/categorias/<project>/embeddings/<phase>/config.json
+    config/.env
+
+Parámetros CLI:
+    query                 Pregunta o consulta en texto libre (obligatorio, posicional)
+    --project PROJECT     Nombre del proyecto/categoría (obligatorio)
+    --base DIR            Directorio raíz (defecto: /Volumes/research/categorias)
+    --phase PHASE         Subcarpeta del índice a consultar, o 'all' (defecto: all)
+    --k N                 Número de resultados a mostrar (defecto: 8)
+    --type TYPE           Filtrar chunks por tipo: text | table
+    --paper PAPER_ID      Filtrar por paper_id (coincidencia parcial)
 
 Variables de entorno (config/.env):
-    OLLAMA_HOST → URL del servidor Ollama (defecto: http://pciq22.uca.es:11434)
+    OLLAMA_HOST           URL del servidor Ollama (defecto: http://pciq22.uca.es:11434)
+
+Dependencias:
+    faiss-cpu, numpy, ollama, python-dotenv
+
+Ejemplo:
+    python3 8_query_rag.py "hydrogen sulfide removal biogas" \\
+        --project anoxic_biogas_biodesulfurization --k 10
+
+Nota:
+    El modelo de embedding se lee de config.json del índice. Si no existe,
+    usa OLLAMA_MODEL_EMBED de utils/constants.py (bge-m3). Asegúrate de que
+    el modelo con el que se consulta coincide con el usado al indexar.
 """
 
 import argparse
