@@ -244,6 +244,8 @@ Pendiente. Ejemplo de LaunchAgent o cron:
 - **Página de logs en vivo**: `tail -f` de `~/Library/Logs/research_agent/*.log` directamente en la web.
 - **Editor doi_manual.xlsx** con `st.data_editor` — actualmente solo visor.
 
+✅ Botón renombrado por DOI en tab Pendientes (2026-05-31) — permite renombrar PDFs copiados directamente a `categorias/<cat>/pdfs/` sin pasar por inbox.
+
 ### ✅ 6. Actualizar precios en app_utils.py (completado 2026-05-27)
 
 `LLM_PRICING` verificado a 2026-05-27. Único cambio:
