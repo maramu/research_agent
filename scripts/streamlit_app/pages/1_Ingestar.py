@@ -482,6 +482,57 @@ with tab_pending:
     else:
         st.info("No hay categorías con PDFs en el NAS.")
 
+    st.divider()
+    st.markdown("##### 📝 Renombrar PDFs por DOI")
+    st.caption(
+        "Ejecuta `1_rename_papers_by_doi.py` sobre los PDFs de las categorías "
+        "seleccionadas. Los PDFs sin DOI quedan sin renombrar y se registran en "
+        "`doi_manual.xlsx`. Haz esto antes de reprocesar si acabas de copiar PDFs "
+        "con nombres sucios."
+    )
+
+    with st.form("rename_pending_form"):
+        selected_rename = st.multiselect(
+            "Categorías a renombrar",
+            options=existing_categories,
+            default=[],
+        )
+        submit_rename = st.form_submit_button("📝 Renombrar PDFs")
+
+    if submit_rename:
+        if not selected_rename:
+            st.warning("Selecciona al menos una categoría.")
+        else:
+            from pipeline import run_step
+
+            rename_errors = []
+            for cat in selected_rename:
+                _folder = str(CATEGORIAS_DIR / cat / "pdfs")
+                res = execute_with_live_output(
+                    lambda on_output, _folder=_folder: run_step(
+                        "1_rename_papers_by_doi.py",
+                        ["--folder", _folder, "--apply"],
+                        on_output=on_output,
+                        label=f"rename [{cat}]",
+                    ),
+                    f"rename [{cat}]",
+                )
+                if res is None or res.get("returncode", 1) != 0:
+                    rename_errors.append(cat)
+
+            if rename_errors:
+                st.warning(
+                    f"Algunas categorías terminaron con errores: {', '.join(rename_errors)}. "
+                    "Revisa el log superior."
+                )
+            else:
+                st.success(
+                    "✓ Renombrado completado. Comprueba `doi_manual.xlsx` para los PDFs sin DOI. "
+                    "Ya puedes pulsar **Reprocesar pendientes**."
+                )
+
+    st.divider()
+
     if not existing_categories:
         st.info("No hay categorías disponibles en el NAS.")
     else:

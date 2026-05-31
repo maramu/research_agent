@@ -613,6 +613,16 @@ def run_inbox_process(
 
     summary: Dict[str, Any] = {"status": overall, "categories": results}
     _log_summary("INBOX", results)
+
+    if overall != "error":
+        _pending_csv = NAS_ROOT / "metadatos" / "cribado_pendiente.csv"
+        try:
+            if _pending_csv.exists():
+                _pending_csv.unlink()
+                log.info("cribado_pendiente.csv eliminado tras procesado exitoso.")
+        except Exception as e:
+            log.warning("No se pudo eliminar cribado_pendiente.csv: %s", e)
+
     return summary
 
 
