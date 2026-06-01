@@ -3,11 +3,12 @@
 6_Mantenimiento.py — Tareas de administración del pipeline.
 
 Secciones:
-  1. Backfill metadata (stable_id)
-  2. Re-indexar FAISS
-  3. Limpieza de duplicados
-  4. Reconstruir doi_registry
-  5. Coherencia PDF / MD
+  1. Categorías activas
+  2. Backfill metadata (stable_id)
+  3. Re-indexar FAISS
+  4. Limpieza de duplicados
+  5. Reconstruir doi_registry
+  6. Coherencia PDF / MD
 """
 
 from __future__ import annotations
@@ -24,9 +25,11 @@ if str(STREAMLIT_APP_DIR) not in sys.path:
     sys.path.insert(0, str(STREAMLIT_APP_DIR))
 
 from app_utils import (
+    CANONICAL_CATEGORIES,
     CATEGORIAS_DIR,
     PIPELINE_AVAILABLE, PIPELINE_IMPORT_ERROR,
     check_nas, list_existing_categories,
+    load_active_categories, save_active_categories,
 )
 
 st.set_page_config(page_title="Mantenimiento", page_icon="🔧", layout="wide")
@@ -74,7 +77,33 @@ def execute_script_live(script: str, args: list[str], label: str) -> dict | None
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# SECCIÓN 1 — Backfill metadata (stable_id)
+# SECCIÓN 1 — Categorías activas
+# ═══════════════════════════════════════════════════════════════════════════
+
+with st.expander("⚙️ Categorías activas", expanded=True):
+    active_now = load_active_categories()
+    selected_active = st.multiselect(
+        "Categorías activas",
+        options=CANONICAL_CATEGORIES,
+        default=[c for c in active_now if c in CANONICAL_CATEGORIES],
+        key="active_categories_select",
+    )
+    st.caption(
+        "Las categorías inactivas aparecen en gris en la portada "
+        "y se excluyen de Scopus, RAG y Pendientes."
+    )
+    if not selected_active:
+        st.warning("Selecciona al menos una categoría.")
+    if st.button("💾 Guardar configuración", key="btn_save_active_cats"):
+        if selected_active:
+            save_active_categories(selected_active)
+            st.success(f"✓ Configuración guardada — {len(selected_active)} categorías activas.")
+        else:
+            st.warning("Selecciona al menos una categoría.")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# SECCIÓN 2 — Backfill metadata (stable_id)
 # ═══════════════════════════════════════════════════════════════════════════
 
 with st.expander("🗂️ Backfill metadata (stable_id)", expanded=False):
@@ -132,7 +161,7 @@ with st.expander("🗂️ Backfill metadata (stable_id)", expanded=False):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# SECCIÓN 2 — Re-indexar FAISS
+# SECCIÓN 3 — Re-indexar FAISS
 # ═══════════════════════════════════════════════════════════════════════════
 
 with st.expander("🔄 Re-indexar FAISS", expanded=False):
@@ -172,7 +201,7 @@ with st.expander("🔄 Re-indexar FAISS", expanded=False):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# SECCIÓN 3 — Limpieza de duplicados
+# SECCIÓN 4 — Limpieza de duplicados
 # ═══════════════════════════════════════════════════════════════════════════
 
 with st.expander("🗑️ Limpieza de duplicados", expanded=False):
@@ -244,7 +273,7 @@ def _get_pdf_md_mismatches(cat: str) -> dict:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# SECCIÓN 4 — Reconstruir doi_registry
+# SECCIÓN 5 — Reconstruir doi_registry
 # ═══════════════════════════════════════════════════════════════════════════
 
 with st.expander("📋 Reconstruir doi_registry", expanded=False):
@@ -264,7 +293,7 @@ with st.expander("📋 Reconstruir doi_registry", expanded=False):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# SECCIÓN 5 — Coherencia PDF / MD
+# SECCIÓN 6 — Coherencia PDF / MD
 # ═══════════════════════════════════════════════════════════════════════════
 
 with st.expander("🔗 Coherencia PDF / MD", expanded=False):

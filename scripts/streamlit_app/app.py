@@ -23,6 +23,7 @@ from app_utils import (
     check_grobid, check_nas, check_nas_space, check_nas_writable,
     check_ollama, check_ollama_model,
     get_category_quality, get_category_stats, human_status_icon, list_existing_categories,
+    load_active_categories,
 )
 
 st.set_page_config(
@@ -159,8 +160,17 @@ else:
         })
 
     df = pd.DataFrame(rows)
+
+    _active_cats = set(load_active_categories())
+
+    def _style_inactive(row):
+        cat = str(row.get("Categoría", "")).replace(" (ad-hoc)", "")
+        if cat not in _active_cats:
+            return ["color: lightgray"] * len(row)
+        return [""] * len(row)
+
     st.dataframe(
-        df,
+        df.style.apply(_style_inactive, axis=1),
         hide_index=True,
         use_container_width=True,
         column_config={

@@ -602,3 +602,41 @@ def fmt_cost(usd: float) -> str:
     if usd < 1:
         return f"${usd:.4f}"
     return f"${usd:.2f}"
+
+
+def get_corpus_manifest(category: str) -> Dict[str, Any]:
+    """Lee el corpus_manifest.json de la categoría; devuelve {} si no existe o falla."""
+    try:
+        from utils.corpus_manifest import read_manifest
+        return read_manifest(category, CATEGORIAS_DIR)
+    except Exception:
+        return {}
+
+
+# ---------------------------------------------------------------------------
+# Categorías activas
+# ---------------------------------------------------------------------------
+
+ACTIVE_CATEGORIES_FILE = CONFIG_DIR / "active_categories.yml"
+
+
+def load_active_categories() -> List[str]:
+    """Devuelve la lista de categorías activas; CANONICAL_CATEGORIES como fallback."""
+    try:
+        data = load_yaml(ACTIVE_CATEGORIES_FILE)
+        active = data.get("active")
+        if isinstance(active, list) and active:
+            return active
+    except Exception:
+        pass
+    return list(CANONICAL_CATEGORIES)
+
+
+def save_active_categories(active: List[str]) -> None:
+    """Escribe active_categories.yml con backup previo."""
+    save_yaml(ACTIVE_CATEGORIES_FILE, {"active": active})
+
+
+def is_category_active(category: str) -> bool:
+    """True si la categoría está en la lista de activas."""
+    return category in load_active_categories()

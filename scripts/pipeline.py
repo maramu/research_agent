@@ -454,6 +454,18 @@ def run_scopus(
                 if cat != "ALL":
                     target_cats.append(cat)
 
+    # --- Filtro de categorías activas ---
+    try:
+        from utils.constants import CANONICAL_CATEGORIES as _ALL_CATS
+        _config_path = Path(__file__).parent.parent / "config" / "active_categories.yml"
+        if _config_path.exists():
+            import yaml as _yaml
+            _active = _yaml.safe_load(_config_path.read_text(encoding="utf-8")).get("active", _ALL_CATS)
+            target_cats = [c for c in target_cats if c in _active]
+            log.info("Categorías activas tras filtro: %s", target_cats)
+    except Exception as e:
+        log.warning("No se pudo leer active_categories.yml: %s", e)
+
     # --- Paso 2 y 3: descargar + procesar por categoría ---
     for cat in target_cats:
         log.info("═" * 50)

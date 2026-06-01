@@ -55,6 +55,7 @@ Notas:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import logging
 import re
@@ -562,6 +563,145 @@ def apply_cleanup(decisions: list[DuplicateDecision], base: Path) -> list[Path]:
     return deleted_files
 
 
+# ============================================================
+# DETECCIÓN AVANZADA DE DUPLICADOS
+# ============================================================
+
+def normalize_title(title: str) -> str:
+    if title is None:
+        return ""
+    text = str(title).lower()
+    text = re.sub(r'[^\w\s]', '', text)
+    return re.sub(r'\s+', ' ', text).strip()
+
+
+def pdf_sha256(pdf_path: Path) -> Optional[str]:
+    try:
+        return hashlib.sha256(pdf_path.read_bytes()).hexdigest()
+    except Exception:
+        return None
+
+
+def detect_title_duplicates(cats: list[str], base: Path) -> list[dict]:
+    groups: dict[str, list[dict]] = defaultdict(list)
+    for category in cats:
+        meta_path = base / category / "metadata" / "papers_metadata.jsonl"
+        if not meta_path.exists():
+            continue
+        try:
+            with meta_path.open(encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        data = json.loads(line)
+                    except Exception:
+                        continue
+                    title = data.get("title") or ""
+                    norm = normalize_title(title)
+                    if len(norm) < 10:
+                        continue
+                    stem, _ = infer_stem(data)
+                    groups[norm].append({
+                        "category": category,
+                        "paper_id": stem or "",
+                        "doi":      normalize_doi(data.get("doi") or ""),
+                        "title":    title,
+                        "year":     data.get("year"),
+                    })
+        except Exception:
+            continue
+    return [
+        {"match_type": "title", "norm_title": norm, "papers": papers}
+        for norm, papers in sorted(groups.items())
+        if len(papers) >= 2
+    ]
+
+
+def detect_hash_duplicates(cats: list[str], base: Path) -> list[dict]:
+    groups: dict[str, list[dict]] = defaultdict(list)
+    for category in cats:
+        pdfs_dir = base / category / "pdfs"
+        if not pdfs_dir.exists():
+            continue
+        for pdf in sorted(pdfs_dir.iterdir()):
+            if not pdf.is_file() or pdf.suffix.lower() != ".pdf":
+                continue
+            sha = pdf_sha256(pdf)
+            if sha is None:
+                continue
+            groups[sha].append({
+                "category": category,
+                "paper_id": pdf.stem,
+                "pdf_path": str(pdf),
+            })
+    return [
+        {"match_type": "hash", "sha256": sha, "papers": papers}
+        for sha, papers in sorted(groups.items())
+        if len(papers) >= 2
+    ]
+
+
+def write_duplicate_report(
+    decisions_doi: list[DuplicateDecision],
+    title_dups: list[dict],
+    hash_dups: list[dict],
+    out_path: Path,
+) -> Optional[Path]:
+    try:
+        import openpyxl
+    except ImportError:
+        print("⚠ openpyxl no instalado — no se genera el informe Excel (pip install openpyxl)")
+        return None
+
+    wb = openpyxl.Workbook()
+
+    ws_doi = wb.active
+    ws_doi.title = "DOI"
+    ws_doi.append(["doi", "category_keep", "stem_keep", "category_remove", "stem_remove", "reason", "type"])
+    for dec in decisions_doi:
+        ws_doi.append([
+            dec.doi,
+            dec.keep.category,
+            dec.keep.stem,
+            dec.remove.category,
+            dec.remove.stem,
+            dec.reason,
+            dec.duplicate_type,
+        ])
+
+    ws_title = wb.create_sheet("Titulo")
+    ws_title.append(["norm_title", "category", "paper_id", "doi", "title", "year", "recommended_action"])
+    for group in title_dups:
+        for paper in group["papers"]:
+            ws_title.append([
+                group["norm_title"],
+                paper["category"],
+                paper["paper_id"],
+                paper["doi"],
+                paper["title"],
+                paper["year"],
+                "revisar_manual",
+            ])
+
+    ws_hash = wb.create_sheet("Hash")
+    ws_hash.append(["sha256", "category", "paper_id", "pdf_path", "recommended_action"])
+    for group in hash_dups:
+        for paper in group["papers"]:
+            ws_hash.append([
+                group["sha256"],
+                paper["category"],
+                paper["paper_id"],
+                paper["pdf_path"],
+                "revisar_manual",
+            ])
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    wb.save(str(out_path))
+    return out_path
+
+
 def parse_args() -> argparse.Namespace:
     ap = argparse.ArgumentParser(description="Detecta y limpia duplicados por DOI ya procesados")
     mode = ap.add_mutually_exclusive_group()
@@ -604,6 +744,19 @@ def main() -> int:
 
     print_decision_details(decisions)
     summarize(decisions)
+
+    title_dups = detect_title_duplicates(cats, base)
+    hash_dups  = detect_hash_duplicates(cats, base)
+    print(f"Duplicados por título: {len(title_dups)}")
+    print(f"Duplicados por hash PDF: {len(hash_dups)}")
+    if title_dups or hash_dups:
+        print("Ver informe Excel para revisión manual.")
+    report_path = write_duplicate_report(
+        decisions, title_dups, hash_dups,
+        base.parent / "metadatos" / "duplicate_report.xlsx",
+    )
+    if report_path:
+        print(report_path)
 
     if not apply_mode:
         print("")
