@@ -370,13 +370,17 @@ suplementario, duplicado dudoso.
 
 Desde Streamlit: aceptar / rechazar / mover a categoría / borrar.
 
-### 19. Detección avanzada de duplicados — MEDIA prioridad
+### ✅ 19. Detección avanzada de duplicados (completado 2026-06-01)
 
-Ampliar `9_cleanup_duplicates.py` con criterios adicionales:
-mismo título normalizado, mismo primer autor + año + título similar, mismo hash PDF.
+`9_cleanup_duplicates.py` ampliado con dos nuevos detectores (sin tocar la lógica DOI existente):
 
-Generar informe `/Volumes/research/metadatos/duplicate_report.xlsx` con columnas:
-`paper_id_1`, `paper_id_2`, `category_1`, `category_2`, `match_type`, `confidence`, `recommended_action`.
+- `normalize_title(title)` — lowercase, strip puntuación, colapsa espacios.
+- `pdf_sha256(pdf_path)` — hash SHA-256 del binario PDF.
+- `detect_title_duplicates(cats, base)` — agrupa por título normalizado (≥10 chars), devuelve grupos con ≥2 papers.
+- `detect_hash_duplicates(cats, base)` — agrupa PDFs por hash SHA-256, devuelve grupos con ≥2 ficheros.
+- `write_duplicate_report(decisions_doi, title_dups, hash_dups, out_path)` — genera `metadatos/duplicate_report.xlsx` con tres hojas: **DOI** (decisiones automáticas), **Titulo** y **Hash** (revisión manual). `openpyxl` con `try/except ImportError`.
+
+En `main()`: los dos detectores se ejecutan siempre (preview y apply), se imprime resumen y se genera el Excel.
 
 ### ✅ 20. Log completo de consultas RAG (completado 2026-05-28)
 
@@ -438,12 +442,29 @@ Paquetes exportables por tema:
 
 Facilita trabajo de grupo y dirección de alumnos.
 
-### 25. corpus_manifest.json — MEDIA prioridad
+### ✅ 25. corpus_manifest.json (completado 2026-06-01)
 
-Manifiesto por categoría con: nº PDFs, nº chunks, modelo de embedding,
-modelo de resumen, URL GROBID, hash de keywords, commit git, mtime del índice FAISS.
+`scripts/utils/corpus_manifest.py` — nuevo módulo con:
+- `build_manifest(category, base)` — dict con 11 campos: `category`, `generated_at`, `n_pdfs`, `n_md_clean`, `n_chunks` (líneas totales en todos los JSONL), `n_papers_metadata`, `avg_quality_score`, `faiss_indexes` (lista por subcarpeta con phase/model/chunks/dimension/mtime), `keywords_hash` (SHA1-8 del bloque YAML de la categoría), `git_commit`, `faiss_stale` (bool: algún PDF más nuevo que el índice más reciente).
+- `write_manifest(category, base)` → escribe `categorias/<cat>/corpus_manifest.json`, devuelve ruta.
+- `read_manifest(category, base)` → lee JSON o devuelve `{}`.
+- CLI: `python3 corpus_manifest.py --project <cat> [--base DIR]`.
 
-Útil para reproducibilidad y para detectar cuándo un índice está desactualizado.
+`app_utils.get_corpus_manifest(category)` — wrapper con `try/except` para uso desde Streamlit.
+
+### ✅ Selector de categorías activas (completado 2026-06-01)
+
+`config/active_categories.yml` — nuevo fichero YAML con lista `active:` de categorías habilitadas. Las categorías inactivas no se incluyen en búsquedas Scopus, RAG ni Pendientes.
+
+`app_utils.py` — tres nuevas funciones: `load_active_categories()` (lee el YAML, fallback a `CANONICAL_CATEGORIES`), `save_active_categories(active)` (escribe con backup `.bak` via `save_yaml()`), `is_category_active(category)`. Constante `ACTIVE_CATEGORIES_FILE`.
+
+`6_Mantenimiento.py` — nueva **Sección 1 — Categorías activas** (expander expandido por defecto): `st.multiselect` sobre `CANONICAL_CATEGORIES`, caption explicativo, botón guardar con aviso si selección vacía. Secciones anteriores renumeradas 2–6.
+
+`app.py` — filas de categorías inactivas en gris con `df.style.apply(_style_inactive, axis=1)`.
+
+`pipeline.run_scopus()` — filtra `target_cats` contra la lista activa antes del bucle de descarga/procesado. Bloque `try/except` silencioso si el YAML no existe.
+
+---
 
 ### ✅ 26. Health checks extendidos (completado 2026-05-27)
 

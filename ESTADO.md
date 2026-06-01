@@ -59,7 +59,8 @@ research_agent/
 ├── config/
 │   ├── .env                          ← claves API, hosts
 │   ├── keywords.yml                  ← palabras clave para cribado (8 categorías)
-│   └── scopus_queries.yml            ← queries Scopus por categoría
+│   ├── scopus_queries.yml            ← queries Scopus por categoría
+│   └── active_categories.yml         ← lista de categorías activas (excluye inactivas de Scopus/RAG)
 ├── scripts/
 │   ├── pipeline.py                   ← orquestador (módulo importable)
 │   ├── run_pipeline.py               ← CLI del orquestador (scopus/inbox/adhoc)
@@ -76,7 +77,8 @@ research_agent/
 │   ├── 8_query_rag.py
 │   ├── utils/
 │   │   ├── pdf_utils.py
-│   │   └── constants.py              ← Constantes compartidas (OLLAMA_MODEL_EMBED, CANONICAL_CATEGORIES)
+│   │   ├── constants.py              ← Constantes compartidas (OLLAMA_MODEL_EMBED, CANONICAL_CATEGORIES)
+│   │   └── corpus_manifest.py        ← Genera/lee corpus_manifest.json por categoría
 │   └── streamlit_app/                ← Interfaz web (Streamlit)
 │       ├── app.py                    ← portada: health checks + tabla categorías
 │       ├── app_utils.py              ← helpers compartidos (renombrado para no
@@ -110,7 +112,8 @@ research_agent/
 | `6_make_packages.py` | Crea paquetes NotebookLM (FULLTEXT, REFERENCES, INDEX) | ✅ |
 | `7_make_master_index.py` | Genera MASTER_INDEX.md por categoría | ✅ |
 | `8_query_rag.py` | Consultas RAG sobre índice FAISS (CLI) | ✅ |
-| `9_cleanup_duplicates.py` | Detecta y elimina PDFs duplicados por DOI | ✅ |
+| `9_cleanup_duplicates.py` | Detecta y elimina PDFs duplicados por DOI. Detección avanzada por título normalizado y hash SHA-256 con informe `metadatos/duplicate_report.xlsx` (3 hojas: DOI/Titulo/Hash) | ✅ |
+| `utils/corpus_manifest.py` | Genera `corpus_manifest.json` por categoría: n_pdfs, n_chunks, quality_score, faiss_indexes, faiss_stale, keywords_hash, git_commit. CLI + API pública `read_manifest()` | ✅ |
 | `pipeline.py` | Orquestador: cinco flujos (`run_scopus`, `run_inbox`, `run_adhoc`, `integrate_adhoc`, `promote_adhoc_to_category`). Helpers: `_copy_files_skip_existing()`. `_CANONICAL_CATEGORIES` importado de `utils/constants.py` (fallback inline si `ImportError`). Importable por Streamlit | ✅ |
 | `run_pipeline.py` | CLI del orquestador con subcomandos | ✅ |
 | `streamlit_app/` | Interfaz web sobre el pipeline (ver sección dedicada) | ✅ |
@@ -177,13 +180,13 @@ herramientas adicionales (RAG, editores de configuración, visor de DOIs).
 
 | Página | Función |
 |---|---|
-| `app.py` (portada) | Health checks en 2 filas: NAS / Ollama (+ latencia) / GROBID (+ latencia) + espacio libre NAS / bge-m3 disponible / permisos escritura NAS. Tabla de categorías con conteos (PDFs, pendientes, MD, resúmenes, chunks, metadata, FAISS, paquetes). |
+| `app.py` (portada) | Health checks en 2 filas: NAS / Ollama (+ latencia) / GROBID (+ latencia) + espacio libre NAS / bge-m3 disponible / permisos escritura NAS. Tabla de categorías con conteos (PDFs, pendientes, MD, resúmenes, chunks, metadata, FAISS, paquetes). Filas de categorías inactivas en gris (`df.style.apply`). |
 | `1_Ingestar` | 4 tabs: **Scopus** / **Inbox** / **Pendientes** / **Ad-hoc**. Progreso en directo vía `on_output`. Pendientes: tabla de brechas por categoría con reprocesado selectivo. Ad-hoc: formulario + sección **🔗 Integrar ad-hoc en categoría** (selectbox origen/destino, checkbox borrar fuente, llama a `integrate_adhoc()`). Auto-recuperación de estado Inbox al inicio: si `cribado_pendiente.csv` existe en disco (p.ej. tras reinicio launchd), restaura `session_state` y muestra toast. Tab Pendientes: botón 📝 Renombrar PDFs por DOI por categoría (ejecuta `1_rename_papers_by_doi.py --folder categorias/<cat>/pdfs --apply`; PDFs sin DOI se registran en `doi_manual.xlsx`). Usar antes de Reprocesar cuando se copian PDFs con nombres sucios directamente a `pdfs/`. |
 | `2_RAG` | Búsqueda FAISS sobre cualquier proyecto+fase. Filtros por tipo y paper_id. Selector de provider (Ollama / Anthropic / OpenAI) y modelo. Toggle síntesis LLM con streaming. Pre-estimación de coste pre-query. Coste real post-query. Contador acumulado mensual en sidebar. Log completo de consultas en `metadatos/rag_queries/rag_queries_YYYY-MM.jsonl` (10 campos: pregunta, papers recuperados, respuesta, costes). Botón "💾 Guardar como nota" → `notas_rag/<proyecto>/YYYY-MM-DD_<proyecto>_<slug>.md`. Patrón flag+`st.rerun()` para persistencia entre reruns de Streamlit. Expander "📦 Exportar papers recuperados": ZIP en memoria con PDFs y/o md_clean de los papers recuperados (fallback año+autor para PDFs renombrados por Crossref). Botón guardar nota movido al bloque de síntesis (fix rerun). |
 | `3_Keywords` | Editor por textarea de `config/keywords.yml` (una keyword por línea, backup .bak automático) |
 | `4_Scopus_queries` | Editor por categoría de `config/scopus_queries.yml` (multilínea, añadir/duplicar/borrar queries) |
 | `5_DOI_manual` | Visor con filtros de `doi_manual.xlsx`, descarga CSV de vista filtrada |
-| `6_Mantenimiento` | 5 secciones expandibles: **Backfill metadata** (detecta papers sin `stable_id`, re-ejecuta `4_extract_metadata.py` por categoría) / **Re-indexar FAISS** (multiselect categorías, todas por defecto, `--force bge-m3`) / **Limpieza de duplicados** (preview → apply condicional, con aviso de re-indexado) / **Reconstruir doi_registry** (llama a `build_doi_registry_from_nas()` directamente) / **Coherencia PDF/MD** (detecta huérfanos, comparación normalizada, corrección automática con reprocesado). Probada en producción 2026-05-27. |
+| `6_Mantenimiento` | 6 secciones expandibles: **Categorías activas** (multiselect sobre CANONICAL_CATEGORIES, guarda `active_categories.yml`) / **Backfill metadata** (detecta papers sin `stable_id`, re-ejecuta `4_extract_metadata.py` por categoría) / **Re-indexar FAISS** (multiselect categorías, todas por defecto, `--force bge-m3`) / **Limpieza de duplicados** (preview → apply condicional, con aviso de re-indexado) / **Reconstruir doi_registry** (llama a `build_doi_registry_from_nas()` directamente) / **Coherencia PDF/MD** (detecta huérfanos, comparación normalizada, corrección automática con reprocesado). |
 | `7_Revision` | Revisión bibliográfica con 5 prompts especializados (estado del arte, tabla de artículos clave, lagunas, comparativa, introducción). RAG sobre categoría+fase, streaming en 3 providers. Descarga Markdown + guardar en NAS (`notas_rag/`). Patrón flag+`st.rerun()`. Expander "📦 Exportar papers usados": ZIP (PDF+MD) + BibTeX generado desde `papers_metadata.jsonl`. Fragmentos usados en expander colapsado. |
 | `8_Exportar` | Exporta bibliografía de una categoría a BibTeX / RIS / CSV. Filtros: rango de años, solo-DOI, quality score mínimo. Vista previa de papers seleccionados + 3 botones de descarga. |
 
@@ -312,6 +315,8 @@ Editor visual disponible en la página **📚 Scopus_queries** de la web.
 - `integrate_adhoc(adhoc, target, delete_source)` en `pipeline.py`: copia pdfs/, md_clean/, summaries/, chunks/, metadata/ de un proyecto ad-hoc a una categoría canónica existente y re-indexa FAISS del destino. Los ficheros ya existentes se saltan.
 - `promote_adhoc_to_category(adhoc, new_name, keywords, delete_source)` en `pipeline.py`: crea una nueva categoría canónica desde un ad-hoc copiando también embeddings/ y registrando keywords en `config/keywords.yml`. Valida nombre (`^[a-z0-9_]+$`) y que la categoría no exista previamente.
 - `quality_score` (0–1) y `warnings` añadidos a cada registro de `papers_metadata.jsonl` por `4_extract_metadata.py`. 7 criterios: título, DOI, abstract, año, autores, refs<5, md_clean corto. Papers procesados antes del item 17 no tienen el campo — rellenar con **Mantenimiento → Backfill metadata**. Panel "📊 Calidad del corpus" en portada Streamlit (expander, solo categorías con metadata existente).
+- `active_categories.yml` en `config/`: lista YAML `active:` con las categorías habilitadas. Editado desde la web (Mantenimiento → Sección 1). Las inactivas se muestran en gris en portada y se excluyen de `run_scopus()`. Fallback a `CANONICAL_CATEGORIES` si el fichero no existe o está vacío.
+- `corpus_manifest.json` en `categorias/<cat>/`: generado con `utils/corpus_manifest.py`; contiene métricas de estado del corpus (n_pdfs, n_chunks, quality_score, faiss_indexes, faiss_stale, keywords_hash, git_commit). Actualizar tras ingestas o re-indexados. `app_utils.get_corpus_manifest()` lo lee para la portada.
 - `1_rename_papers_by_doi.py` genera nombres con solo guiones bajos desde 2026-05-28 (fix guiones/espacios en `shorten_title` y `sanitize_filename`). PDFs renombrados antes pueden tener guiones en el stem — usar **Mantenimiento → Coherencia PDF/MD** para detectar y corregir los artefactos con nombre viejo.
 - ZIP export en RAG (`2_RAG.py`) y Revisión (`7_Revision.py`) usa `build_papers_zip` con fallback: paper_id exacto → stable_id desde `papers_metadata.jsonl` → glob por prefijo. Resuelve PDFs cuyo paper_id (nombre viejo) ya no coincide con el stem del PDF renombrado por Crossref.
 
