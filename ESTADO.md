@@ -4,15 +4,15 @@
 
 | Componente | Detalle |
 |---|---|
-| Mac mini M4 Pro (casa) | 32GB RAM, modo servidor 24/7, ejecuta scripts y Streamlit |
-| NAS (casa) | `/Volumes/research/` — almacenamiento (PDFs, MDs, chunks, embeddings) |
-| Mac mini Pro (UCA) | `pciq22.uca.es` — host de Ollama + GROBID |
-| Scripts | `/Volumes/Disco/proyectos/research_agent/scripts/` |
+| Mac mini M4 Pro (casa) | edición de código, acceso remoto — ya no ejecuta Streamlit ni pipeline |
+| NAS (casa) | backup — /Volumes/research_bk |
+| Mac mini Pro (UCA) (pciq22.uca.es) | máquina principal — scripts, Streamlit, datos, Ollama, GROBID |
+| Scripts | `/Users/martinramirez/proyectos/research_agent/scripts/` |
 | Config | `/Volumes/Disco/proyectos/research_agent/config/` |
-| Venv | `~/venvs/rag_papers` (Python 3.13) |
-| GROBID | Docker, `http://pciq22.uca.es:8070` |
+| Venv | `~/venvs/rag_papers` (Python 3.13 via Homebrew /opt/homebrew/bin/python3.13) |
+| GROBID | Docker (ARM64 nativo), imagen `grobid/grobid:0.9.0-crf`, compose en `~/grobid-compose.yml` |
 | Ollama | `http://pciq22.uca.es:11434` |
-| Streamlit | `http://<ip-mac-mini>:8501` — servicio launchd 24/7 |
+| Streamlit | `http://<ip-pciq22>:8501` — servicio launchd 24/7 en pciq22 |
 | GitHub | `https://github.com/maramu/research_agent` |
 
 ## Modelos Ollama disponibles
@@ -215,7 +215,8 @@ Consumo idle ≈ 5-10W.
 | Plist en repo | `deployment/com.research_agent.streamlit.plist` |
 | Instalado en | `~/Library/LaunchAgents/com.research_agent.streamlit.plist` |
 | Etiqueta | `com.research_agent.streamlit` |
-| Comando | `python3.13 -m streamlit run app.py …` (NO el shim `streamlit`) |
+| Comando | `/Users/martinramirez/venvs/rag_papers/bin/python3 -m streamlit run app.py` |
+| WorkingDirectory | `/Users/martinramirez/proyectos/research_agent/scripts/streamlit_app` |
 | Logs | `~/Library/Logs/research_agent/streamlit.{log,err.log}` |
 | KeepAlive | true (reinicia automáticamente si se cae) |
 | RunAtLoad | true (arranca al login) |
@@ -236,9 +237,9 @@ launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.research_agent.strea
 
 ### Acceso
 
-- Mac mini (local): `http://localhost:8501`
-- LAN (en casa): `http://192.168.0.17:8501`
-- Fuera (con VPN casa activa): `http://192.168.0.17:8501`
+- Red UCA (local): `http://10.142.6.107:8501`
+- Fuera (con VPN UCA activa): `http://10.142.6.107:8501`
+- Mac mini de casa: acceso solo para edición de código vía git
 - **NO** expuesto a internet (URL pública del router NO funciona — y bien que está)
 
 ## Configuración (config/.env)
@@ -341,3 +342,6 @@ UCA) porque:
   leer/escribir ficheros del NAS)
 - Ollama/GROBID son llamadas HTTP cortas, perfectamente tolerables sobre VPN UCA
 - Es la única máquina con acceso simultáneo y cómodo a ambos recursos
+- GROBID corre en Docker ARM64 nativo (`grobid/grobid:0.9.0-crf`) en pciq22. Compose en `~/grobid-compose.yml`. Docker Desktop configurado para arrancar al login.
+- Mac mini de casa ya no ejecuta Streamlit ni pipeline. Servicio launchd eliminado. Modo hibernación restaurado (pmset). Repo conservado en `/Volumes/Disco/proyectos/research_agent/` para edición.
+- Datos migrados del NAS Synology (casa) al SSD Crucial X9 4TB montado en `/Volumes/research/` en pciq22. NAS pasa a backup.

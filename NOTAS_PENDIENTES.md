@@ -4,6 +4,20 @@
 
 ## Verificaciones completadas
 
+### ✅ Migración a pciq22 + SSD Crucial X9 4TB (2026-06-03)
+
+Pipeline completo migrado del Mac mini de casa a `pciq22.uca.es`:
+- SSD Crucial X9 4TB formateado APFS, montado en `/Volumes/research/` — reemplaza NAS como almacenamiento principal
+- Repo clonado en `/Users/martinramirez/proyectos/research_agent/`
+- Venv rehecho con Python 3.13 (Homebrew)
+- Streamlit como servicio launchd (plist en `deployment/`)
+- GROBID migrado a imagen ARM64 nativa `grobid/grobid:0.9.0-crf` (antes `lfoppiano/grobid:0.8.1` amd64 con emulación)
+- Todos los health checks verdes: NAS, Ollama, GROBID, bge-m3, escritura, 3999 GB libres
+- Mac mini de casa: launchd eliminado, hibernación restaurada, repo conservado para edición
+- NAS Synology casa: renombrado a `research_bk`, rol de backup
+
+---
+
 ### ✅ Coherencia PDF/MD + fix nombres Crossref (2026-05-28)
 
 `1_rename_papers_by_doi.py` — dos fixes en generación de nombres:
