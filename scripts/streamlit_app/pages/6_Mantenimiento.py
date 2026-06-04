@@ -250,7 +250,7 @@ def _get_pdf_md_mismatches(cat: str) -> dict:
       missing_mds: stems de PDF sin md_clean con el mismo nombre
     """
     def _norm(s: str) -> str:
-        return re.sub(r"[\s\-]+", "_", s).lower()
+        return re.sub(r"[\s\.\-]+", "_", s).lower()
 
     cat_dir  = CATEGORIAS_DIR / cat
     pdfs_dir = cat_dir / "pdfs"
