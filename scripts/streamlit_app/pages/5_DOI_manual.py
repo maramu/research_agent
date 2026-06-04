@@ -121,6 +121,21 @@ with st.expander("🔍 Filtros", expanded=True):
             default=[],
             key="doi_status_filter",
         )
+    fcols2 = st.columns(2)
+    with fcols2[0]:
+        only_no_doi = st.checkbox(
+            "Solo sin DOI",
+            value=False,
+            key="doi_only_no_doi",
+            help="Muestra solo las filas con la columna DOI vacía o sin asignar",
+        )
+    with fcols2[1]:
+        fecha_desde = st.date_input(
+            "Fecha desde",
+            value=None,
+            key="doi_fecha_desde",
+            help="Filtra registros creados a partir de esta fecha (columna de creación)",
+        )
 
 # Construir máscara de filtro
 mask = pd.Series(True, index=df_full.index)
@@ -134,6 +149,29 @@ if free_text:
     for col in df_full.select_dtypes(include=["object", "string"]).columns:
         text_mask |= df_full[col].astype(str).str.lower().str.contains(needle, na=False)
     mask &= text_mask
+
+# Filtro: solo sin DOI
+_doi_col = next((c for c in df_full.columns if c.lower() == "doi"), None)
+if only_no_doi and _doi_col:
+    mask &= df_full[_doi_col].isna() | (df_full[_doi_col].astype(str).str.strip() == "")
+
+# Filtro: fecha desde
+_DATE_COL_CANDIDATES = {"fecha", "fecha_creacion", "fecha_registro", "created_at", "date"}
+_date_col = next(
+    (c for c in df_full.columns if c.lower() in _DATE_COL_CANDIDATES),
+    None,
+)
+if _date_col is None:
+    _date_col = next(
+        (c for c in df_full.columns if pd.api.types.is_datetime64_any_dtype(df_full[c])),
+        None,
+    )
+if fecha_desde and _date_col:
+    try:
+        _col_dates = pd.to_datetime(df_full[_date_col], errors="coerce")
+        mask &= _col_dates >= pd.Timestamp(fecha_desde)
+    except Exception:
+        pass
 
 df_view = df_full.loc[mask].copy()
 st.markdown(f"**Resultado**: {len(df_view)} filas")

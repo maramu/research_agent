@@ -11,17 +11,27 @@ Posición en el pipeline:
 
 Estructura del índice de salida:
     embeddings/<phase>[__<modelo>]/
-        index.faiss      ← índice FAISS (IndexFlatL2, dim=1024 para bge-m3)
-        metadata.jsonl   ← metadatos de cada chunk (paper_id, section, type, text…)
-        config.json      ← project, phase, model, chunks, dimension
+        index.faiss          ← índice FAISS (IndexFlatL2, dim=1024 para bge-m3)
+        metadata.jsonl       ← metadatos de cada chunk (paper_id, section, type, text…)
+        config.json          ← project, phase, model, chunks, dimension
+        indexed_papers.json  ← paper_ids ya indexados + modelo usado (para modo incremental)
 
 Nomenclatura de la carpeta de salida:
     - Modelo por defecto (bge-m3): embeddings/<phase>/
     - Modelo alternativo:          embeddings/<phase>__<modelo_sanitizado>/
     Esto permite coexistir varios índices con distintos modelos.
 
-Skip logic:
-    Si index.faiss ya existe y --force no está activo, el script sale sin hacer nada.
+Modos de ejecución:
+    Sin --force (defecto — incremental):
+        - Si no existe índice → crea desde cero (mismo comportamiento que antes).
+        - Si existe índice y hay papers nuevos → carga el índice, embeddea solo los
+          chunks de papers nuevos (no en indexed_papers.json) y los añade con index.add().
+          Actualiza metadata.jsonl (append), config.json y indexed_papers.json.
+        - Si existe índice y no hay papers nuevos → imprime "Índice actualizado, nada nuevo"
+          y sale sin tocar nada.
+    Con --force:
+        Re-indexa todo desde cero (comportamiento original). Útil al cambiar modelo
+        o tras limpiar duplicados.
 
 Ficheros leídos:
     /Volumes/research/categorias/<project>/chunks/**/*.jsonl
@@ -32,6 +42,7 @@ Ficheros escritos:
         index.faiss
         metadata.jsonl
         config.json
+        indexed_papers.json
 
 Parámetros CLI:
     --project PROJECT     Nombre del proyecto/categoría (obligatorio)
@@ -39,7 +50,7 @@ Parámetros CLI:
     --phase PHASE         Etiqueta de fase a indexar, o 'all' (defecto: all)
     --model MODEL         Modelo Ollama de embedding (defecto: bge-m3)
     --batch-size N        Chunks por lote de progreso (defecto: 64)
-    --force               Sobrescribe el índice aunque ya exista
+    --force               Re-indexa todo desde cero aunque ya exista el índice
 
 Variables de entorno (config/.env):
     OLLAMA_HOST           URL del servidor Ollama (defecto: http://pciq22.uca.es:11434)
@@ -52,6 +63,9 @@ Notas:
     - El embedding se hace chunk a chunk (Ollama no acepta batch); el parámetro
       --batch-size solo controla la frecuencia de los mensajes de progreso.
     - mxbai-embed-large NO es compatible (contexto 512 vs ~1500 chars por chunk).
+    - El modo incremental detecta papers nuevos por paper_id. Si se regeneraron
+      chunks de un paper ya indexado (p.ej. tras re-procesar con GROBID), usar
+      --force para que queden incluidos correctamente.
 """
 
 import argparse
@@ -80,6 +94,24 @@ from utils.constants import OLLAMA_MODEL_EMBED  # noqa: E402
 DEFAULT_BASE       = "/Volumes/research/categorias"
 DEFAULT_MODEL      = OLLAMA_MODEL_EMBED
 DEFAULT_BATCH_SIZE = 64
+INDEXED_PAPERS_FILE = "indexed_papers.json"
+
+
+def _load_indexed_papers(out_dir: Path) -> tuple[set, str]:
+    """Devuelve (set de paper_ids ya indexados, modelo usado). Vacío si no existe el fichero."""
+    p = out_dir / INDEXED_PAPERS_FILE
+    if not p.exists():
+        return set(), ""
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+        return set(data.get("paper_ids", [])), data.get("model", "")
+    except Exception:
+        return set(), ""
+
+
+def _save_indexed_papers(out_dir: Path, paper_ids: set, model: str) -> None:
+    data = {"paper_ids": sorted(paper_ids), "model": model}
+    (out_dir / INDEXED_PAPERS_FILE).write_text(json.dumps(data, indent=2), encoding="utf-8")
 
 
 def phase_from_path(p: Path) -> str:
@@ -129,7 +161,7 @@ def _model_suffix(model: str) -> str:
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Genera embeddings FAISS con Ollama nomic-embed-text")
+    ap = argparse.ArgumentParser(description="Genera embeddings FAISS con Ollama (modo incremental por defecto)")
     ap.add_argument("--project",    required=True, help="Nombre del proyecto (subcarpeta bajo --base)")
     ap.add_argument("--base",       default=DEFAULT_BASE, help=f"Directorio raíz (defecto: {DEFAULT_BASE})")
     ap.add_argument("--phase",      default="all",
@@ -138,32 +170,46 @@ def main():
     ap.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE,
                     help="Chunks por progreso (el embedding es siempre uno a uno en Ollama)")
     ap.add_argument("--force",      action="store_true",
-                    help="Sobrescribe el índice aunque ya exista")
+                    help="Re-indexa todo desde cero aunque ya exista el índice")
     args = ap.parse_args()
 
     base        = Path(args.base)
     project_dir = base / args.project
     chunks_dir  = project_dir / "chunks"
     out_dir     = project_dir / "embeddings" / f"{args.phase}{_model_suffix(args.model)}"
+    index_path  = out_dir / "index.faiss"
 
     if not chunks_dir.exists():
         raise SystemExit(f"No existe chunks dir: {chunks_dir}")
 
-    if (out_dir / "index.faiss").exists() and not args.force:
-        print(f"Índice existente, salto: {out_dir / 'index.faiss'}")
-        print("Usa --force para re-indexar y sobrescribirlo.")
-        return
+    incremental = index_path.exists() and not args.force
+
+    if incremental:
+        indexed_ids, indexed_model = _load_indexed_papers(out_dir)
+        if indexed_model and indexed_model != args.model:
+            print(
+                f"Advertencia: el índice existente usa el modelo '{indexed_model}', "
+                f"pero se solicitó '{args.model}'.\n"
+                "Usa --force para re-indexar desde cero con el nuevo modelo."
+            )
+            return
+    else:
+        indexed_ids = set()
 
     out_dir.mkdir(parents=True, exist_ok=True)
 
     ollama_host = os.getenv("OLLAMA_HOST", "http://pciq22.uca.es:11434")
     client      = ollama.Client(host=ollama_host)
+
     print(f"Project    : {args.project}")
     print(f"Phase      : {args.phase}")
     print(f"Model      : {args.model}")
     print(f"Ollama     : {ollama_host}")
     print(f"Chunks dir : {chunks_dir}")
     print(f"Output dir : {out_dir}")
+    print(f"Modo       : {'incremental' if incremental else 'completo'}")
+    if incremental:
+        print(f"Papers ya indexados: {len(indexed_ids)}")
     print("")
 
     all_vectors: list = []
@@ -172,11 +218,13 @@ def main():
     buf_meta:    list = []
 
     for rec in iter_chunks(chunks_dir, args.phase):
+        if incremental and rec.get("paper_id", "") in indexed_ids:
+            continue
         buf_texts.append(rec["text"])
         buf_meta.append(rec)
 
         if len(buf_texts) >= args.batch_size:
-            print(f"  Embeddiendo {len(buf_texts)} chunks  (total procesados: {len(all_meta) + len(buf_texts)})…")
+            print(f"  Embeddiendo {len(buf_texts)} chunks  (procesados: {len(all_meta) + len(buf_texts)})…")
             all_vectors.extend(embed_texts(client, buf_texts, args.model))
             all_meta.extend(buf_meta)
             buf_texts, buf_meta = [], []
@@ -186,35 +234,56 @@ def main():
         all_vectors.extend(embed_texts(client, buf_texts, args.model))
         all_meta.extend(buf_meta)
 
+    if incremental and not all_vectors:
+        print("Índice actualizado, nada nuevo.")
+        return
+
     if not all_vectors:
         raise SystemExit("No se encontraron chunks para embeddear.")
 
-    X   = np.vstack(all_vectors)
-    dim = X.shape[1]
+    X = np.vstack(all_vectors)
 
-    index = faiss.IndexFlatL2(dim)
-    index.add(X)
+    if incremental:
+        index = faiss.read_index(str(index_path))
+        index.add(X)
+        with (out_dir / "metadata.jsonl").open("a", encoding="utf-8") as f:
+            for m in all_meta:
+                f.write(json.dumps(m, ensure_ascii=False) + "\n")
+        new_paper_ids    = {rec.get("paper_id", "") for rec in all_meta}
+        all_indexed_ids  = indexed_ids | new_paper_ids
+    else:
+        dim   = X.shape[1]
+        index = faiss.IndexFlatL2(dim)
+        index.add(X)
+        with (out_dir / "metadata.jsonl").open("w", encoding="utf-8") as f:
+            for m in all_meta:
+                f.write(json.dumps(m, ensure_ascii=False) + "\n")
+        all_indexed_ids = {rec.get("paper_id", "") for rec in all_meta}
 
-    faiss.write_index(index, str(out_dir / "index.faiss"))
+    faiss.write_index(index, str(index_path))
 
-    with (out_dir / "metadata.jsonl").open("w", encoding="utf-8") as f:
-        for m in all_meta:
-            f.write(json.dumps(m, ensure_ascii=False) + "\n")
+    dim          = index.d
+    total_chunks = index.ntotal
 
     config = {
         "project":   args.project,
         "phase":     args.phase,
         "model":     args.model,
-        "chunks":    len(all_meta),
+        "chunks":    total_chunks,
         "dimension": dim,
     }
     (out_dir / "config.json").write_text(json.dumps(config, indent=2), encoding="utf-8")
+    _save_indexed_papers(out_dir, all_indexed_ids, args.model)
 
-    print(f"\nEmbeddings creados : {len(all_meta)} chunks")
+    verb = "añadidos al índice" if incremental else "creados"
+    print(f"\nChunks {verb} : {len(all_meta)}")
+    if incremental:
+        print(f"Total en índice    : {total_chunks}")
     print(f"Dimension          : {dim}")
-    print(f"FAISS index        : {out_dir / 'index.faiss'}")
+    print(f"FAISS index        : {index_path}")
     print(f"Metadata           : {out_dir / 'metadata.jsonl'}")
     print(f"Config             : {out_dir / 'config.json'}")
+    print(f"Indexed papers     : {out_dir / INDEXED_PAPERS_FILE}")
 
 
 if __name__ == "__main__":

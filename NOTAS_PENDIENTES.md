@@ -4,6 +4,23 @@
 
 ## Verificaciones completadas
 
+### ✅ FAISS incremental + filtros DOI manual (2026-06-04)
+
+**`scripts/5_build_embeddings.py`** — indexado incremental por defecto:
+- Nuevo fichero `indexed_papers.json` junto al índice FAISS: lista de `paper_ids` ya indexados + modelo.
+- Sin `--force`: si el índice existe, solo embeddea chunks de papers nuevos (`paper_id` no en `indexed_papers.json`). Carga el índice con `faiss.read_index()`, añade con `index.add()`, hace append en `metadata.jsonl` y actualiza `config.json` + `indexed_papers.json`.
+- Si no hay papers nuevos → imprime "Índice actualizado, nada nuevo" y sale.
+- Si el modelo del índice existente no coincide con `--model` → avisa y sale (usar `--force`).
+- Con `--force` → comportamiento original (re-indexar todo).
+- `config.json` refleja ahora `index.ntotal` (total acumulado) en lugar de solo el lote actual.
+
+**`scripts/streamlit_app/pages/5_DOI_manual.py`** — dos filtros nuevos en el expander 🔍 Filtros:
+- **Solo sin DOI** (checkbox): muestra solo filas con columna `doi` vacía o NaN.
+- **Fecha desde** (date_input): filtra por columna de fecha de creación; detecta automáticamente columnas `fecha`, `fecha_creacion`, `fecha_registro`, `created_at`, `date` o dtype datetime. Si la columna no existe, el filtro se ignora silenciosamente.
+- Ambos filtros se aplican en cascada con los existentes (status + búsqueda libre).
+
+---
+
 ### ✅ Fix flujo PDFs manuales + protección renombrado (2026-06-04)
 
 Problema detectado: al copiar PDFs manuales directamente a `categorias/<cat>/pdfs/` 
