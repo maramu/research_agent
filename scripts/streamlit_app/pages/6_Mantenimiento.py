@@ -252,7 +252,7 @@ def _get_pdf_md_mismatches(cat: str) -> dict:
     def _norm(s: str) -> str:
         import unicodedata
         s = unicodedata.normalize("NFKC", s)  # resuelve ligaduras tipográficas (ﬁ → fi)
-        s = re.sub(r"[\s\.\-]+", "_", s).lower()
+        s = re.sub(r"[\s\.\-,]+", "_", s).lower()
         s = re.sub(r"_+", "_", s)  # colapsa múltiples guiones bajos
         return s.strip("_")
 
