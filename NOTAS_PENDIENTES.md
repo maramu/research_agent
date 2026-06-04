@@ -4,6 +4,25 @@
 
 ## Verificaciones completadas
 
+### ✅ Fix normalización coherencia PDF/MD (2026-06-04)
+
+Sección 5 "Coherencia PDF/MD" de `6_Mantenimiento.py` — función `_norm` mejorada para evitar falsos positivos en la detección de huérfanos:
+
+- Normalización Unicode NFKC: resuelve ligaduras tipográficas (`ﬁ` → `fi`)
+- Regex ampliado `[\s\.\-,]+`: cubre puntos, comas y guiones además de espacios
+- Colapso de guiones bajos múltiples con `re.sub(r"_+", "_", s)`
+- `strip("_")` para eliminar guiones bajos al inicio/fin del stem
+
+Casos que generaban falsos positivos resueltos:
+- PDFs con nombres `10. 2012-06 A...` vs MDs `10_2012_06_A...` (puntos)
+- PDFs con comas en el título (`Purification, Upgrading...`) vs MDs sin coma
+- PDFs con guiones residuales (`fe_ii_-persulfate`) vs MDs normalizados
+- Ligadura `ﬁ` en nombre de fichero generada por GROBID
+
+Commit: `fix: normalización PDF/MD — puntos, comas, ligaduras unicode, colapso guiones bajos`
+
+---
+
 ### ✅ Verificación de rutas hardcodeadas post-migración (2026-06-04)
 
 Revisados todos los `.py` del proyecto buscando rutas de la máquina anterior `/Volumes/Disco/`:
