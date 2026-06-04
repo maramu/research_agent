@@ -231,7 +231,7 @@ launchctl list | grep streamlit
 tail -f ~/Library/Logs/research_agent/streamlit.log
 
 # Parar / arrancar / recargar
-launchctl bootout  gui/$(id -u)/com.research_agent.streamlit
+launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.research_agent.streamlit.plist
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.research_agent.streamlit.plist
 ```
 
