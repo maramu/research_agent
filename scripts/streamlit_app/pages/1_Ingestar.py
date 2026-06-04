@@ -15,6 +15,7 @@ de Streamlit en tiempo real.
 
 from __future__ import annotations
 
+import re
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -505,9 +506,43 @@ with tab_pending:
         else:
             from pipeline import run_step
 
-            rename_errors = []
+            def _norm(s: str) -> str:
+                import unicodedata
+                s = unicodedata.normalize("NFKC", s)
+                s = re.sub(r"[\s\.\-,]+", "_", s).lower()
+                s = re.sub(r"_+", "_", s)
+                return s.strip("_")
+
+            rename_errors: list[str] = []
+            cats_processed: list[str] = []
+
             for cat in selected_rename:
-                _folder = str(CATEGORIAS_DIR / cat / "pdfs")
+                pdfs_dir = CATEGORIAS_DIR / cat / "pdfs"
+                md_dir   = CATEGORIAS_DIR / cat / "md_clean"
+
+                pdf_stems = {p.stem for p in pdfs_dir.glob("*.pdf")} if pdfs_dir.exists() else set()
+                md_stems: set[str] = set()
+                if md_dir.exists():
+                    for m in md_dir.glob("*.clean.md"):
+                        md_stems.add(m.name.replace(".clean.md", ""))
+
+                pdf_norm = {_norm(s): s for s in pdf_stems}
+                md_norm  = {_norm(s) for s in md_stems}
+
+                new_pdf_stems = {s for k, s in pdf_norm.items() if k not in md_norm}
+                n_already     = len(pdf_stems) - len(new_pdf_stems)
+
+                if not new_pdf_stems:
+                    st.info(f"No hay PDFs nuevos que renombrar en {cat}")
+                    continue
+
+                st.info(
+                    f"Renombrando {len(new_pdf_stems)} PDFs nuevos "
+                    f"({n_already} ya procesados, se saltan)"
+                )
+                cats_processed.append(cat)
+
+                _folder = str(pdfs_dir)
                 res = execute_with_live_output(
                     lambda on_output, _folder=_folder: run_step(
                         "1_rename_papers_by_doi.py",
@@ -525,7 +560,7 @@ with tab_pending:
                     f"Algunas categorías terminaron con errores: {', '.join(rename_errors)}. "
                     "Revisa el log superior."
                 )
-            else:
+            elif cats_processed:
                 st.success(
                     "✓ Renombrado completado. Comprueba `doi_manual.xlsx` para los PDFs sin DOI. "
                     "Ya puedes pulsar **Reprocesar pendientes**."
