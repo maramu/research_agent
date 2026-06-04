@@ -250,11 +250,7 @@ def _get_pdf_md_mismatches(cat: str) -> dict:
       missing_mds: stems de PDF sin md_clean con el mismo nombre
     """
     def _norm(s: str) -> str:
-        import unicodedata
-        s = unicodedata.normalize("NFKC", s)  # resuelve ligaduras tipográficas (ﬁ → fi)
-        s = re.sub(r"[\s\.\-,]+", "_", s).lower()
-        s = re.sub(r"_+", "_", s)  # colapsa múltiples guiones bajos
-        return s.strip("_")
+        return re.sub(r"[\s\.\-]+", "_", s).lower()
 
     cat_dir  = CATEGORIAS_DIR / cat
     pdfs_dir = cat_dir / "pdfs"
