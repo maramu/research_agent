@@ -4,6 +4,28 @@
 
 ## Verificaciones completadas
 
+### ✅ Fix flujo PDFs manuales + protección renombrado (2026-06-04)
+
+Problema detectado: al copiar PDFs manuales directamente a `categorias/<cat>/pdfs/` 
+y luego usar "Renombrar por DOI", el script renombraba también PDFs ya procesados 
+generando artefactos huérfanos y duplicados.
+
+Fixes aplicados:
+- `1_Ingestar.py` — botón "Renombrar por DOI" en tab Pendientes ahora compara 
+  stems de PDFs contra md_clean con `_norm` (NFKC + `[\s\.\-,]+→_` + colapso) 
+  y salta PDFs que ya tienen md_clean. Muestra cuántos se saltan y cuántos se procesan.
+
+Flujo correcto para PDFs manuales cuando se conoce la categoría:
+1. Copiar PDFs a `categorias/<cat>/pdfs/`
+2. Pendientes → Renombrar por DOI en esa categoría (solo toca PDFs sin md_clean)
+3. Pendientes → Reprocesar esa categoría
+
+⚠️ NUNCA usar "Renombrar por DOI" en una categoría que mezcle PDFs ya procesados 
+con PDFs nuevos sin haber comprobado primero qué tiene md_clean. El fix lo protege 
+automáticamente pero conviene entender el flujo.
+
+---
+
 ### ✅ Fix normalización coherencia PDF/MD (2026-06-04)
 
 Sección 5 "Coherencia PDF/MD" de `6_Mantenimiento.py` — función `_norm` mejorada para evitar falsos positivos en la detección de huérfanos:
