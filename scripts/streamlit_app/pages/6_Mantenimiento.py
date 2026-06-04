@@ -166,8 +166,9 @@ with st.expander("🗂️ Backfill metadata (stable_id)", expanded=False):
 
 with st.expander("🔄 Re-indexar FAISS", expanded=False):
     st.markdown(
-        "Re-construye los índices FAISS de las categorías seleccionadas con "
-        "`bge-m3` y `--force`. Útil tras limpiar duplicados o hacer backfill de metadata."
+        "Actualiza los índices FAISS añadiendo solo los papers nuevos (modo incremental "
+        "por defecto). Usa `--force` solo si has eliminado papers, cambiado el modelo "
+        "de embeddings, o necesitas reconstruir el índice desde cero."
     )
 
     existing_cats_faiss = list_existing_categories()
@@ -181,22 +182,34 @@ with st.expander("🔄 Re-indexar FAISS", expanded=False):
             key="faiss_cats",
         )
 
+        faiss_mode = st.radio(
+            "Modo",
+            options=["Incremental (solo nuevos)", "Forzar reconstrucción completa (--force)"],
+            index=0,
+            horizontal=True,
+            key="faiss_mode",
+        )
+
         if st.button("▶ Re-indexar seleccionadas", type="primary", key="btn_reindex"):
             if not selected_faiss:
                 st.warning("Selecciona al menos una categoría.")
             else:
+                use_force = faiss_mode == "Forzar reconstrucción completa (--force)"
+                extra_args = ["--force"] if use_force else []
                 for cat in selected_faiss:
                     result = execute_script_live(
                         "5_build_embeddings.py",
-                        ["--project", cat, "--model", "bge-m3", "--force"],
+                        ["--project", cat, "--model", "bge-m3"] + extra_args,
                         f"build_embeddings [{cat}]",
                     )
                     if not result or result.get("returncode") != 0:
                         st.error(f"✗ Falló para **{cat}**. Revisar salida.")
                         break
                 else:
+                    modo_label = "forzado" if use_force else "incremental"
                     st.success(
-                        f"✓ Re-indexado completado para {len(selected_faiss)} categoría(s)."
+                        f"✓ Re-indexado ({modo_label}) completado para "
+                        f"{len(selected_faiss)} categoría(s)."
                     )
 
 
