@@ -75,7 +75,7 @@ load_dotenv(_DOTENV_PATH)
 load_dotenv()
 
 NAS_ROOT = Path("/Volumes/research")
-_LOGS_DIR = Path("/Volumes/Disco/proyectos/research_agent/logs")
+_LOGS_DIR = _SCRIPT_DIR.parent / "logs"
 
 _SCOPUS_SEARCH_URL = "https://api.elsevier.com/content/search/scopus"
 _PAGE_SIZE = 25  # máximo permitido por la API Scopus

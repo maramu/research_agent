@@ -4,6 +4,26 @@
 
 ## Verificaciones completadas
 
+### ✅ Verificación de rutas hardcodeadas post-migración (2026-06-04)
+
+Revisados todos los `.py` del proyecto buscando rutas de la máquina anterior `/Volumes/Disco/`:
+
+**Ficheros corregidos:**
+- `scripts/0_scopus_api.py:78` — `_LOGS_DIR` ahora usa `_SCRIPT_DIR.parent / "logs"`
+- `scripts/3a_download_pdfs.py` — añadida constante `_LOGS_DIR = Path(__file__).parent.parent / "logs"` a nivel de módulo; eliminadas 4 ocurrencias de la ruta hardcodeada (`_NAS_SUBDIRS`, `Config.log_file`, `parse_args()`, `main()`)
+- `ESTADO.md` — tabla infraestructura y ejemplo cron actualizados a `/Users/martinramirez/...`
+- `NOTAS_PENDIENTES.md` — ejemplo cron actualizado
+
+**No tocado (correcto):**
+- Docstrings en `0_scopus_api.py:19` y `3a_download_pdfs.py:41,58` — no son rutas funcionales
+- Todas las referencias a `pciq22.uca.es` son URLs de red (`OLLAMA_HOST`, `GROBID_URL`) — correctas
+- `/Volumes/research/` en código — correcto en ambas máquinas
+
+**Duda menor (no aplicada):**
+- `streamlit_app/pages/1_Ingestar.py:599` — `placeholder="/Users/martinramirez/Desktop/papers_revision"` es texto de ayuda en un campo de entrada vacío. No es funcional, pero menciona un path del usuario. Cambiar a texto genérico si se comparte la app con otros.
+
+---
+
 ### ✅ Migración a pciq22 + SSD Crucial X9 4TB (2026-06-03)
 
 Pipeline completo migrado del Mac mini de casa a `pciq22.uca.es`:
@@ -246,7 +266,7 @@ Implementado en `pipeline.integrate_adhoc()` + `pipeline.promote_adhoc_to_catego
 
 Pendiente. Ejemplo de LaunchAgent o cron:
 ```bash
-0 6 * * 1  cd /Volumes/Disco/proyectos/research_agent/scripts && \
+0 6 * * 1  cd /Users/martinramirez/proyectos/research_agent/scripts && \
            /Users/martinramirez/venvs/rag_papers/bin/python run_pipeline.py \
            scopus --recent-days 7
 ```

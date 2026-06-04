@@ -137,6 +137,7 @@ from urllib.parse import urljoin
 from urllib3.util.retry import Retry
 
 _DOTENV_PATH = Path(__file__).parent.parent / "config" / ".env"
+_LOGS_DIR    = Path(__file__).parent.parent / "logs"
 load_dotenv(_DOTENV_PATH)  # config/.env (nivel de proyecto)
 load_dotenv()              # fallback: .env local o variables de entorno ya establecidas
 
@@ -170,7 +171,7 @@ _NAS_SUBDIRS = [
     NAS_ROOT / "inbox",
     NAS_ROOT / "inbox_csv",
     NAS_ROOT / "metadatos",
-    Path("/Volumes/Disco/proyectos/research_agent/logs"),
+    _LOGS_DIR,
 ]
 
 
@@ -230,7 +231,7 @@ class Config:
     output_dir: Path = field(default_factory=lambda: NAS_ROOT / "inbox")
     results_xlsx: str = str(NAS_ROOT / "metadatos" / "descarga_results.xlsx")
     results_csv: str  = str(NAS_ROOT / "metadatos" / "descarga_results.csv")
-    log_file: Path = field(default_factory=lambda: Path("/Volumes/Disco/proyectos/research_agent/logs") / "3a_download_pdfs.log")
+    log_file: Path = field(default_factory=lambda: _LOGS_DIR / "3a_download_pdfs.log")
     cache_file: str = str(NAS_ROOT / "metadatos" / "descarga_cache.json")
     cache_max_age_days: int = 30  # 0 = sin expiración
     # Pendientes manuales: HTML navegable + CSV plano, ambos en metadatos/
@@ -1649,7 +1650,7 @@ class DownloadManager:
 
 def parse_args() -> argparse.Namespace:
     METADATOS_DIR = NAS_ROOT / "metadatos"
-    LOGS_DIR = Path("/Volumes/Disco/proyectos/research_agent/logs")
+    LOGS_DIR = _LOGS_DIR
     parser = argparse.ArgumentParser(
         description=(
             "3a_download_pdfs — Paso 3a del pipeline research_agent. "
@@ -1767,7 +1768,7 @@ def main() -> None:
     csv_path = Path(args.csv) if args.csv else Path("scopus_results.csv")
     stem = csv_path.stem  # e.g. "cribado_global_phase1A"
     METADATOS_DIR = NAS_ROOT / "metadatos"
-    LOGS_DIR = Path("/Volumes/Disco/proyectos/research_agent/logs")
+    LOGS_DIR = _LOGS_DIR
 
     # output_dir: --out-dir > --phase > inbox/
     if args.out_dir:

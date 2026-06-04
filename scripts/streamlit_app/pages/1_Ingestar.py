@@ -596,7 +596,7 @@ with tab_adhoc:
         pdfs_path = st.text_input(
             "Ruta a la carpeta con los PDFs",
             value="",
-            placeholder="/Users/martinramirez/Desktop/papers_revision",
+            placeholder="/ruta/a/los/pdfs",
             help="Ruta absoluta. Los PDFs se copian (no se mueven).",
         )
 
