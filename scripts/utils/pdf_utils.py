@@ -12,7 +12,7 @@ from typing import Optional
 
 import fitz  # PyMuPDF
 
-DOI_REGEX = re.compile(r"\b(10\.\d{4,9}/[-._;()/:A-Z0-9]+)\b", re.IGNORECASE)
+DOI_REGEX = re.compile(r"\b(10\.\d{4,9}/[-._;(),<>/:A-Z0-9]+)\b", re.IGNORECASE)
 
 STOPWORDS = {
     "a", "an", "and", "as", "at", "by", "for", "from", "in", "into", "of",
