@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.research_agent.streamlit_public</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/martinramirez/venvs/rag_papers/bin/python3</string>
+        <string>-m</string>
+        <string>streamlit</string>
+        <string>run</string>
+        <string>app_public.py</string>
+        <string>--server.address</string>
+        <string>0.0.0.0</string>
+        <string>--server.port</string>
+        <string>8502</string>
+        <string>--server.headless</string>
+        <string>true</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/martinramirez/proyectos/research_agent/scripts/streamlit_app</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PUBLIC_APP</key>
+        <string>true</string>
+        <key>HOME</key>
+        <string>/Users/martinramirez</string>
+        <key>PATH</key>
+        <string>/Users/martinramirez/venvs/rag_papers/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>/Users/martinramirez/Library/Logs/research_agent/streamlit_public.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/Users/martinramirez/Library/Logs/research_agent/streamlit_public.err.log</string>
+
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+</dict>
+</plist>

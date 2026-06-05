@@ -26,11 +26,19 @@ from app_utils import (
     load_active_categories,
 )
 
+from app_utils import check_password, is_public_app  # añadir a los imports existentes
+
 st.set_page_config(
     page_title="research_agent",
     page_icon="🔬",
     layout="wide",
 )
+
+# ── Autenticación ────────────────────────────────────────────────────────────
+_pwd_env = "PUBLIC_APP_PASSWORD" if is_public_app() else "PRIVATE_APP_PASSWORD"
+if not check_password(_pwd_env):
+    st.stop()
+# ─────────────────────────────────────────────────────────────────────────────
 
 # ---------------------------------------------------------------------------
 # Cabecera

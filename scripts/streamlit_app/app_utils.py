@@ -640,3 +640,56 @@ def save_active_categories(active: List[str]) -> None:
 def is_category_active(category: str) -> bool:
     """True si la categoría está en la lista de activas."""
     return category in load_active_categories()
+
+def is_public_app() -> bool:
+    """True cuando la instancia corre como app pública (puerto 8502).
+
+    Se activa con la variable de entorno PUBLIC_APP=true, inyectada
+    desde el plist de launchd de la instancia pública.
+    """
+    return os.getenv("PUBLIC_APP", "").lower() in ("1", "true", "yes")
+
+
+def check_password(env_var: str = "PRIVATE_APP_PASSWORD") -> bool:
+    """Muestra un formulario de contraseña y devuelve True si el usuario
+    está autenticado.
+
+    - La contraseña se lee de la variable de entorno `env_var` (leída
+      desde config/.env al arrancar la app).
+    - El estado de autenticación se guarda en st.session_state bajo la
+      clave f"auth_{env_var}" para que persista durante la sesión.
+    - Si la variable de entorno no está configurada, deja pasar (facilita
+      el desarrollo local sin contraseña).
+
+    Uso en cada página:
+        from app_utils import check_password, is_public_app
+        env = "PUBLIC_APP_PASSWORD" if is_public_app() else "PRIVATE_APP_PASSWORD"
+        if not check_password(env):
+            st.stop()
+    """
+    import streamlit as st  # import local para no forzar dependencia en módulos CLI
+
+    session_key = f"auth_{env_var}"
+    if st.session_state.get(session_key):
+        return True
+
+    correct = os.getenv(env_var, "")
+    if not correct:
+        # Sin contraseña configurada → acceso libre (útil en dev)
+        st.session_state[session_key] = True
+        return True
+
+    # Formulario de login
+    st.markdown("## 🔐 Acceso restringido")
+    with st.form("login_form", clear_on_submit=True):
+        pwd = st.text_input("Contraseña", type="password")
+        submitted = st.form_submit_button("Entrar")
+
+    if submitted:
+        if pwd == correct:
+            st.session_state[session_key] = True
+            st.rerun()
+        else:
+            st.error("Contraseña incorrecta.")
+
+    return False

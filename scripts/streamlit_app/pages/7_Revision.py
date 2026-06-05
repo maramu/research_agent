@@ -26,13 +26,18 @@ from app_utils import (
     check_nas, check_ollama,
     estimate_cost_usd, fmt_cost,
     list_existing_categories, list_embedding_phases, embedding_phase_model,
-    check_anthropic_api, check_openai_api,
+    check_anthropic_api, check_openai_api, check_password, is_public_app,
 )
 
 st.set_page_config(
     page_title="Revisión bibliográfica", page_icon="📚", layout="wide"
 )
+_pwd_env = "PUBLIC_APP_PASSWORD" if is_public_app() else "PRIVATE_APP_PASSWORD"
+if not check_password(_pwd_env):
+    st.stop()
+
 st.title("📚 Revisión bibliográfica")
+
 st.caption(
     "RAG con prompts especializados para escritura científica. "
     "Selecciona categoría, tipo de síntesis y foco temático."
@@ -149,10 +154,14 @@ with st.sidebar:
 
     st.divider()
     st.header("Síntesis")
-    provider = st.selectbox(
-        "Provider",
-        ["Ollama (local)", "Anthropic (Claude)", "OpenAI (GPT)"],
+
+    _provider_options = (
+        ["Ollama (local)"]
+        if is_public_app()
+        else ["Ollama (local)", "Anthropic (Claude)", "OpenAI (GPT)"]
     )
+    provider = st.selectbox("Provider", _provider_options)
+
     if provider == "Ollama (local)":
         synth_model = st.selectbox("Modelo", OLLAMA_MODELS_LLM, index=0)
     elif provider == "Anthropic (Claude)":

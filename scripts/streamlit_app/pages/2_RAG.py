@@ -42,11 +42,16 @@ from app_utils import (
     check_anthropic_api, check_nas, check_ollama, check_openai_api,
     embedding_phase_model, estimate_cost_pre_query, estimate_cost_usd,
     fmt_cost, get_monthly_usage, list_embedding_phases, list_existing_categories,
-    record_rag_query, record_rag_query_full,
+    record_rag_query, record_rag_query_full, check_password, is_public_app,
 )
 from utils.export_refs import build_papers_zip
 
 st.set_page_config(page_title="RAG", page_icon="🔍", layout="wide")
+
+_pwd_env = "PUBLIC_APP_PASSWORD" if is_public_app() else "PRIVATE_APP_PASSWORD"
+if not check_password(_pwd_env):
+    st.stop()
+
 st.title("🔍 Consultas RAG")
 
 # ---------------------------------------------------------------------------
@@ -178,11 +183,36 @@ with st.sidebar:
     do_synth = st.toggle("Sintetizar respuesta con LLM", value=True)
 
     if do_synth:
-        provider = st.selectbox(
-            "Provider",
-            options=["Ollama (local)", "Anthropic (Claude)", "OpenAI (GPT)"],
-            index=0,
+        _provider_options = (
+            ["Ollama (local)"]
+            if is_public_app()
+            else ["Ollama (local)", "Anthropic (Claude)", "OpenAI (GPT)"]
         )
+        provider = st.selectbox("Provider", options=_provider_options, index=0)
+
+        if provider == "Ollama (local)":
+            synth_model = st.selectbox("Modelo", options=OLLAMA_MODELS_LLM, index=1)
+        elif provider == "Anthropic (Claude)":
+            ant_ok, ant_msg = check_anthropic_api()
+            if not ant_ok:
+                st.error(f"Anthropic: {ant_msg}")
+                synth_model = None
+            else:
+                synth_model = st.selectbox("Modelo", options=ANTHROPIC_MODELS, index=1)
+        else:  # OpenAI
+            oai_ok, oai_msg = check_openai_api()
+            if not oai_ok:
+                st.error(f"OpenAI: {oai_msg}")
+                synth_model = None
+            else:
+                synth_model = st.selectbox("Modelo", options=OPENAI_MODELS, index=0)
+
+        max_output_tokens = st.slider(
+            "Máx tokens respuesta", 256, 4096, 1024, step=256,
+            help="Tope superior. La respuesta real suele ser bastante menor.",
+        )
+    else:
+        provider = synth_model = max_output_tokens = None
 
         if provider == "Ollama (local)":
             synth_model = st.selectbox("Modelo", options=OLLAMA_MODELS_LLM, index=1)
