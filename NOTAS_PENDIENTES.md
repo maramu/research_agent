@@ -534,6 +534,7 @@ Paquetes exportables por tema:
 ```
 
 Facilita trabajo de grupo y dirección de alumnos.
+Parcialmente completado por items 10+11+22+23, salbo que quiera un excel con los datos tabulados
 
 ### ✅ 25. corpus_manifest.json (completado 2026-06-01)
 
@@ -588,10 +589,15 @@ Entrada: `pendientes_descarga.csv` (item 15, prerequisito).
 Reglas: sin saltarse paywalls, sin captchas, pausas entre accesos, límite por sesión,
 parar ante 403/429.
 
-### 29. Página de actividad — BAJA-MEDIA prioridad
+### ✅ 29. Página de actividad (completado 2026-06-05)
 
-Mostrar en Streamlit: últimas ingestas, últimos errores, últimas consultas RAG,
-uso mensual de modelos. Parte de los datos ya existen en `rag_usage/`.
+`scripts/streamlit_app/pages/9_Actividad.py` — página solo para la app privada:
+- Sección 1: uso RAG mes actual (`rag_usage_YYYY-MM.jsonl`) — métricas + tabla modelos de pago.
+- Sección 2: últimas 20 consultas RAG (`rag_queries_YYYY-MM.jsonl`) en orden inverso.
+- Sección 3: corpus por método de ingesta (source_type) leído de `papers_metadata.jsonl` por categoría.
+- Sección 4: errores `[ERROR]` de los 5 logs más recientes en `research_agent/logs/`.
+- Guard `is_public_app()` → `st.stop()` directo; app privada requiere `check_password("PRIVATE_APP_PASSWORD")`.
+- Botón "🔄 Actualizar" + manejo de excepciones por sección.
 
 ### 30. Documentación para el grupo — ALTA si se comparte
 

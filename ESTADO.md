@@ -194,6 +194,7 @@ herramientas adicionales (RAG, editores de configuración, visor de DOIs).
 | `6_Mantenimiento` | 6 secciones expandibles: **Categorías activas** (multiselect sobre CANONICAL_CATEGORIES, guarda `active_categories.yml`) / **Backfill metadata** (detecta papers sin `stable_id`, re-ejecuta `4_extract_metadata.py` por categoría) / **Re-indexar FAISS** (multiselect categorías, todas por defecto, `--force bge-m3`) / **Limpieza de duplicados** (preview → apply condicional, con aviso de re-indexado) / **Reconstruir doi_registry** (llama a `build_doi_registry_from_nas()` directamente) / **Coherencia PDF/MD** (detecta huérfanos, corrección automática con reprocesado; comparación via `_norm`: Unicode NFKC + regex `[\s\.\-,]+` → `_` + colapso `_+` + `strip("_")`). |
 | `7_Revision` | Revisión bibliográfica con 5 prompts especializados (estado del arte, tabla de artículos clave, lagunas, comparativa, introducción). RAG sobre categoría+fase, streaming en 3 providers. Descarga Markdown + guardar en NAS (`notas_rag/`). Patrón flag+`st.rerun()`. Expander "📦 Exportar papers usados": ZIP (PDF+MD) + BibTeX generado desde `papers_metadata.jsonl`. Fragmentos usados en expander colapsado. |
 | `8_Exportar` | Exporta bibliografía de una categoría a BibTeX / RIS / CSV. Filtros: rango de años, solo-DOI, quality score mínimo. Vista previa de papers seleccionados + 3 botones de descarga. |
+| `9_Actividad` | Solo app privada. 4 secciones: uso RAG mes actual (métricas + tabla modelos de pago), últimas 20 consultas RAG, corpus por método de ingesta (`source_type`), errores recientes en `research_agent/logs/`. |
 
 Importa directamente `pipeline.py` (no subprocess separado). Watchdog instalado
 para auto-recarga al editar ficheros.
@@ -255,6 +256,11 @@ tail -f ~/Library/Logs/research_agent/streamlit.log
 # Parar / arrancar / recargar
 launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.research_agent.streamlit.plist
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.research_agent.streamlit.plist
+
+# Publico
+launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.research_agent.streamlit_public.plist
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.research_agent.streamlit_public.plist
+
 ```
 
 ### Acceso
