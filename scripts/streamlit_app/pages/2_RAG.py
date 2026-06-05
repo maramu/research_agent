@@ -214,30 +214,6 @@ with st.sidebar:
     else:
         provider = synth_model = max_output_tokens = None
 
-        if provider == "Ollama (local)":
-            synth_model = st.selectbox("Modelo", options=OLLAMA_MODELS_LLM, index=1)
-        elif provider == "Anthropic (Claude)":
-            ant_ok, ant_msg = check_anthropic_api()
-            if not ant_ok:
-                st.error(f"Anthropic: {ant_msg}")
-                synth_model = None
-            else:
-                synth_model = st.selectbox("Modelo", options=ANTHROPIC_MODELS, index=1)
-        else:  # OpenAI
-            oai_ok, oai_msg = check_openai_api()
-            if not oai_ok:
-                st.error(f"OpenAI: {oai_msg}")
-                synth_model = None
-            else:
-                synth_model = st.selectbox("Modelo", options=OPENAI_MODELS, index=0)
-
-        max_output_tokens = st.slider(
-            "Máx tokens respuesta", 256, 4096, 1024, step=256,
-            help="Tope superior. La respuesta real suele ser bastante menor.",
-        )
-    else:
-        provider = synth_model = max_output_tokens = None
-
     # Contador mensual
     st.divider()
     st.header("Uso del mes")
