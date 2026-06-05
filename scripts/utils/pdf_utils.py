@@ -64,6 +64,12 @@ def _clean_doi(doi: str) -> str:
     doi = doi.strip()
     doi = doi.rstrip(").,;]}>")
     doi = doi.lstrip("([<{")
+    # Wiley/ACS SICI: keep the single-letter suffix (e.g. "2-G"), strip any run
+    # of 2+ alpha chars that follows it (e.g. "within" in "2-Gwithin").
+    doi = re.sub(r'(-[a-zA-Z])[a-zA-Z]{2,}$', r'\1', doi)
+    # General case: strip a word of 3+ alpha chars glued after a non-alpha
+    # (e.g. "2within" → "2").
+    doi = re.sub(r'[a-zA-Z]{3,}$', '', doi)
     return doi
 
 
