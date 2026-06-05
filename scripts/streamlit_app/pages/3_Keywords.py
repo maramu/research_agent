@@ -21,6 +21,11 @@ if str(STREAMLIT_APP_DIR) not in sys.path:
 from app_utils import CANONICAL_CATEGORIES, CONFIG_DIR, load_yaml, save_yaml
 
 st.set_page_config(page_title="Keywords", page_icon="🔑", layout="wide")
+from app_utils import check_password, is_public_app
+if is_public_app():
+    st.stop()
+if not check_password("PRIVATE_APP_PASSWORD"):
+    st.stop()
 st.title("🔑 Editor de keywords.yml")
 
 st.markdown(

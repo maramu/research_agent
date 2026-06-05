@@ -37,6 +37,11 @@ from app_utils import (
 )
 
 st.set_page_config(page_title="Ingestar", page_icon="📥", layout="wide")
+from app_utils import check_password, is_public_app
+if is_public_app():
+    st.stop()
+if not check_password("PRIVATE_APP_PASSWORD"):
+    st.stop()
 st.title("📥 Ingestar")
 
 # ---------------------------------------------------------------------------

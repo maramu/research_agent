@@ -20,6 +20,11 @@ from app_utils import (
 from utils.export_refs import load_papers, to_bibtex, to_ris, to_csv_str
 
 st.set_page_config(page_title="Exportar", page_icon="📤", layout="wide")
+from app_utils import check_password, is_public_app
+if is_public_app():
+    st.stop()
+if not check_password("PRIVATE_APP_PASSWORD"):
+    st.stop()
 st.title("📤 Exportar bibliografía")
 
 nas_ok, nas_msg = check_nas()

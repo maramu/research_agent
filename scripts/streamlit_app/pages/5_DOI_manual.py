@@ -21,6 +21,11 @@ if str(STREAMLIT_APP_DIR) not in sys.path:
 from app_utils import DOI_MANUAL_XLSX, check_nas
 
 st.set_page_config(page_title="DOI manual", page_icon="📄", layout="wide")
+from app_utils import check_password, is_public_app
+if is_public_app():
+    st.stop()
+if not check_password("PRIVATE_APP_PASSWORD"):
+    st.stop()
 st.title("📄 doi_manual.xlsx")
 st.caption(f"Fichero: `{DOI_MANUAL_XLSX}`")
 
