@@ -57,6 +57,7 @@ import argparse
 import csv
 import logging
 import re
+import sys
 import time
 import unicodedata
 from pathlib import Path
@@ -64,6 +65,9 @@ from typing import Optional
 
 import fitz  # PyMuPDF
 import requests
+
+sys.path.insert(0, str(Path(__file__).parent))
+from utils.pdf_utils import extract_doi_from_pdf, extract_doi_from_text
 
 # ============================================================
 # CONFIGURACIÓN POR DEFECTO
@@ -78,8 +82,6 @@ FAILED_SUBFOLDER_NAME = "fallidos"
 log = logging.getLogger(__name__)
 
 CROSSREF_API = "https://api.crossref.org/works/"
-DOI_REGEX = re.compile(r"\b(10\.\d{4,9}/[-._;()/:A-Z0-9]+)\b", re.IGNORECASE)
-
 STOPWORDS = {
     "a", "an", "and", "as", "at", "by", "for", "from", "in", "into", "of",
     "on", "or", "the", "to", "with", "without", "via", "using", "use",
@@ -275,57 +277,6 @@ def update_renamed_in_excel(
     except Exception as e:
         log.warning("update_renamed_in_excel: %s: %s", type(e).__name__, e)
         return 0
-
-
-# ============================================================
-# DOI DESDE PDF
-# ============================================================
-
-def clean_doi(doi: str) -> str:
-    doi = doi.strip()
-    doi = doi.rstrip(").,;]}>")
-    doi = doi.lstrip("([<{")
-    return doi
-
-
-def extract_doi_from_text(text: str) -> Optional[str]:
-    text = text.replace("\x00", " ")
-    text = re.sub(r"https?://(dx\.)?doi\.org/", "", text, flags=re.IGNORECASE)
-    text = re.sub(r"\bdoi\s*:\s*", "", text, flags=re.IGNORECASE)
-
-    matches = DOI_REGEX.findall(text)
-    for m in matches:
-        doi = clean_doi(m)
-        if doi.lower().startswith("10."):
-            return doi
-    return None
-
-
-def extract_text_from_pdf(pdf_path: Path, max_pages: int = 3) -> str:
-    texts = []
-    with fitz.open(pdf_path) as doc:
-        n = min(len(doc), max_pages)
-        for i in range(n):
-            texts.append(doc[i].get_text("text", sort=True))
-    return "\n".join(texts)
-
-
-def extract_doi_from_pdf(pdf_path: Path) -> Optional[str]:
-    try:
-        with fitz.open(pdf_path) as doc:
-            meta = doc.metadata or {}
-            meta_text = " ".join(str(v) for v in meta.values() if v)
-            doi = extract_doi_from_text(meta_text)
-            if doi:
-                return doi
-    except Exception:
-        pass
-
-    try:
-        text = extract_text_from_pdf(pdf_path, max_pages=3)
-        return extract_doi_from_text(text)
-    except Exception:
-        return None
 
 
 # ============================================================
