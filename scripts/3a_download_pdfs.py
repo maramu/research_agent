@@ -343,6 +343,7 @@ class Stats:
     already_exists: int = 0
     failed: int = 0
     no_doi: int = 0
+    skipped_registry: int = 0
     by_method: Dict[str, int] = field(default_factory=dict)
 
     def record(self, res: DownloadResult) -> None:
@@ -365,6 +366,7 @@ class Stats:
             f"Ya existían:    {self.already_exists}",
             f"Desde caché:    {self.from_cache}",
             f"Sin DOI:        {self.no_doi}",
+            f"Ya en corpus:   {self.skipped_registry}",
             f"Fallidos:       {self.failed}",
         ]
         if self.by_method:
@@ -1497,6 +1499,20 @@ class DownloadManager:
 
         results: List[DownloadResult] = []
 
+        # Leer doi_registry.txt una sola vez al inicio del lote
+        _REGISTRY_TXT = NAS_ROOT / "metadatos" / "doi_registry.txt"
+        known_corpus_dois: set = set()
+        if _REGISTRY_TXT.exists():
+            try:
+                with open(_REGISTRY_TXT, encoding="utf-8") as _rf:
+                    for _line in _rf:
+                        _d = _line.strip().lower()
+                        if _d:
+                            known_corpus_dois.add(_d)
+                log.info("doi_registry.txt: %d DOIs conocidos cargados", len(known_corpus_dois))
+            except Exception as _re:
+                log.warning("No se pudo leer doi_registry.txt: %s", _re)
+
         for idx, (_, row) in enumerate(subset.iterrows(), start=1):
             if self._shutdown:
                 log.warning("Proceso interrumpido en artículo %d/%d.", idx - 1, total)
@@ -1518,6 +1534,24 @@ class DownloadManager:
                 }
                 results.append(res)
                 self.stats.record(res)
+                continue
+
+            if doi and doi.lower() in known_corpus_dois:
+                log.info(
+                    "[%d/%d] DOI ya en corpus (doi_registry) — saltando: %s",
+                    idx, total, doi,
+                )
+                if _HAS_REGISTRY and not self.cfg.dry_run:
+                    try:
+                        _registry_upsert(
+                            [{"doi": doi, "title": title, "year": year,
+                              "reason": "already_in_corpus"}],
+                            category=self.cfg.category,
+                        )
+                        _registry_mark_downloaded([doi])
+                    except Exception as _re:
+                        log.warning("Error al actualizar registro para %s: %s", doi, _re)
+                self.stats.skipped_registry += 1
                 continue
 
             res = self.process_article(idx, total, doi, title, year, authors)
