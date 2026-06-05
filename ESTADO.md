@@ -57,13 +57,15 @@
 ```
 research_agent/
 ├── config/
-│   ├── .env                          ← claves API, hosts
+│   ├── .env                          ← claves API, hosts (NO subir a git)
+│   ├── .env.example                  ← plantilla de variables (sí subir a git)
 │   ├── keywords.yml                  ← palabras clave para cribado (8 categorías)
 │   ├── scopus_queries.yml            ← queries Scopus por categoría
 │   └── active_categories.yml         ← lista de categorías activas (excluye inactivas de Scopus/RAG)
 ├── scripts/
 │   ├── pipeline.py                   ← orquestador (módulo importable)
 │   ├── run_pipeline.py               ← CLI del orquestador (scopus/inbox/adhoc)
+│   ├── run_weekly_scopus.py          ← ingesta semanal autónoma + email resumen
 │   ├── 0_scopus_api.py               ← búsqueda Scopus API
 │   ├── 1_rename_papers_by_doi.py
 │   ├── 2_screen_pdfs.py
@@ -92,7 +94,9 @@ research_agent/
 │           ├── 4_Scopus_queries.py   ← editor de scopus_queries.yml
 │           └── 5_DOI_manual.py       ← visor filtrable de doi_manual.xlsx
 ├── deployment/
-│   └── com.research_agent.streamlit.plist   ← LaunchAgent del servicio Streamlit
+│   ├── com.research_agent.streamlit.plist        ← LaunchAgent Streamlit privado (8501)
+│   ├── com.research_agent.streamlit_public.plist ← LaunchAgent Streamlit público (8502)
+│   └── com.research_agent.scopus_weekly.plist    ← LaunchAgent ingesta semanal (lunes 06:00)
 ├── logs/                             ← logs antiguos de scripts numerados
 ├── .gitignore
 └── requirements.txt
@@ -127,6 +131,7 @@ research_agent/
 | `streamlit_app/pages/7_Revision.py` | Revisión bibliográfica: 5 prompts especializados, streaming 3 providers, ZIP+BibTeX papers usados, guardar nota NAS | ✅ |
 | `streamlit_app/pages/8_Exportar.py` | Exportar bibliografía por categoría: filtros año/DOI/quality, BibTeX/RIS/CSV descargables | ✅ |
 | `streamlit_app/app_public.py` (portada pública, puerto 8502) | `st.navigation` con 2 páginas: RAG + Revisión bibliográfica. Autenticación con `check_password("PUBLIC_APP_PASSWORD")`. Solo Ollama disponible (filtrado en `2_RAG.py` con `is_public_app()`). | ✅ |
+| `run_weekly_scopus.py` | Ingesta Scopus semanal autónoma. Ejecuta `run_scopus(WEEKLY_CATEGORIES, recent_days=7)`, cuenta PDFs nuevos y chunks, lee `pendientes_descarga.csv` y envía email HTML resumen via Gmail STARTTLS. Fallback HTML a `/tmp/`. `--dry-run` imprime HTML sin ejecutar. Config SMTP desde `.env`. | ✅ |
 
 ## Tres flujos del pipeline
 
@@ -243,6 +248,20 @@ Consumo idle ≈ 5-10W.
 | Logs | `~/Library/Logs/research_agent/streamlit_public.{log,err.log}` |
 | KeepAlive | true |
 | RunAtLoad | true |
+
+**Ingesta Scopus semanal (`run_weekly_scopus.py`)**
+
+| Aspecto | Valor |
+|---|---|
+| Plist en repo | `deployment/com.research_agent.scopus_weekly.plist` |
+| Instalado en | `~/Library/LaunchAgents/com.research_agent.scopus_weekly.plist` |
+| Etiqueta | `com.research_agent.scopus_weekly` |
+| Comando | `python3.13 run_weekly_scopus.py` (venv) |
+| WorkingDirectory | `/Users/martinramirez/proyectos/research_agent/scripts` |
+| Logs | `~/Library/Logs/research_agent/scopus_weekly.{log,err.log}` |
+| Schedule | Lunes a las 06:00 (`StartCalendarInterval`) |
+| RunAtLoad | false |
+| KeepAlive | false |
 
 Comandos día a día:
 

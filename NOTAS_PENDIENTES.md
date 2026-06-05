@@ -320,13 +320,27 @@ Implementado en `pipeline.integrate_adhoc()` + `pipeline.promote_adhoc_to_catego
 
 ---
 
-### 4. Cron/launchd para ingesta Scopus semanal automática
+### ✅ 4. Cron/launchd para ingesta Scopus semanal automática (completado 2026-06-05)
 
-Pendiente. Ejemplo de LaunchAgent o cron:
+`scripts/run_weekly_scopus.py` — script autónomo que:
+- Ejecuta `run_scopus(categories=WEEKLY_CATEGORIES, recent_days=7)` (actualmente solo `biogas_upgrading_biomethanation`).
+- Cuenta PDFs antes/después para calcular nuevos; cuenta chunks totales tras procesar.
+- Lee `pendientes_descarga.csv`, filtra status=="pending", ordena cat asc + last_checked desc.
+- Construye email HTML con tabla de resultados + tabla DOIs pendientes (con enlaces clicables).
+- Envía via `smtplib` + Gmail STARTTLS. Fallback: escribe HTML en `/tmp/research_agent_weekly_report.html`.
+- Soporta `--dry-run` (imprime HTML en stdout sin ejecutar Scopus ni enviar email).
+- Config SMTP desde `.env`: `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_TO`.
+
+`deployment/com.research_agent.scopus_weekly.plist` — LaunchAgent:
+- `StartCalendarInterval`: lunes a las 06:00 (Weekday=1, Hour=6).
+- `RunAtLoad: false` — solo se lanza los lunes, no al instalar.
+- Logs en `~/Library/Logs/research_agent/scopus_weekly.{log,err.log}`.
+
+Para instalar en pciq22:
 ```bash
-0 6 * * 1  cd /Users/martinramirez/proyectos/research_agent/scripts && \
-           /Users/martinramirez/venvs/rag_papers/bin/python run_pipeline.py \
-           scopus --recent-days 7
+cp deployment/com.research_agent.scopus_weekly.plist ~/Library/LaunchAgents/
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.research_agent.scopus_weekly.plist
+launchctl list | grep scopus
 ```
 
 ### 5. Pequeñas mejoras UX en la web (baja prioridad)

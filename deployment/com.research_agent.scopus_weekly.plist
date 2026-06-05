@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.research_agent.scopus_weekly</string>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/martinramirez/proyectos/research_agent/scripts</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/martinramirez/venvs/rag_papers/bin/python3.13</string>
+        <string>run_weekly_scopus.py</string>
+    </array>
+
+    <!-- Ejecutar cada lunes a las 06:00 -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Weekday</key>
+        <integer>1</integer>
+        <key>Hour</key>
+        <integer>6</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>HOME</key>
+        <string>/Users/martinramirez</string>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+
+    <!-- No ejecutar al instalar el plist, solo los lunes -->
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>KeepAlive</key>
+    <false/>
+
+    <key>StandardOutPath</key>
+    <string>/Users/martinramirez/Library/Logs/research_agent/scopus_weekly.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/martinramirez/Library/Logs/research_agent/scopus_weekly.err.log</string>
+</dict>
+</plist>
