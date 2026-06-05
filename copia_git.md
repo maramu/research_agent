@@ -11,6 +11,8 @@ git add ESTADO.md NOTAS_PENDIENTES.md
 git commit -m "texto de lo que se ha realizado"
 git push
 
+o mejor aún:
+git push origin main
 
 
 # En pciq22
