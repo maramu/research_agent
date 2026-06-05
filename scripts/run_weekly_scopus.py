@@ -14,7 +14,9 @@ Uso directo:
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import csv
+import logging
 import os
 import smtplib
 import socket
@@ -52,6 +54,8 @@ from pipeline import run_scopus  # noqa: E402
 WEEKLY_CATEGORIES: list[str] = [
     "biogas_upgrading_biomethanation",
 ]
+
+SCOPUS_TIMEOUT = 2700  # 45 minutos — evita colgarse si 3a_download_pdfs.py no responde
 
 # ---------------------------------------------------------------------------
 # Configuración SMTP (leída de .env)
@@ -103,7 +107,10 @@ def _load_pending_dois() -> list[dict]:
 
 
 def _status_icon(status: str) -> str:
-    return {"ok": "✅", "partial": "⚠️", "error": "❌", "skipped": "⏭️"}.get(status, "❓")
+    return {
+        "ok": "✅", "partial": "⚠️", "error": "❌",
+        "skipped": "⏭️", "timeout": "⏱️",
+    }.get(status, "❓")
 
 # ---------------------------------------------------------------------------
 # HTML builder
@@ -141,7 +148,9 @@ def build_html(
     error_msg: str = "",
 ) -> str:
     icon = _status_icon(overall)
-    status_class = {"ok": "ok", "partial": "warn", "error": "error"}.get(overall, "warn")
+    status_class = {
+        "ok": "ok", "partial": "warn", "error": "error", "timeout": "warn",
+    }.get(overall, "warn")
 
     html = f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8"><style>{_CSS}</style></head>
@@ -169,7 +178,7 @@ def build_html(
         before, after = pdf_diffs.get(cat, (0, 0))
         new_pdfs = after - before
         chunks = chunk_totals.get(cat, "—") if status == "ok" else "—"
-        pill = {"ok": "pill-ok", "error": "pill-err"}.get(status, "pill-warn")
+        pill = {"ok": "pill-ok", "error": "pill-err", "timeout": "pill-warn"}.get(status, "pill-warn")
         html += (
             f"<tr><td>{cat}</td>"
             f"<td><span class='{pill}'>{_status_icon(status)} {status}</span></td>"
@@ -235,7 +244,24 @@ def send_email(subject: str, html: str) -> None:
 
 def main(dry_run: bool = False) -> None:
     run_date = datetime.now().strftime("%Y-%m-%d")
-    log_path = str(PROJECT_DIR / "logs" / f"run_weekly_scopus_{run_date}.log")
+
+    # ── Logging a fichero ─────────────────────────────────────────────────
+    logs_dir = PROJECT_DIR / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    log_path = str(logs_dir / f"run_weekly_scopus_{run_date}.log")
+
+    log = logging.getLogger("weekly_scopus")
+    log.setLevel(logging.INFO)
+    if not log.handlers:
+        _fmt = logging.Formatter("%(asctime)s %(levelname)s %(message)s")
+        fh = logging.FileHandler(log_path, encoding="utf-8")
+        fh.setFormatter(_fmt)
+        log.addHandler(fh)
+        sh = logging.StreamHandler(sys.stdout)
+        sh.setFormatter(_fmt)
+        log.addHandler(sh)
+
+    log.info("=== run_weekly_scopus iniciado%s ===", " (dry-run)" if dry_run else "")
 
     # Contar PDFs antes de la ingesta
     pdf_before = {cat: _count_pdfs(cat) for cat in WEEKLY_CATEGORIES}
@@ -246,13 +272,23 @@ def main(dry_run: bool = False) -> None:
     t_start = time.monotonic()
 
     if dry_run:
-        # No ejecutar ingesta real; simular resultado OK
         cat_results = {cat: {"status": "ok"} for cat in WEEKLY_CATEGORIES}
     else:
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        future = executor.submit(run_scopus, categories=WEEKLY_CATEGORIES, recent_days=7)
         try:
-            result = run_scopus(categories=WEEKLY_CATEGORIES, recent_days=7)
+            result    = future.result(timeout=SCOPUS_TIMEOUT)
             cat_results = result.get("categories", {})
             overall     = result.get("status", "error")
+            log.info("run_scopus completado — estado: %s", overall)
+        except concurrent.futures.TimeoutError:
+            error_msg = (
+                f"run_scopus superó el timeout de {SCOPUS_TIMEOUT}s "
+                f"({SCOPUS_TIMEOUT // 60} min). El subproceso sigue en background."
+            )
+            overall   = "timeout"
+            cat_results = {cat: {"status": "timeout"} for cat in WEEKLY_CATEGORIES}
+            log.error("TIMEOUT — %s", error_msg)
         except Exception as exc:
             error_msg   = str(exc)
             overall     = "error"
@@ -260,6 +296,10 @@ def main(dry_run: bool = False) -> None:
                 cat: {"status": "error", "reason": error_msg}
                 for cat in WEEKLY_CATEGORIES
             }
+            log.error("Excepción en run_scopus: %s", error_msg)
+        finally:
+            # No esperar al hilo — el email debe salir aunque run_scopus siga corriendo
+            executor.shutdown(wait=False)
 
     duration_s = time.monotonic() - t_start
 
@@ -291,16 +331,21 @@ def main(dry_run: bool = False) -> None:
 
     if dry_run:
         print(html)
+        log.info("=== dry-run finalizado ===")
         return
 
     try:
         send_email(subject, html)
-        print(f"Email enviado a {SMTP_TO}: {subject}")
+        log.info("Email enviado a %s", SMTP_TO)
     except Exception as exc:
         fallback = Path("/tmp/research_agent_weekly_report.html")
         fallback.write_text(html, encoding="utf-8")
-        print(f"ERROR enviando email: {exc}")
-        print(f"Informe HTML guardado en: {fallback}")
+        log.error("ERROR enviando email: %s — HTML guardado en %s", exc, fallback)
+
+    log.info(
+        "=== run_weekly_scopus finalizado — estado: %s, duración: %.1fs ===",
+        overall, duration_s,
+    )
 
 
 if __name__ == "__main__":
