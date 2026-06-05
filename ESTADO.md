@@ -118,6 +118,7 @@ research_agent/
 | `run_pipeline.py` | CLI del orquestador con subcomandos | ✅ |
 | `streamlit_app/` | Interfaz web sobre el pipeline (ver sección dedicada) | ✅ |
 | `utils/pdf_utils.py` | Funciones comunes (DOI, slugify, texto) | ✅ |
+- `DOI_REGEX` ampliado para capturar `<`, `>` en DOIs Wiley/ACS SICI antiguos (commit 95c119f)
 | `utils/download_registry.py` | Registro persistente de DOIs pendientes de descarga (pendientes_descarga.csv) | ✅ |
 | `utils/export_refs.py` | BibTeX/RIS/CSV + ZIP papers (`build_papers_zip` con fallback año+autor: paper_id exacto → stable_id desde jsonl → glob prefijo 20 chars) | ✅ |
 | `streamlit_app/pages/7_Revision.py` | Revisión bibliográfica: 5 prompts especializados, streaming 3 providers, ZIP+BibTeX papers usados, guardar nota NAS | ✅ |
