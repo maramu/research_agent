@@ -363,11 +363,12 @@ bge-m3 adoptado como modelo de producción. `utils/constants.py` centraliza el v
 
 Ver sección "Verificaciones completadas" — Bug #1 y #2.
 
-### 10. Instancia RAG pública (puerto 8502)
+### ✅ 10. Instancia RAG pública (puerto 8502) (completado 2026-06-05)
 
-Segunda instancia Streamlit solo con página RAG, sin ingesta ni configuración,
-limitada a Ollama (gratuito). Para compartir con colaboradores.
-Requiere segundo plist launchd en puerto 8502 y control de acceso (VPN o similar).
+Segunda instancia Streamlit con páginas RAG + Revisión bibliográfica, sin ingesta
+ni configuración, limitada a Ollama. `app_public.py` con `st.navigation`, autenticación
+por `check_password("PUBLIC_APP_PASSWORD")` e `is_public_app()` para filtrar providers.
+Segundo plist launchd en `deployment/com.research_agent.streamlit_public.plist`.
 
 ### ✅ 11. Exportar papers desde RAG (completado 2026-05-28)
 

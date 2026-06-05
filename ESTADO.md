@@ -82,7 +82,8 @@ research_agent/
 │   └── streamlit_app/                ← Interfaz web (Streamlit)
 │       ├── app.py                    ← portada: health checks + tabla categorías
 │       ├── app_utils.py              ← helpers compartidos (renombrado para no
-│       │                               colisionar con scripts/utils/)
+│       │                               colisionar con scripts/utils/).
+│       │                               Incluye check_password(), is_public_app()
 │       ├── README.md                 ← instrucciones despliegue + launchd
 │       └── pages/
 │           ├── 1_Ingestar.py         ← scopus / inbox / adhoc con progreso live
@@ -125,6 +126,7 @@ research_agent/
 | `utils/export_refs.py` | BibTeX/RIS/CSV + ZIP papers (`build_papers_zip` con fallback año+autor: paper_id exacto → stable_id desde jsonl → glob prefijo 20 chars) | ✅ |
 | `streamlit_app/pages/7_Revision.py` | Revisión bibliográfica: 5 prompts especializados, streaming 3 providers, ZIP+BibTeX papers usados, guardar nota NAS | ✅ |
 | `streamlit_app/pages/8_Exportar.py` | Exportar bibliografía por categoría: filtros año/DOI/quality, BibTeX/RIS/CSV descargables | ✅ |
+| `streamlit_app/app_public.py` (portada pública, puerto 8502) | `st.navigation` con 2 páginas: RAG + Revisión bibliográfica. Autenticación con `check_password("PUBLIC_APP_PASSWORD")`. Solo Ollama disponible (filtrado en `2_RAG.py` con `is_public_app()`). | ✅ |
 
 ## Tres flujos del pipeline
 
@@ -215,6 +217,10 @@ Consumo idle ≈ 5-10W.
 
 | Aspecto | Valor |
 |---|---|
+**Instancia privada (puerto 8501 — `app.py`)**
+
+| Aspecto | Valor |
+|---|---|
 | Plist en repo | `deployment/com.research_agent.streamlit.plist` |
 | Instalado en | `~/Library/LaunchAgents/com.research_agent.streamlit.plist` |
 | Etiqueta | `com.research_agent.streamlit` |
@@ -223,6 +229,19 @@ Consumo idle ≈ 5-10W.
 | Logs | `~/Library/Logs/research_agent/streamlit.{log,err.log}` |
 | KeepAlive | true (reinicia automáticamente si se cae) |
 | RunAtLoad | true (arranca al login) |
+
+**Instancia pública (puerto 8502 — `app_public.py`)**
+
+| Aspecto | Valor |
+|---|---|
+| Plist en repo | `deployment/com.research_agent.streamlit_public.plist` |
+| Instalado en | `~/Library/LaunchAgents/com.research_agent.streamlit_public.plist` |
+| Etiqueta | `com.research_agent.streamlit_public` |
+| Comando | `PUBLIC_APP=true /Users/martinramirez/venvs/rag_papers/bin/python3 -m streamlit run app_public.py --server.port 8502` |
+| WorkingDirectory | `/Users/martinramirez/proyectos/research_agent/scripts/streamlit_app` |
+| Logs | `~/Library/Logs/research_agent/streamlit_public.{log,err.log}` |
+| KeepAlive | true |
+| RunAtLoad | true |
 
 Comandos día a día:
 
@@ -254,6 +273,8 @@ GROBID_URL=http://pciq22.uca.es:8070
 GROBID_TIMEOUT=600
 UNPAYWALL_EMAIL=martin.ramirez@uca.es
 ELSEVIER_API_KEY=<clave>
+PRIVATE_APP_PASSWORD=<contraseña instancia privada>
+PUBLIC_APP_PASSWORD=<contraseña instancia pública>
 ```
 
 ## Queries Scopus (config/scopus_queries.yml)
