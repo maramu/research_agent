@@ -92,7 +92,11 @@ research_agent/
 │           ├── 2_RAG.py              ← retrieval FAISS + síntesis LLM opcional
 │           ├── 3_Keywords.py         ← editor estructurado de keywords.yml
 │           ├── 4_Scopus_queries.py   ← editor de scopus_queries.yml
-│           └── 5_DOI_manual.py       ← visor filtrable de doi_manual.xlsx
+│           ├── 5_DOI_manual.py       ← visor filtrable de doi_manual.xlsx
+│           ├── 6_Mantenimiento.py    ← mantenimiento corpus (6 secciones)
+│           ├── 7_Revision.py         ← revisión bibliográfica (5 prompts)
+│           ├── 8_Exportar.py         ← exportar BibTeX/RIS/CSV por categoría
+│           └── 9_Actividad.py        ← actividad sistema (solo app privada)
 ├── deployment/
 │   ├── com.research_agent.streamlit.plist        ← LaunchAgent Streamlit privado (8501)
 │   ├── com.research_agent.streamlit_public.plist ← LaunchAgent Streamlit público (8502)
@@ -131,7 +135,7 @@ research_agent/
 | `streamlit_app/pages/7_Revision.py` | Revisión bibliográfica: 5 prompts especializados, streaming 3 providers, ZIP+BibTeX papers usados, guardar nota NAS | ✅ |
 | `streamlit_app/pages/8_Exportar.py` | Exportar bibliografía por categoría: filtros año/DOI/quality, BibTeX/RIS/CSV descargables | ✅ |
 | `streamlit_app/app_public.py` (portada pública, puerto 8502) | `st.navigation` con 2 páginas: RAG + Revisión bibliográfica. Autenticación con `check_password("PUBLIC_APP_PASSWORD")`. Solo Ollama disponible (filtrado en `2_RAG.py` con `is_public_app()`). | ✅ |
-| `run_weekly_scopus.py` | Ingesta Scopus semanal autónoma. Ejecuta `run_scopus(WEEKLY_CATEGORIES, recent_days=7)`, cuenta PDFs nuevos y chunks, lee `pendientes_descarga.csv` y envía email HTML resumen via Gmail STARTTLS. Fallback HTML a `/tmp/`. `--dry-run` imprime HTML sin ejecutar. Config SMTP desde `.env`. | ✅ |
+| `run_weekly_scopus.py` | Ingesta Scopus semanal autónoma. Ejecuta `run_scopus(WEEKLY_CATEGORIES, recent_days=7)`, cuenta PDFs nuevos y chunks, lee `pendientes_descarga.csv` y envía email HTML resumen via Gmail STARTTLS. Timeout 45 min via `ThreadPoolExecutor` + `future.result(timeout=2700)`; estado `"timeout"` si se supera y el email se envía igualmente. Logging a fichero (`logs/run_weekly_scopus_YYYY-MM-DD.log`) + stdout. Fallback HTML a `/tmp/`. `--dry-run` imprime HTML sin ejecutar. Config SMTP desde `.env`. | ✅ |
 
 ## Tres flujos del pipeline
 

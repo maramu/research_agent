@@ -4,6 +4,28 @@
 
 ## Verificaciones completadas
 
+### ✅ Fix guards autenticación páginas privadas (2026-06-05)
+
+Añadido guard de autenticación en las 6 páginas que carecían de él:
+`1_Ingestar.py`, `3_Keywords.py`, `4_Scopus_queries.py`, `5_DOI_manual.py`,
+`6_Mantenimiento.py`, `8_Exportar.py`.
+
+Patrón insertado justo después de cada `st.set_page_config()`:
+```python
+from app_utils import check_password, is_public_app
+if is_public_app():
+    st.stop()
+if not check_password("PRIVATE_APP_PASSWORD"):
+    st.stop()
+```
+
+Contexto: `2_RAG.py` y `7_Revision.py` ya tenían guard propio (usan `is_public_app()`
+para elegir entre `PUBLIC_APP_PASSWORD` y `PRIVATE_APP_PASSWORD`). `9_Actividad.py`
+solo hace `is_public_app()` → `st.stop()` (exclusiva de la app privada, sin prompt
+de contraseña).
+
+---
+
 ### ✅ FAISS incremental + filtros DOI manual (2026-06-04)
 
 **`scripts/5_build_embeddings.py`** — indexado incremental por defecto:
@@ -324,12 +346,14 @@ Implementado en `pipeline.integrate_adhoc()` + `pipeline.promote_adhoc_to_catego
 
 `scripts/run_weekly_scopus.py` — script autónomo que:
 - Ejecuta `run_scopus(categories=WEEKLY_CATEGORIES, recent_days=7)` (actualmente solo `biogas_upgrading_biomethanation`).
+- **Timeout 45 min**: `concurrent.futures.ThreadPoolExecutor` + `future.result(timeout=2700)`. Si se supera → estado `"timeout"`, `executor.shutdown(wait=False)` para no bloquear el hilo principal; el email se envía igualmente.
 - Cuenta PDFs antes/después para calcular nuevos; cuenta chunks totales tras procesar.
 - Lee `pendientes_descarga.csv`, filtra status=="pending", ordena cat asc + last_checked desc.
 - Construye email HTML con tabla de resultados + tabla DOIs pendientes (con enlaces clicables).
 - Envía via `smtplib` + Gmail STARTTLS. Fallback: escribe HTML en `/tmp/research_agent_weekly_report.html`.
 - Soporta `--dry-run` (imprime HTML en stdout sin ejecutar Scopus ni enviar email).
 - Config SMTP desde `.env`: `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_TO`.
+- **Logging a fichero**: `FileHandler` en `PROJECT_DIR/logs/run_weekly_scopus_YYYY-MM-DD.log` + `StreamHandler` (stdout). Captura inicio, fin, estado, timeout, errores y envío de email. Guard `if not log.handlers` para evitar duplicados.
 
 `deployment/com.research_agent.scopus_weekly.plist` — LaunchAgent:
 - `StartCalendarInterval`: lunes a las 06:00 (Weekday=1, Hour=6).
