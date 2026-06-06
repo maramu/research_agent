@@ -102,6 +102,7 @@ DEFAULT_DEST_BASE = Path("/Volumes/research/categorias")
 FALLIDOS_DIR = Path("/Volumes/research/fallidos")
 DUPLICADOS_DIR = Path("/Volumes/research/duplicados")
 KNOWN_DOIS_FILE = Path("/Volumes/research/metadatos/doi_registry.txt")
+DOI_MANUAL_FILE = Path("/Volumes/research/metadatos/doi_manual.xlsx")
 
 LOW_CONFIDENCE_THRESHOLD = 0.6
 CROSSREF_EMAIL = "martin.ramirez@uca.es"  # para Crossref API (educado: identificarse)
@@ -168,22 +169,66 @@ def setup_logging() -> logging.Logger:
     return logger
 
 
-def load_known_dois(path: Path) -> dict[str, str]:
-    """Lee doi_registry.txt (doi\\torigencategoria/archivo) y devuelve {doi: origen}."""
-    if not path.exists():
-        return {}
+def load_known_dois(
+    path: Path,
+    logger: Optional[logging.Logger] = None,
+    doi_manual_path: Path = DOI_MANUAL_FILE,
+) -> dict[str, str]:
+    """Lee doi_registry.txt y doi_manual.xlsx; devuelve {doi: origen}."""
     result: dict[str, str] = {}
+    if path.exists():
+        try:
+            with path.open(encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    parts = line.split("\t", 1)
+                    if len(parts) == 2:
+                        result[parts[0]] = parts[1]
+        except Exception as e:
+            print(f"Advertencia: no se pudo leer {path}: {e}")
+
+    # Cruzar contra doi_manual.xlsx para evitar duplicados de PDFs asignados manualmente
     try:
-        with path.open(encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                parts = line.split("\t", 1)
-                if len(parts) == 2:
-                    result[parts[0]] = parts[1]
-    except Exception as e:
-        print(f"Advertencia: no se pudo leer {path}: {e}")
+        import openpyxl
+    except ImportError:
+        _warn = "openpyxl no disponible; doi_manual.xlsx omitido en detección de duplicados"
+        if logger:
+            logger.warning(_warn)
+        else:
+            print(f"Advertencia: {_warn}")
+        return result
+
+    if doi_manual_path.exists():
+        try:
+            wb = openpyxl.load_workbook(doi_manual_path, read_only=True, data_only=True)
+            ws = wb.active
+            first_row = next(ws.iter_rows(min_row=1, max_row=1, values_only=True), None)
+            headers = [str(h).strip().lower() if h else "" for h in (first_row or [])]
+            doi_col = next((i for i, h in enumerate(headers) if "doi" in h), None)
+            extra = 0
+            if doi_col is not None:
+                for row in ws.iter_rows(min_row=2, values_only=True):
+                    val = row[doi_col] if doi_col < len(row) else None
+                    if val:
+                        doi_str = str(val).strip()
+                        if doi_str and doi_str not in result:
+                            result[doi_str] = str(doi_manual_path)
+                            extra += 1
+            wb.close()
+            _msg = f"doi_manual.xlsx: {extra} DOIs adicionales cargados para detección de duplicados"
+            if logger:
+                logger.info(_msg)
+            else:
+                print(_msg)
+        except Exception as e:
+            _warn = f"No se pudo leer {doi_manual_path}: {e}"
+            if logger:
+                logger.warning(_warn)
+            else:
+                print(f"Advertencia: {_warn}")
+
     return result
 
 
@@ -658,7 +703,7 @@ def main() -> int:
     print("-" * 80)
 
     rows: list[dict] = []
-    doi_registry: dict[str, str] = load_known_dois(KNOWN_DOIS_FILE)
+    doi_registry: dict[str, str] = load_known_dois(KNOWN_DOIS_FILE, logger=logger)
     logger.info(f"DOIs conocidos precargados: {len(doi_registry)}")
     print(f"DOIs conocidos:  {len(doi_registry)} (cargados de doi_registry.txt)")
     total = len(pdfs)
