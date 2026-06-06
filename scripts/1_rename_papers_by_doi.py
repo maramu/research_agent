@@ -60,6 +60,7 @@ import re
 import sys
 import time
 import unicodedata
+from datetime import date
 from pathlib import Path
 from typing import Optional
 
@@ -164,7 +165,7 @@ def load_doi_manual(xlsx_path: Path) -> dict[str, str]:
             xlsx_path.parent.mkdir(parents=True, exist_ok=True)
             wb = openpyxl.Workbook()
             ws = wb.active
-            ws.append(["nombre_archivo", "doi"])
+            ws.append(["nombre_archivo", "doi", "fecha_inclusion"])
             wb.save(xlsx_path)
             print(f"Excel DOI manual creado: {xlsx_path}")
         except Exception as e:
@@ -203,15 +204,31 @@ def append_doi_not_found(xlsx_path: Path, filenames: list[str]) -> int:
     try:
         wb = openpyxl.load_workbook(xlsx_path)
         ws = wb.active
+
+        # Localizar o añadir columna fecha_inclusion en la cabecera
+        n_cols = ws.max_column or 2
+        header = [ws.cell(row=1, column=c).value for c in range(1, n_cols + 1)]
+        headers_lower = [str(h).strip().lower() if h is not None else "" for h in header]
+        if "fecha_inclusion" in headers_lower:
+            fecha_col = headers_lower.index("fecha_inclusion") + 1  # 1-based
+        else:
+            fecha_col = n_cols + 1
+            ws.cell(row=1, column=fecha_col).value = "fecha_inclusion"
+
         existing: set[str] = set()
         if ws.max_row is not None and ws.max_row >= 2:
             for row in ws.iter_rows(min_row=2, values_only=True):
                 if row and row[0] is not None:
                     existing.add(str(row[0]).strip())
         added = 0
+        today = date.today().isoformat()
         for name in filenames:
             if name not in existing:
-                ws.append([name, ""])
+                row_data = [None] * fecha_col
+                row_data[0] = name
+                row_data[1] = ""
+                row_data[fecha_col - 1] = today
+                ws.append(row_data)
                 existing.add(name)
                 added += 1
         if added:
@@ -243,6 +260,17 @@ def update_renamed_in_excel(
         wb = openpyxl.load_workbook(xlsx_path)
         ws = wb.active
 
+        # Localizar o añadir columna fecha_inclusion en la cabecera
+        n_cols = ws.max_column or 2
+        header = [ws.cell(row=1, column=c).value for c in range(1, n_cols + 1)]
+        headers_lower = [str(h).strip().lower() if h is not None else "" for h in header]
+        if "fecha_inclusion" in headers_lower:
+            fecha_col = headers_lower.index("fecha_inclusion") + 1  # 1-based
+        else:
+            fecha_col = n_cols + 1
+            ws.cell(row=1, column=fecha_col).value = "fecha_inclusion"
+        today = date.today().isoformat()
+
         # Índice nombre → número de fila (1-based), desde la fila 2
         name_to_row: dict[str, int] = {}
         if ws.max_row is not None and ws.max_row >= 2:
@@ -260,6 +288,7 @@ def update_renamed_in_excel(
             if nuevo in name_to_row:
                 continue
             elif original in name_to_row:
+                # Actualización: NO modificar fecha_inclusion
                 row_idx = name_to_row[original]
                 ws.cell(row=row_idx, column=1).value = nuevo
                 if doi and not ws.cell(row=row_idx, column=2).value:
@@ -267,7 +296,12 @@ def update_renamed_in_excel(
                 name_to_row[nuevo] = name_to_row.pop(original)
                 changed += 1
             else:
-                ws.append([nuevo, doi])
+                # Fila nueva: escribir fecha_inclusion
+                row_data = [None] * fecha_col
+                row_data[0] = nuevo
+                row_data[1] = doi
+                row_data[fecha_col - 1] = today
+                ws.append(row_data)
                 name_to_row[nuevo] = ws.max_row
                 changed += 1
 

@@ -9,6 +9,7 @@ Los cambios se guardan sobreescribiendo el fichero con backup previo (.bak).
 from __future__ import annotations
 
 import sys
+from datetime import date
 from pathlib import Path
 
 import pandas as pd
@@ -228,7 +229,10 @@ action_cols = st.columns([1, 1, 4])
 
 with action_cols[0]:
     if st.button("➕ Añadir fila", use_container_width=True):
-        empty_row = pd.DataFrame([{col: "" for col in df_full.columns}])
+        new_vals = {col: "" for col in df_full.columns}
+        if "fecha_inclusion" in new_vals:
+            new_vals["fecha_inclusion"] = date.today().isoformat()
+        empty_row = pd.DataFrame([new_vals])
         sheets[sheet_name] = pd.concat([df_full, empty_row], ignore_index=True)
         st.session_state["doi_editor_version"] += 1
         st.rerun()
