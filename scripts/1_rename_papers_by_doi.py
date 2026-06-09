@@ -55,6 +55,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import importlib.util
 import logging
 import re
 import sys
@@ -62,7 +63,7 @@ import time
 import unicodedata
 from datetime import date
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 import fitz  # PyMuPDF
 import requests
@@ -146,6 +147,168 @@ def unique_path(path: Path) -> Path:
 
 def already_renamed(filename: str) -> bool:
     return bool(re.match(r"^\d{4}_[a-z0-9]+_.+\.pdf$", filename.lower()))
+
+
+# ============================================================
+# DOI DESDE CSV DE SCOPUS (lookup por título)
+# ============================================================
+
+def _load_normalize_title():
+    """Importa normalize_title() desde 9_cleanup_duplicates.py.
+
+    El módulo empieza por dígito y no es importable con `import`, así que se
+    carga por ruta con importlib. Si falla, se usa un fallback local idéntico
+    para no romper el renombrado.
+    """
+    mod_path = Path(__file__).parent / "9_cleanup_duplicates.py"
+    try:
+        spec = importlib.util.spec_from_file_location("_cleanup_dups", mod_path)
+        mod = importlib.util.module_from_spec(spec)
+        # Registrar antes de exec_module: el módulo define @dataclass y la
+        # maquinaria de dataclasses necesita sys.modules[name] poblado.
+        sys.modules[spec.name] = mod
+        spec.loader.exec_module(mod)  # type: ignore[union-attr]
+        return mod.normalize_title
+    except Exception as e:  # noqa: BLE001
+        log.warning(
+            "No se pudo importar normalize_title de 9_cleanup_duplicates.py (%s); "
+            "uso fallback local", e
+        )
+
+        def _fallback(title: str) -> str:
+            if title is None:
+                return ""
+            text = str(title).lower()
+            text = re.sub(r"[^\w\s]", "", text)
+            return re.sub(r"\s+", " ", text).strip()
+
+        return _fallback
+
+
+_normalize_title_base = _load_normalize_title()
+
+
+def normalize_title(title: str) -> str:
+    """Normalización agresiva título→clave para el lookup contra el CSV.
+
+    Aplica NFKC unicode y delega en normalize_title() de 9_cleanup_duplicates
+    (lowercase, quita puntuación, colapsa espacios). Misma lógica que el
+    detector de duplicados por título, para que las claves coincidan.
+    """
+    if title is None:
+        return ""
+    text = unicodedata.normalize("NFKC", str(title))
+    return _normalize_title_base(text)
+
+
+def _detect_csv_column(df, candidates: list[str]) -> Optional[str]:
+    """Localiza una columna por nombre exacto (case-insensitive) o subcadena.
+
+    Estilo detect_column de 3a_download_pdfs.py.
+    """
+    norm = {str(c).lower().strip(): c for c in df.columns}
+    for cand in candidates:
+        if cand.lower() in norm:
+            return norm[cand.lower()]
+    for c in df.columns:
+        cl = str(c).lower().strip()
+        for cand in candidates:
+            if cand.lower() in cl:
+                return c
+    return None
+
+
+def _clean_csv_doi(value: Any) -> str:
+    """Limpia un DOI del CSV: quita espacios y prefijos URL. No corrige el DOI."""
+    if value is None:
+        return ""
+    s = str(value).strip()
+    if not s or s.lower() == "nan":
+        return ""
+    for prefix in (
+        "https://doi.org/", "http://doi.org/",
+        "https://dx.doi.org/", "http://dx.doi.org/",
+    ):
+        if s.lower().startswith(prefix):
+            s = s[len(prefix):]
+            break
+    return s.strip()
+
+
+def _extract_title_from_filename(stem: str) -> str:
+    """Extrae el título del nombre largo de 3a_download_pdfs.py.
+
+    Formato esperado: "YYYY - Autor - Título largo del paper [10.xxxx_yyy]".
+    Devuelve la parte central (tras el 2º ' - ', sin el bloque ' [10...]').
+    Fallback si no hay corchetes o guiones suficientes: el stem sin el bloque DOI.
+    """
+    # Quitar el sufijo " [10....]" con el DOI embebido (si lo hay)
+    s = re.sub(r"\s*\[10\..*?\]\s*$", "", stem).strip()
+    # El título es lo que queda tras el segundo separador ' - '
+    parts = s.split(" - ")
+    if len(parts) >= 3:
+        return " - ".join(parts[2:]).strip()
+    return s
+
+
+def load_doi_from_csv(csv_path: Path) -> dict[str, str]:
+    """Lee el CSV de Scopus y devuelve {titulo_normalizado: doi}.
+
+    Tolerante: si el CSV no existe, pandas no está disponible, no se puede leer,
+    o faltan las columnas DOI/Title, devuelve {} y avisa con log.warning() en
+    lugar de fallar (el renombrado cae a extract_doi_from_pdf).
+
+    Ante títulos que normalizan a la misma clave con DOIs distintos, conserva el
+    primero y avisa de la ambigüedad.
+    """
+    if not csv_path or not Path(csv_path).exists():
+        log.warning("CSV de DOIs no encontrado: %s — se usará extracción desde PDF", csv_path)
+        return {}
+
+    try:
+        import pandas as pd
+    except ImportError:
+        log.warning("pandas no disponible — no se puede leer --doi-csv %s", csv_path)
+        return {}
+
+    try:
+        df = pd.read_csv(
+            csv_path, dtype=str, encoding="utf-8-sig",
+            sep=None, engine="python",
+        )
+    except Exception as e:  # noqa: BLE001
+        log.warning("No se pudo leer %s (%s) — se usará extracción desde PDF", csv_path, e)
+        return {}
+
+    doi_col = _detect_csv_column(df, ["DOI"])
+    title_col = _detect_csv_column(df, ["Title", "Article title", "Document title"])
+    if not doi_col or not title_col:
+        log.warning(
+            "CSV %s sin columnas DOI/Title reconocibles (columnas=%s) — "
+            "se usará extracción desde PDF", csv_path, list(df.columns)
+        )
+        return {}
+
+    mapping: dict[str, str] = {}
+    for _, row in df.iterrows():
+        doi = _clean_csv_doi(row.get(doi_col))
+        title = row.get(title_col)
+        if not doi or title is None:
+            continue
+        key = normalize_title(title)
+        if not key:
+            continue
+        existing = mapping.get(key)
+        if existing is not None and existing != doi:
+            log.warning(
+                "Título ambiguo en CSV (misma clave, DOI distinto): %r → "
+                "conservo %s, ignoro %s", key[:60], existing, doi
+            )
+            continue
+        mapping[key] = doi
+
+    log.info("CSV de DOIs cargado: %d títulos→DOI desde %s", len(mapping), csv_path)
+    return mapping
 
 
 # ============================================================
@@ -398,8 +561,10 @@ def process_pdf(
     skip_already_renamed: bool,
     failed_folder: Optional[Path],
     doi_manual: dict[str, str],
+    csv_doi_lookup: Optional[dict[str, str]] = None,
 ) -> dict:
     """Procesa un PDF. Si failed_folder es None, los fallidos no se mueven."""
+    csv_doi_lookup = csv_doi_lookup or {}
     original = pdf_path.name
     result: dict = {
         "archivo_original": original,
@@ -409,6 +574,7 @@ def process_pdf(
         "title": "",
         "archivo_resultado": "",
         "estado": "",
+        "estado_doi_origen": "",
         "error": "",
     }
 
@@ -417,12 +583,25 @@ def process_pdf(
         result["estado"] = "IGNORADO_YA_RENOMBRADO"
         return result
 
-    # Consultar DOI manual antes de intentar extraerlo del PDF
+    # Prioridad de obtención del DOI:
+    #   1. doi_manual.xlsx (override manual)
+    #   2. --doi-csv (CSV de Scopus: lookup por título del nombre de fichero)
+    #   3. Fallback: extracción desde metadatos/texto del PDF
     manual_doi = doi_manual.get(original)
+    doi: Optional[str] = None
     if manual_doi:
-        doi: Optional[str] = manual_doi
-    else:
-        # Extraer DOI (extract_doi_from_pdf ya atrapa sus propias excepciones)
+        doi = manual_doi
+    elif csv_doi_lookup:
+        title_key = normalize_title(_extract_title_from_filename(pdf_path.stem))
+        csv_doi = csv_doi_lookup.get(title_key) if title_key else None
+        if csv_doi:
+            doi = csv_doi
+            result["estado_doi_origen"] = "CSV_SCOPUS"
+            log.info("DOI desde CSV Scopus para '%s' → %s", original, doi)
+
+    if not doi:
+        # Fallback: extraer del PDF (extract_doi_from_pdf atrapa sus excepciones)
+        log.debug("Sin DOI manual/CSV para '%s'; intento extract_doi_from_pdf", original)
         try:
             doi = extract_doi_from_pdf(pdf_path)
         except Exception as e:
@@ -504,7 +683,7 @@ def save_csv(rows: list[dict], csv_path: Path) -> None:
     csv_path.parent.mkdir(parents=True, exist_ok=True)
     fieldnames = [
         "archivo_original", "doi", "year", "first_author", "title",
-        "archivo_resultado", "estado", "error",
+        "archivo_resultado", "estado", "estado_doi_origen", "error",
     ]
     with csv_path.open("w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
@@ -535,10 +714,19 @@ def main() -> int:
         "--doi-manual", default=str(DEFAULT_DOI_MANUAL),
         help="Excel con DOIs manuales: columna A = nombre PDF, columna B = DOI"
     )
+    parser.add_argument(
+        "--doi-csv", default=None,
+        help="CSV de Scopus (columnas DOI, Title) para resolver el DOI por título "
+             "del nombre de fichero antes de extraerlo del PDF"
+    )
     args = parser.parse_args()
 
     xlsx_path = Path(args.doi_manual)
     doi_manual = load_doi_manual(xlsx_path)
+
+    csv_doi_lookup: dict[str, str] = {}
+    if args.doi_csv:
+        csv_doi_lookup = load_doi_from_csv(Path(args.doi_csv))
 
     folder = Path(args.folder).expanduser().resolve()
     if not folder.exists() or not folder.is_dir():
@@ -562,6 +750,8 @@ def main() -> int:
     print(f"Modo:        {'RENOMBRADO REAL' if args.apply else 'PREVIEW'}")
     print(f"Fallidos:    {'→ subcarpeta fallidos' if args.move_failed else 'se quedan en su lugar'}")
     print(f"DOI manual:  {len(doi_manual)} entradas ({args.doi_manual})")
+    if args.doi_csv:
+        print(f"DOI CSV:     {len(csv_doi_lookup)} títulos→DOI ({args.doi_csv})")
     print(f"CSV salida:  {csv_path}")
     print("-" * 90)
 
@@ -575,6 +765,7 @@ def main() -> int:
             skip_already_renamed=not args.no_skip_renamed,
             failed_folder=failed_folder,
             doi_manual=doi_manual,
+            csv_doi_lookup=csv_doi_lookup,
         )
         rows.append(row)
 

@@ -503,10 +503,14 @@ def run_scopus(
             results[cat] = {"status": "error", "stage": "download", "details": dl_result}
             continue
 
-        # Renombrar PDFs por DOI antes de procesar
+        # Renombrar PDFs por DOI antes de procesar.
+        # --doi-csv usa el CSV de Scopus como fuente primaria del DOI (por título),
+        # más fiable que extraerlo del texto del PDF.
         rename_result = run_step(
             "1_rename_papers_by_doi.py",
-            ["--folder", str(pdfs_dir), "--apply"],
+            ["--folder", str(pdfs_dir),
+             "--apply",
+             "--doi-csv", str(csv_path)],
             on_output=handler,
             label=f"rename [{cat}]",
         )
