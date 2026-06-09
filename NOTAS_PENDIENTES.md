@@ -4,6 +4,18 @@
 
 ## Verificaciones completadas
 
+### ✅ Renombrado automático por DOI en pipeline (completado 2026-06-09)
+
+Fix implementado en `pipeline.py`:
+- `run_scopus()` (línea ~495): renombra PDFs por DOI **después de descargar, antes de procesar**
+- `run_inbox_process()` (línea ~615): renombra PDFs en inbox **después de screen [apply], antes de detectar categorías**
+
+Si el renombrado falla (DOI no en Crossref), se emite warning pero el pipeline continúa con los nombres originales.
+
+Resultado: **Cero artefactos huérfanos** en futuras ejecuciones de `run_scopus()` e `run_inbox()`.
+
+---
+
 ### ✅ Fix guards autenticación páginas privadas (2026-06-05)
 
 Añadido guard de autenticación en las 6 páginas que carecían de él:
