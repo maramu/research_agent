@@ -305,6 +305,15 @@ def build_registry(categories: list[str], base: Path) -> dict[str, list[PaperRec
     return dict(registry)
 
 
+def build_stem_index(registry: dict[str, list[PaperRecord]]) -> dict[tuple[str, str], PaperRecord]:
+    """Índice {(category, stem): PaperRecord} para lookup desde hash_dups."""
+    index: dict[tuple[str, str], PaperRecord] = {}
+    for records in registry.values():
+        for rec in records:
+            index[(rec.category, rec.stem)] = rec
+    return index
+
+
 def choose_keep_intra(records: list[PaperRecord]) -> tuple[PaperRecord, str]:
     ordered = sorted(
         records,
@@ -563,6 +572,65 @@ def apply_cleanup(decisions: list[DuplicateDecision], base: Path) -> list[Path]:
     return deleted_files
 
 
+def apply_hash_cleanup(
+    hash_dups: list[dict],
+    stem_index: dict[tuple[str, str], PaperRecord],
+    base: Path,
+) -> tuple[list[Path], int, list[str]]:
+    """Elimina duplicados por hash PDF usando la misma lógica de desempate que DOI."""
+    deleted_files: list[Path] = []
+    removed_count = 0
+    affected: set[str] = set()
+    meta_decisions: list[DuplicateDecision] = []
+
+    for group in hash_dups:
+        papers = group["papers"]
+        if len(papers) < 2:
+            continue
+
+        # Misma prioridad que choose_keep_intra: nombre limpio Crossref > stem alfabético
+        sorted_papers = sorted(
+            papers,
+            key=lambda p: (not _is_clean_stem(p["paper_id"]), p["paper_id"].lower()),
+        )
+        keep_paper = sorted_papers[0]
+
+        for remove_paper in sorted_papers[1:]:
+            category = remove_paper["category"]
+            stem = remove_paper["paper_id"]
+            project_dir = base / category
+
+            for path in candidate_paths(project_dir, stem):
+                if path.exists():
+                    path.unlink()
+                    deleted_files.append(path)
+                    log.info("Hash-dup eliminado: %s", path)
+                else:
+                    log.debug("No existe (hash-dup): %s", path)
+
+            affected.add(category)
+            removed_count += 1
+
+            # Reescribir JSONL si existe registro para el eliminado
+            remove_rec = stem_index.get((category, stem))
+            if remove_rec is not None:
+                keep_rec = stem_index.get((keep_paper["category"], keep_paper["paper_id"]))
+                meta_decisions.append(
+                    DuplicateDecision(
+                        doi=remove_rec.doi,
+                        duplicate_type="hash",
+                        keep=keep_rec if keep_rec is not None else remove_rec,
+                        remove=remove_rec,
+                        reason="PDF idéntico por SHA-256; nombre limpio Crossref > stem alfabético",
+                    )
+                )
+
+    if meta_decisions:
+        rewrite_metadata(meta_decisions)
+
+    return deleted_files, removed_count, sorted(affected)
+
+
 # ============================================================
 # DETECCIÓN AVANZADA DE DUPLICADOS
 # ============================================================
@@ -765,23 +833,33 @@ def main() -> int:
         print(f"Log: {LOG_FILE}")
         return 0
 
-    if not decisions:
+    if not decisions and not hash_dups:
         print("No hay secundarios que eliminar.")
         print(f"Log: {LOG_FILE}")
         return 0
 
-    deleted_files = apply_cleanup(decisions, base)
-    affected = affected_categories(decisions)
+    stem_index = build_stem_index(registry)
+
+    deleted_doi: list[Path] = []
+    if decisions:
+        deleted_doi = apply_cleanup(decisions, base)
+    affected_doi = affected_categories(decisions)
+
+    deleted_hash, hash_removed_count, affected_hash = apply_hash_cleanup(hash_dups, stem_index, base)
+
+    all_deleted = deleted_doi + deleted_hash
+    all_affected = sorted(set(affected_doi) | set(affected_hash))
 
     print("")
-    print(f"Duplicados eliminados: {len(decisions)}")
+    print(f"Duplicados DOI eliminados: {len(decisions)}")
+    print(f"Duplicados hash eliminados: {hash_removed_count}")
     print("Archivos eliminados:")
-    if deleted_files:
-        for path in deleted_files:
+    if all_deleted:
+        for path in all_deleted:
             print(f"  {path}")
     else:
         print("  (ninguno; los archivos secundarios ya no existían)")
-    print_reindex_commands(affected, base)
+    print_reindex_commands(all_affected, base)
     print(f"Log: {LOG_FILE}")
     return 0
 
