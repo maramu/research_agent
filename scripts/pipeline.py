@@ -493,6 +493,16 @@ def run_scopus(
             results[cat] = {"status": "error", "stage": "download", "details": dl_result}
             continue
 
+        # Renombrar PDFs por DOI antes de procesar
+        rename_result = run_step(
+            "1_rename_papers_by_doi.py",
+            ["--folder", str(pdfs_dir), "--apply"],
+            on_output=handler,
+            label=f"rename [{cat}]",
+        )
+        if rename_result["returncode"] != 0:
+            log.warning("Renombrado falló para '%s', continuamos con nombres originales", cat)
+
         # Cadena de procesado
         proc_result = process_category(cat, on_output=handler)
         results[cat] = proc_result
@@ -604,6 +614,16 @@ def run_inbox_process(
     )
     if screen_result["returncode"] != 0:
         return {"status": "error", "stage": "screen", "details": screen_result}
+
+    # Renombrar PDFs por DOI antes de procesar
+    rename_result = run_step(
+        "1_rename_papers_by_doi.py",
+        ["--folder", str(INBOX_DIR), "--apply"],
+        on_output=handler,
+        label="rename [inbox]",
+    )
+    if rename_result["returncode"] != 0:
+        log.warning("Renombrado falló en inbox, continuamos")
 
     affected = detect_affected_categories()
     if not affected:
