@@ -1506,7 +1506,7 @@ class DownloadManager:
             try:
                 with open(_REGISTRY_TXT, encoding="utf-8") as _rf:
                     for _line in _rf:
-                        _d = _line.strip().lower()
+                        _d = _line.strip().split("\t")[0].lower()
                         if _d:
                             known_corpus_dois.add(_d)
                 log.info("doi_registry.txt: %d DOIs conocidos cargados", len(known_corpus_dois))

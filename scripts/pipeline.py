@@ -466,6 +466,16 @@ def run_scopus(
     except Exception as e:
         log.warning("No se pudo leer active_categories.yml: %s", e)
 
+    # Actualizar doi_registry antes de descargar para evitar duplicados
+    log.info("Actualizando registro de DOIs antes de descargar...")
+    try:
+        n_dois = build_doi_registry_from_nas()
+        log.info("Registro actualizado: %d DOIs conocidos en el NAS", n_dois)
+        if handler:
+            handler(f"✓ Registro DOIs actualizado: {n_dois} DOIs conocidos")
+    except Exception as e:
+        log.warning("No se pudo actualizar doi_registry.txt: %s", e)
+
     # --- Paso 2 y 3: descargar + procesar por categoría ---
     for cat in target_cats:
         log.info("═" * 50)
