@@ -4,6 +4,47 @@
 
 ## Verificaciones completadas
 
+### ✅ Pipeline ingesta Scopus — fixes robustez (2026-06-09)
+
+Serie de fixes críticos detectados durante la ingesta manual tras corte de luz:
+
+**Bug doi_registry check (`3a_download_pdfs.py` línea 1509):**
+- `_line.strip().lower()` → `_line.strip().split("\t")[0].lower()`
+- El fichero `doi_registry.txt` tiene formato `doi\tcategory/filename`. Sin el split
+  se añadía la línea completa al set y la comparación `doi.lower() in known_corpus_dois`
+  siempre fallaba → descargaba todos los artículos en cada ingesta sin detectar duplicados.
+
+**Actualizar doi_registry antes de descargar (`pipeline.py` — `run_scopus()`):**
+- Añadido `build_doi_registry_from_nas()` justo antes del bucle `for cat in target_cats:`
+- Equivalente a lo que ya hacía `run_inbox_screen()`. Garantiza que el registro refleja
+  el estado real del NAS antes de cada descarga.
+
+**Renombrado automático por DOI en `run_scopus()` (`pipeline.py`):**
+- Insertado paso `1_rename_papers_by_doi.py --apply` después de descargar y antes
+  de `process_category()`. Si falla, warning y continúa.
+
+**Renombrado automático por DOI en `run_inbox_process()` (`pipeline.py`):**
+- Mismo fix: renombrado antes de `detect_affected_categories()`.
+
+**Eliminación automática de duplicados por hash en `9_cleanup_duplicates.py`:**
+- Nueva función `apply_hash_cleanup()`: ordena por prioridad nombre limpio, elimina
+  PDF + artefactos de los secundarios. `main()` con `--apply` ahora procesa también
+  hash_dups además de DOI dups.
+
+**DOI desde CSV de Scopus en `1_rename_papers_by_doi.py`:**
+- Nueva fuente de DOI: prioridad 2 entre doi_manual y extract_doi_from_pdf.
+- `load_doi_from_csv(csv_path)` → `{título_normalizado: doi}` usando normalize_title
+  de 9_cleanup_duplicates.py (importado por importlib).
+- `_extract_title_from_filename(stem)` extrae el título del nombre largo de Scopus.
+- `--doi-csv PATH` nuevo argumento CLI.
+- `pipeline.py run_scopus()` pasa `--doi-csv str(csv_path)` al renombrado.
+- Fallback completo si no se pasa `--doi-csv` o el CSV no es legible.
+
+**Resultado verificado:** prueba controlada con `--max 20` mostró `Ya en corpus: N`
+alto, `Descargados: N` solo artículos realmente nuevos, 0 duplicados, 0 huérfanos.
+
+---
+
 ### ✅ Renombrado automático por DOI en pipeline (completado 2026-06-09)
 
 Fix implementado en `pipeline.py`:

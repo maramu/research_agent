@@ -111,20 +111,20 @@ research_agent/
 | Script | Función | Estado |
 |---|---|---|
 | `0_scopus_api.py` | Consulta Scopus Search API por categoría. Queries en `config/scopus_queries.yml` | ✅ |
-| `1_rename_papers_by_doi.py` | Renombra PDFs via DOI + Crossref. Gestiona `doi_manual.xlsx` | ✅ |
+| `1_rename_papers_by_doi.py` | Renombra PDFs via DOI + Crossref. Gestiona `doi_manual.xlsx`. **2026-06-09**: nueva fuente DOI `--doi-csv` (CSV Scopus, prioridad entre doi_manual y extracción PDF); `load_doi_from_csv` + `_extract_title_from_filename` + `normalize_title` (reutiliza 9_cleanup). Fallback completo si no se pasa. | ✅ |
 - Eliminada `DOI_REGEX` duplicada y funciones `clean_doi`, `extract_doi_from_text`, `extract_doi_from_pdf` — ahora importa desde `utils.pdf_utils` (commit d1ea84d)
 | `2_screen_pdfs.py` | Clasifica PDFs en 8 categorías via keywords + Ollama | ✅ |
 | `3_process_corpus.py` | PDF → TEI (GROBID) → MD clean → chunks JSONL | ✅ |
-| `3a_download_pdfs.py` | Descarga PDFs desde CSV Scopus via Unpaywall + Elsevier API | ✅ |
+| `3a_download_pdfs.py` | Descarga PDFs desde CSV Scopus via Unpaywall + Elsevier API. **Bug fix 2026-06-09**: doi_registry check corregido (`_line.strip().split("\t")[0].lower()` — el fichero tiene formato `doi\tcategory/filename`; antes el split tab faltaba y nunca detectaba duplicados ya en corpus). | ✅ |
 | `3b_summarize.py` | Genera resúmenes con qwen3:14b | ✅ |
 | `4_extract_metadata.py` | Extrae metadatos de TEI XML (título, DOI, autores, refs). Añade `stable_id`, `processed_date`, `source_type`, `download_source`, `download_url`, `access_type`, `download_date`. Arg `--source-type`. Verificado en producción 2026-05-27. | ✅ |
 | `5_build_embeddings.py` | Genera índice FAISS con bge-m3 via Ollama. **Modo incremental por defecto**: solo embeddea papers nuevos (no en `indexed_papers.json`); `--force` para re-indexar todo desde cero. | ✅ |
 | `6_make_packages.py` | Crea paquetes NotebookLM (FULLTEXT, REFERENCES, INDEX) | ✅ |
 | `7_make_master_index.py` | Genera MASTER_INDEX.md por categoría | ✅ |
 | `8_query_rag.py` | Consultas RAG sobre índice FAISS (CLI) | ✅ |
-| `9_cleanup_duplicates.py` | Detecta y elimina PDFs duplicados por DOI. Detección avanzada por título normalizado y hash SHA-256 con informe `metadatos/duplicate_report.xlsx` (3 hojas: DOI/Titulo/Hash) | ✅ |
+| `9_cleanup_duplicates.py` | Detecta y elimina PDFs duplicados por DOI. Detección avanzada por título normalizado y hash SHA-256 con informe `metadatos/duplicate_report.xlsx` (3 hojas: DOI/Titulo/Hash). **2026-06-09**: nueva función `apply_hash_cleanup()` — `--apply` ahora elimina también duplicados por hash PDF (no solo DOI); desempate por nombre limpio Crossref. | ✅ |
 | `utils/corpus_manifest.py` | Genera `corpus_manifest.json` por categoría: n_pdfs, n_chunks, quality_score, faiss_indexes, faiss_stale, keywords_hash, git_commit. CLI + API pública `read_manifest()` | ✅ |
-| `pipeline.py` | Orquestador: cinco flujos (`run_scopus`, `run_inbox`, `run_adhoc`, `integrate_adhoc`, `promote_adhoc_to_category`). Helpers: `_copy_files_skip_existing()`. `_CANONICAL_CATEGORIES` importado de `utils/constants.py` (fallback inline si `ImportError`). Importable por Streamlit | ✅ |
+| `pipeline.py` | Orquestador: cinco flujos (`run_scopus`, `run_inbox`, `run_adhoc`, `integrate_adhoc`, `promote_adhoc_to_category`). Helpers: `_copy_files_skip_existing()`. `_CANONICAL_CATEGORIES` importado de `utils/constants.py` (fallback inline si `ImportError`). Importable por Streamlit. **Fixes 2026-06-09**: (1) `run_scopus()` llama a `build_doi_registry_from_nas()` antes del bucle de categorías; (2) `run_scopus()` pasa `--doi-csv` al paso de renombrado; (3) `run_inbox_process()` añade paso de renombrado antes de `detect_affected_categories()`. | ✅ |
 | `run_pipeline.py` | CLI del orquestador con subcomandos | ✅ |
 | `streamlit_app/` | Interfaz web sobre el pipeline (ver sección dedicada) | ✅ |
 | `utils/pdf_utils.py` | Funciones comunes (DOI, slugify, texto) | ✅ |
