@@ -19,6 +19,7 @@ for d in (str(STREAMLIT_APP_DIR), str(SCRIPTS_DIR)):
         sys.path.insert(0, d)
 
 from utils.export_refs import build_papers_zip, load_papers, to_bibtex
+from utils.constants import CANONICAL_SECTIONS
 from app_utils import (
     ANTHROPIC_MODELS, OPENAI_MODELS, OLLAMA_MODELS_LLM, OLLAMA_MODEL_EMBED,
     OLLAMA_HOST, ANTHROPIC_API_KEY, OPENAI_API_KEY,
@@ -151,6 +152,12 @@ with st.sidebar:
                          format_func=lambda p: phase_labels[p])
 
     k = st.slider("Top-k chunks", 5, 40, 15)
+    sel_sections = st.multiselect(
+        "Secciones",
+        options=CANONICAL_SECTIONS,
+        default=[],
+        help="Filtra por section_canonical (item 32/34). Vacío = todas.",
+    )
 
     st.divider()
     st.header("Síntesis")
@@ -251,17 +258,29 @@ with st.spinner("Buscando fragmentos relevantes…"):
     ol_client = _ollama_client()
     resp = ol_client.embeddings(model=embed_model, prompt=focus)
     qv = np.array(resp["embedding"], dtype="float32").reshape(1, -1)
-    D, I = index.search(qv, k * 3)
+    has_filter = bool(sel_sections)
+    n_fetch    = index.ntotal if has_filter else min(index.ntotal, k * 3)
+    D, I = index.search(qv, n_fetch)
 
 results = []
 for dist, idx in zip(D[0].tolist(), I[0].tolist()):
     if idx < 0 or idx >= len(meta):
         continue
-    results.append((dist, idx, meta[idx]))
+    m = meta[idx]
+    if sel_sections and m.get("section_canonical") not in sel_sections:
+        continue
+    results.append((dist, idx, m))
     if len(results) >= k:
         break
 
 if not results:
+    if sel_sections:
+        st.info(
+            "Sin resultados para las secciones seleccionadas "
+            f"({', '.join(sel_sections)}). Es posible que este índice no esté "
+            "re-indexado con `section_canonical` (item 32): re-trocea y "
+            "re-indexa con `--force` antes de filtrar por sección."
+        )
     st.warning("Sin resultados. Prueba con otro foco temático o más chunks.")
     st.stop()
 
@@ -406,7 +425,8 @@ with st.expander(f"Fragmentos recuperados ({len(results)})", expanded=False):
     for rank, (dist, _, m) in enumerate(results, 1):
         st.markdown(
             f"**[{rank}]** `{m.get('paper_id', '?')}` · "
-            f"{m.get('section', '?')} · dist={dist:.4f}"
+            f"{m.get('section', '?')} ({m.get('section_canonical', '?')}) · "
+            f"dist={dist:.4f}"
         )
         st.markdown(m.get("text", ""))
         st.divider()

@@ -101,7 +101,12 @@ def main():
     ap.add_argument("--k",       type=int, default=DEFAULT_K, help="Número de resultados")
     ap.add_argument("--type",    default="", help="Filtrar por type: text|table (opcional)")
     ap.add_argument("--paper",   default="", help="Filtrar por paper_id contiene (opcional)")
+    ap.add_argument("--sections", default="",
+                    help="Filtrar por section_canonical, separadas por coma "
+                         "(p.ej. methods,results,table). Vacío = todas.")
     args = ap.parse_args()
+
+    allowed_sections = {s.strip() for s in args.sections.split(",") if s.strip()}
 
     base    = Path(args.base)
     emb_dir = base / args.project / "embeddings" / args.phase
@@ -129,8 +134,10 @@ def main():
     index = faiss.read_index(str(index_path))
     meta  = load_metadata(emb_dir)
 
-    qv       = embed_query(client, args.query, model).reshape(1, -1)
-    D, I     = index.search(qv, args.k * 5)
+    qv         = embed_query(client, args.query, model).reshape(1, -1)
+    has_filter = bool(args.type or args.paper or allowed_sections)
+    n_fetch    = index.ntotal if has_filter else min(index.ntotal, args.k * 5)
+    D, I       = index.search(qv, n_fetch)
 
     results = []
     for dist, idx in zip(D[0].tolist(), I[0].tolist()):
@@ -140,6 +147,8 @@ def main():
         if args.type  and m.get("type")     != args.type:
             continue
         if args.paper and args.paper not in m.get("paper_id", ""):
+            continue
+        if allowed_sections and m.get("section_canonical") not in allowed_sections:
             continue
         results.append((dist, idx, m))
         if len(results) >= args.k:
@@ -154,7 +163,7 @@ def main():
         print(
             f"[{rank}] dist={dist:.4f} | {phase_tag}"
             f"paper_id={m.get('paper_id')} | "
-            f"section={m.get('section')} | type={m.get('type')}"
+            f"section={m.get('section')} ({m.get('section_canonical','?')}) | type={m.get('type')}"
         )
         snippet = m.get("text", "")[:700].replace("\n", " ")
         print(f"     {snippet}…")

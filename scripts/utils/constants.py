@@ -17,3 +17,11 @@ CANONICAL_CATEGORIES = [
     "advanced_oxidation_processes",
     "bioleaching_critical_materials",
 ]
+
+# Secciones canónicas (debe coincidir con canonical_section() de
+# 3_process_corpus.py, item 32, más "table"). Fuente de verdad única para
+# el filtrado por sección en la query RAG (item 34).
+CANONICAL_SECTIONS = [
+    "abstract", "introduction", "methods", "results",
+    "discussion", "conclusion", "table", "other",
+]
