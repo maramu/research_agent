@@ -399,3 +399,21 @@ UCA) porque:
 - GROBID corre en Docker ARM64 nativo (`grobid/grobid:0.9.0-crf`) en pciq22. Compose en `~/grobid-compose.yml`. Docker Desktop configurado para arrancar al login.
 - Mac mini de casa ya no ejecuta Streamlit ni pipeline. Servicio launchd eliminado. Modo hibernación restaurado (pmset). Repo conservado en `/Volumes/Disco/proyectos/research_agent/` para edición.
 - Datos migrados del NAS Synology (casa) al SSD Crucial X9 4TB montado en `/Volumes/research/` en pciq22. NAS pasa a backup.
+
+### Ollama — instalación en pciq22
+
+- **Método:** tarball oficial de GitHub (NO Homebrew, NO install.sh — ambos dan versiones corruptas en ARM64)
+- **Binario:** `/usr/local/bin/ollama`
+- **Libs:** `/usr/local/lib/ollama/` (llama-server, llama-quantize, libggml-*.dylib)
+- **Modelos:** `~/.ollama/models/`
+- **Servicio:** LaunchAgent `~/Library/LaunchAgents/com.martin.ollama.plist` (`OLLAMA_HOST=0.0.0.0:11434`)
+- **Logs:** `~/ollama.launchd.log` / `~/ollama.launchd.err`
+
+**Para actualizar:**
+1. Descargar `https://github.com/ollama/ollama/releases/download/vX.Y.Z/ollama-darwin.tgz`
+2. `launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.martin.ollama.plist`
+3. Extraer y copiar binarios a `/usr/local/bin/` y `/usr/local/lib/ollama/`
+4. `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.martin.ollama.plist`
+
+⚠️ Los modelos en `~/.ollama/models/` no se tocan al actualizar.
+⚠️ Evitar abrir Ollama.app — interfiere con el servicio headless.
