@@ -3,6 +3,8 @@
 Constantes compartidas entre scripts/ y streamlit_app/.
 """
 
+import re
+
 # Modelo de embedding por defecto usado en build_embeddings y query_rag.
 # Cambiar aquí afecta a todos los puntos de uso.
 OLLAMA_MODEL_EMBED = "bge-m3"
@@ -25,3 +27,9 @@ CANONICAL_SECTIONS = [
     "abstract", "introduction", "methods", "results",
     "discussion", "conclusion", "table", "other",
 ]
+
+
+def year_from_paper_id(pid: str):
+    """Devuelve el primer año (1900–2039) hallado en el paper_id, o None."""
+    m = re.search(r"(19\d{2}|20[0-3]\d)", pid or "")
+    return int(m.group(1)) if m else None

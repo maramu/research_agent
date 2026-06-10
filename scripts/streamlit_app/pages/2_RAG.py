@@ -45,7 +45,7 @@ from app_utils import (
     record_rag_query, record_rag_query_full, check_password, is_public_app,
 )
 from utils.export_refs import build_papers_zip
-from utils.constants import CANONICAL_SECTIONS
+from utils.constants import CANONICAL_SECTIONS, year_from_paper_id
 
 st.set_page_config(page_title="RAG", page_icon="🔍", layout="wide")
 
@@ -183,6 +183,11 @@ with st.sidebar:
         default=[],
         help="Filtra por section_canonical (item 32/34). Vacío = todas.",
     )
+    usar_year = st.checkbox("Filtrar por año", value=False)
+    if usar_year:
+        ys, ye = st.slider("Rango de años", 1990, 2026, (1990, 2026))
+    else:
+        ys = ye = None
 
     st.divider()
     st.header("Síntesis LLM")
@@ -323,7 +328,8 @@ if not go:
 with st.spinner("Generando embedding y buscando…"):
     ollama_client = get_ollama_client()
     qv = embed_query(ollama_client, query, embed_model).reshape(1, -1)
-    has_filter = bool(type_filter != "(todos)" or paper_filter or sel_sections)
+    has_filter = bool(type_filter != "(todos)" or paper_filter or sel_sections
+                      or ys or ye)
     n_fetch    = index.ntotal if has_filter else min(index.ntotal, k * 5)
     D, I = index.search(qv, n_fetch)
 
@@ -337,6 +343,9 @@ for dist, idx in zip(D[0].tolist(), I[0].tolist()):
     if paper_filter and paper_filter.lower() not in m.get("paper_id", "").lower():
         continue
     if sel_sections and m.get("section_canonical") not in sel_sections:
+        continue
+    year = m.get("year") or year_from_paper_id(m.get("paper_id", ""))
+    if (ys and (year is None or year < ys)) or (ye and (year is None or year > ye)):
         continue
     results.append((dist, idx, m))
     if len(results) >= k:
@@ -516,10 +525,11 @@ for rank, (dist, idx, m) in enumerate(results, start=1):
     section_c  = m.get("section_canonical", "?")
     chunk_type = m.get("type", "?")
     phase_tag  = m.get("phase", "?")
+    year       = m.get("year") or year_from_paper_id(paper_id)
     snippet    = m.get("text", "")
 
     with st.expander(
-        f"**[{rank}]** dist={dist:.4f} · `{paper_id}` · {section} ({section_c}) · {chunk_type}",
+        f"**[{rank}]** dist={dist:.4f} · `{paper_id}` · {year} · {section} ({section_c}) · {chunk_type}",
         expanded=(rank <= 3),
     ):
         st.caption(f"Fase: `{phase_tag}` · Tipo: `{chunk_type}` · Distancia: {dist:.4f}")

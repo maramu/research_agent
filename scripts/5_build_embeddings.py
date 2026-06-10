@@ -89,7 +89,7 @@ else:
 _SCRIPTS_DIR = Path(__file__).parent
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
-from utils.constants import OLLAMA_MODEL_EMBED  # noqa: E402
+from utils.constants import OLLAMA_MODEL_EMBED, year_from_paper_id  # noqa: E402
 
 DEFAULT_BASE       = "/Volumes/research/categorias"
 DEFAULT_MODEL      = OLLAMA_MODEL_EMBED
@@ -112,6 +112,48 @@ def _load_indexed_papers(out_dir: Path) -> tuple[set, str]:
 def _save_indexed_papers(out_dir: Path, paper_ids: set, model: str) -> None:
     data = {"paper_ids": sorted(paper_ids), "model": model}
     (out_dir / INDEXED_PAPERS_FILE).write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+
+_YEAR_KEYS = ("year", "año", "anio", "publication_year", "pub_year")
+
+
+def _record_year(rec):
+    for k in _YEAR_KEYS:
+        v = rec.get(k)
+        if v:
+            try:
+                return int(str(v)[:4])
+            except (ValueError, TypeError):
+                pass
+    return None
+
+
+def _load_pid2year(project_dir: Path) -> dict:
+    """Mapea paper_id y stable_id → año desde papers_metadata.jsonl.
+    Tolerante: si no existe o falla la lectura, devuelve {} (year vendrá del
+    fallback por regex sobre paper_id)."""
+    pid2year: dict = {}
+    meta_path = project_dir / "metadata" / "papers_metadata.jsonl"
+    if not meta_path.exists():
+        return pid2year
+    try:
+        with meta_path.open(encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                rec = json.loads(line)
+                y = _record_year(rec)
+                if y is None:
+                    continue
+                for key in ("paper_id", "stable_id"):
+                    pid = rec.get(key)
+                    if pid:
+                        pid2year[pid] = y
+    except Exception as e:
+        print(f"Advertencia: no se pudo leer papers_metadata.jsonl ({e}). "
+              "Year se derivará solo por regex sobre paper_id.")
+    return pid2year
 
 
 def phase_from_path(p: Path) -> str:
@@ -212,6 +254,8 @@ def main():
         print(f"Papers ya indexados: {len(indexed_ids)}")
     print("")
 
+    pid2year = _load_pid2year(project_dir)
+
     all_vectors: list = []
     all_meta:    list = []
     buf_texts:   list = []
@@ -220,6 +264,8 @@ def main():
     for rec in iter_chunks(chunks_dir, args.phase):
         if incremental and rec.get("paper_id", "") in indexed_ids:
             continue
+        paper_id = rec.get("paper_id", "")
+        rec["year"] = pid2year.get(paper_id) or year_from_paper_id(paper_id)
         buf_texts.append(rec["text"])
         buf_meta.append(rec)
 

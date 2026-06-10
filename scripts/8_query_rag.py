@@ -59,7 +59,7 @@ import ollama
 from dotenv import load_dotenv
 
 sys.path.insert(0, str(Path(__file__).parent))
-from utils.constants import OLLAMA_MODEL_EMBED
+from utils.constants import OLLAMA_MODEL_EMBED, year_from_paper_id
 
 # ── Cargar config/.env ────────────────────────────────────────────────────────
 _ENV_FILE = Path(__file__).parent.parent / "config" / ".env"
@@ -104,6 +104,8 @@ def main():
     ap.add_argument("--sections", default="",
                     help="Filtrar por section_canonical, separadas por coma "
                          "(p.ej. methods,results,table). Vacío = todas.")
+    ap.add_argument("--year-start", type=int, default=None, help="Año desde (incl.)")
+    ap.add_argument("--year-end",   type=int, default=None, help="Año hasta (incl.)")
     args = ap.parse_args()
 
     allowed_sections = {s.strip() for s in args.sections.split(",") if s.strip()}
@@ -135,7 +137,8 @@ def main():
     meta  = load_metadata(emb_dir)
 
     qv         = embed_query(client, args.query, model).reshape(1, -1)
-    has_filter = bool(args.type or args.paper or allowed_sections)
+    has_filter = bool(args.type or args.paper or allowed_sections
+                      or args.year_start or args.year_end)
     n_fetch    = index.ntotal if has_filter else min(index.ntotal, args.k * 5)
     D, I       = index.search(qv, n_fetch)
 
@@ -150,6 +153,10 @@ def main():
             continue
         if allowed_sections and m.get("section_canonical") not in allowed_sections:
             continue
+        year = m.get("year") or year_from_paper_id(m.get("paper_id", ""))
+        if (args.year_start and (year is None or year < args.year_start)) or \
+           (args.year_end   and (year is None or year > args.year_end)):
+            continue
         results.append((dist, idx, m))
         if len(results) >= args.k:
             break
@@ -160,9 +167,10 @@ def main():
 
     for rank, (dist, idx, m) in enumerate(results, start=1):
         phase_tag = f"[{m.get('phase', '?')}] " if args.phase == "all" else ""
+        year = m.get("year") or year_from_paper_id(m.get("paper_id", ""))
         print(
             f"[{rank}] dist={dist:.4f} | {phase_tag}"
-            f"paper_id={m.get('paper_id')} | "
+            f"paper_id={m.get('paper_id')} | year={year} | "
             f"section={m.get('section')} ({m.get('section_canonical','?')}) | type={m.get('type')}"
         )
         snippet = m.get("text", "")[:700].replace("\n", " ")
