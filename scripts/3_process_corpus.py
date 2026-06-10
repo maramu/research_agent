@@ -362,27 +362,66 @@ def extract_tables_md(tei_xml: str) -> List[Dict]:
 # CHUNKING
 # ============================================================
 
-def split_by_headings(md: str) -> List[Tuple[str, str]]:
-    lines       = md.splitlines()
-    sections: List[Tuple[str, List[str]]] = []
+# Keyword patterns for mapping a heading title to a canonical section name.
+# Order matters: first match wins.
+_CANON_PATTERNS: List[Tuple[str, List[str]]] = [
+    ("abstract",     ["abstract"]),
+    ("introduction", ["introduction", "background", "motivation"]),
+    ("methods",      ["method", "material", "experiment", "procedure",
+                      "setup", "approach", "protocol", "design", "operational"]),
+    ("results",      ["result", "finding", "performance", "measurement",
+                      "characterization", "evaluation", "removal", "efficiency"]),
+    ("discussion",   ["discussion"]),
+    ("conclusion",   ["conclusion", "summary", "outlook", "future", "perspective"]),
+]
+
+
+def canonical_section(title: str) -> str:
+    """Maps a heading title to a canonical section label.
+
+    Returns one of: abstract | introduction | methods | results |
+    discussion | conclusion | other.
+    """
+    t = title.lower()
+    for canon, keywords in _CANON_PATTERNS:
+        for kw in keywords:
+            if kw in t:
+                return canon
+    return "other"
+
+
+def split_by_headings(md: str) -> List[Tuple[str, str, int]]:
+    """Split md_clean into (title, text, level) sections.
+
+    level = number of leading '#' characters (1–6). Preamble (text before
+    the first heading) gets level 0. Chunk sizes and overlap are unchanged.
+    """
+    lines         = md.splitlines()
+    sections: List[Tuple[str, List[str], int]] = []
     current_title = "Preamble"
+    current_level = 0
     buf: List[str] = []
-    heading_re  = re.compile(r"^(#{1,6})\s+(.*\S)\s*$")
+    heading_re    = re.compile(r"^(#{1,6})\s+(.*\S)\s*$")
 
     for ln in lines:
         m = heading_re.match(ln)
         if m:
             if buf:
-                sections.append((current_title, buf))
+                sections.append((current_title, buf, current_level))
             current_title = m.group(2).strip()
+            current_level = len(m.group(1))
             buf = []
         else:
             buf.append(ln)
 
     if buf:
-        sections.append((current_title, buf))
+        sections.append((current_title, buf, current_level))
 
-    return [(t, norm_space("\n".join(b))) for t, b in sections if norm_space("\n".join(b))]
+    return [
+        (t, norm_space("\n".join(b)), lvl)
+        for t, b, lvl in sections
+        if norm_space("\n".join(b))
+    ]
 
 
 def chunk_text(text: str, target_words: int, overlap_words: int) -> List[str]:
@@ -454,42 +493,65 @@ def build_chunk_records(
     target_words: int,
     overlap_words: int,
 ) -> List[Dict]:
-    sections    = split_by_headings(md_clean)
+    sections    = split_by_headings(md_clean)  # (title, text, level)
     records: List[Dict] = []
     chunk_index = 1
 
-    for sec_title, sec_text in sections:
+    # Ancestor map: heading level → (title, canonical) for hierarchical
+    # section_canonical. When a heading at level L is encountered, all
+    # ancestor entries with level > L are dropped (we moved to a sibling
+    # or parent section).
+    ancestors: Dict[int, Tuple[str, str]] = {}
+
+    for sec_title, sec_text, level in sections:
+        canonical = canonical_section(sec_title)
+        ancestors[level] = (sec_title, canonical)
+        for k in list(ancestors.keys()):
+            if k > level:
+                del ancestors[k]
+
         if sec_title.lower().startswith("references"):
             continue
+
+        # Effective canonical: nearest ancestor from this level up to 1
+        # whose canonical is not "other". Preamble (level 0) always "other".
+        sec_canonical = "other"
+        for lvl in range(level, 0, -1):
+            if lvl in ancestors and ancestors[lvl][1] != "other":
+                sec_canonical = ancestors[lvl][1]
+                break
+
         for part_i, ch in enumerate(chunk_text(sec_text, target_words, overlap_words), start=1):
             records.append({
-                "phase":           phase,
-                "paper_id":        paper_id,
-                "paper_title":     paper_title,
-                "source_pdf":      str(source_pdf),
-                "source_tei":      str(source_tei),
-                "source_md_clean": str(source_md_clean),
-                "section":         sec_title,
-                "type":            "text",
-                "chunk_index":     chunk_index,
-                "section_part":    part_i,
-                "text":            ch,
+                "phase":             phase,
+                "paper_id":          paper_id,
+                "paper_title":       paper_title,
+                "source_pdf":        str(source_pdf),
+                "source_tei":        str(source_tei),
+                "source_md_clean":   str(source_md_clean),
+                "section":           sec_title,
+                "section_canonical": sec_canonical,
+                "type":              "text",
+                "chunk_index":       chunk_index,
+                "section_part":      part_i,
+                "text":              ch,
             })
             chunk_index += 1
 
     for t_i, tb in enumerate(tables, start=1):
         records.append({
-            "phase":           phase,
-            "paper_id":        paper_id,
-            "paper_title":     paper_title,
-            "source_pdf":      str(source_pdf),
-            "source_tei":      str(source_tei),
-            "source_md_clean": str(source_md_clean),
-            "section":         tb.get("title", f"Table {t_i}"),
-            "type":            "table",
-            "chunk_index":     chunk_index,
-            "table_id":        tb.get("table_id", ""),
-            "text":            tb["text"],
+            "phase":             phase,
+            "paper_id":          paper_id,
+            "paper_title":       paper_title,
+            "source_pdf":        str(source_pdf),
+            "source_tei":        str(source_tei),
+            "source_md_clean":   str(source_md_clean),
+            "section":           tb.get("title", f"Table {t_i}"),
+            "section_canonical": "table",
+            "type":              "table",
+            "chunk_index":       chunk_index,
+            "table_id":          tb.get("table_id", ""),
+            "text":              tb["text"],
         })
         chunk_index += 1
 
