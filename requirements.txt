@@ -94,3 +94,4 @@ zipp==3.23.1
 streamlit>=1.32
 anthropic>=0.39
 openai>=1.50
+rank-bm25

@@ -20,6 +20,8 @@ for d in (str(STREAMLIT_APP_DIR), str(SCRIPTS_DIR)):
 
 from utils.export_refs import build_papers_zip, load_papers, to_bibtex
 from utils.constants import CANONICAL_SECTIONS, year_from_paper_id
+from utils.retrieval import (dense_rank, bm25_rank, rrf_fuse,
+                             passes_filters, pool_size)
 from app_utils import (
     ANTHROPIC_MODELS, OPENAI_MODELS, OLLAMA_MODELS_LLM, OLLAMA_MODEL_EMBED,
     OLLAMA_HOST, ANTHROPIC_API_KEY, OPENAI_API_KEY,
@@ -115,6 +117,22 @@ def _load_index(project: str, phase: str, mtime: float):
     return index, meta, cfg
 
 
+@st.cache_resource(show_spinner="Construyendo índice BM25…")
+def _load_bm25(project: str, phase: str, mtime: float):
+    from utils.retrieval import build_bm25
+    emb_dir   = CATEGORIAS_DIR / project / "embeddings" / phase
+    meta_path = emb_dir / "metadata.jsonl"
+    if not meta_path.exists():
+        return None
+    texts = []
+    with meta_path.open(encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line:
+                texts.append(json.loads(line).get("text", ""))
+    return build_bm25(texts)
+
+
 @st.cache_resource(show_spinner=False)
 def _ollama_client():
     return ollama.Client(host=OLLAMA_HOST, timeout=120)
@@ -163,6 +181,11 @@ with st.sidebar:
         ys, ye = st.slider("Rango de años", 1990, 2026, (1990, 2026))
     else:
         ys = ye = None
+    use_hybrid = st.toggle(
+        "Recuperación híbrida (denso + BM25)", value=False,
+        help="Fusiona FAISS (semántico) con BM25 (léxico exacto: siglas, cepas) "
+             "vía RRF. OFF = solo denso.",
+    )
 
     st.divider()
     st.header("Síntesis")
@@ -257,27 +280,33 @@ if index is None:
     st.error("No se pudo cargar el índice FAISS.")
     st.stop()
 
+bm25 = _load_bm25(project, phase, _mtime) if use_hybrid else None
+if use_hybrid and bm25 is None:
+    st.warning("rank-bm25 no instalado o índice vacío; usando solo denso.")
+
 embed_model = cfg.get("model", OLLAMA_MODEL_EMBED)
 
+has_filter = bool(sel_sections or ys or ye)
 with st.spinner("Buscando fragmentos relevantes…"):
     ol_client = _ollama_client()
     resp = ol_client.embeddings(model=embed_model, prompt=focus)
     qv = np.array(resp["embedding"], dtype="float32").reshape(1, -1)
-    has_filter = bool(sel_sections or ys or ye)
-    n_fetch    = index.ntotal if has_filter else min(index.ntotal, k * 3)
-    D, I = index.search(qv, n_fetch)
+    pool = pool_size(k, index.ntotal, has_filter)
+    d_idx, dist_map = dense_rank(index, qv, pool)
+    if use_hybrid and bm25 is not None:
+        ranked = rrf_fuse(d_idx, bm25_rank(bm25, focus, pool))
+    else:
+        ranked = [(i, dist_map[i]) for i in d_idx]
 
 results = []
-for dist, idx in zip(D[0].tolist(), I[0].tolist()):
-    if idx < 0 or idx >= len(meta):
+for idx, score in ranked:
+    if idx >= len(meta):
         continue
     m = meta[idx]
-    if sel_sections and m.get("section_canonical") not in sel_sections:
+    if not passes_filters(m, sections=sel_sections or None,
+                          year_start=ys, year_end=ye):
         continue
-    year = m.get("year") or year_from_paper_id(m.get("paper_id", ""))
-    if (ys and (year is None or year < ys)) or (ye and (year is None or year > ye)):
-        continue
-    results.append((dist, idx, m))
+    results.append((score, idx, m))
     if len(results) >= k:
         break
 
@@ -430,12 +459,13 @@ with st.expander("📦 Exportar papers usados en esta revisión", expanded=False
 # ── Fragmentos usados ─────────────────────────────────────────────────────────
 st.divider()
 with st.expander(f"Fragmentos recuperados ({len(results)})", expanded=False):
-    for rank, (dist, _, m) in enumerate(results, 1):
+    _sl = "rrf" if (use_hybrid and bm25 is not None) else "dist"
+    for rank, (score, _, m) in enumerate(results, 1):
         _yr = m.get("year") or year_from_paper_id(m.get("paper_id", ""))
         st.markdown(
             f"**[{rank}]** `{m.get('paper_id', '?')}` · {_yr} · "
             f"{m.get('section', '?')} ({m.get('section_canonical', '?')}) · "
-            f"dist={dist:.4f}"
+            f"{_sl}={score:.4f}"
         )
         st.markdown(m.get("text", ""))
         st.divider()

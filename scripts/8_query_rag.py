@@ -60,6 +60,8 @@ from dotenv import load_dotenv
 
 sys.path.insert(0, str(Path(__file__).parent))
 from utils.constants import OLLAMA_MODEL_EMBED, year_from_paper_id
+from utils.retrieval import (build_bm25, dense_rank, bm25_rank,
+                             rrf_fuse, passes_filters, pool_size)
 
 # ── Cargar config/.env ────────────────────────────────────────────────────────
 _ENV_FILE = Path(__file__).parent.parent / "config" / ".env"
@@ -106,6 +108,8 @@ def main():
                          "(p.ej. methods,results,table). Vacío = todas.")
     ap.add_argument("--year-start", type=int, default=None, help="Año desde (incl.)")
     ap.add_argument("--year-end",   type=int, default=None, help="Año hasta (incl.)")
+    ap.add_argument("--hybrid", action="store_true",
+                    help="Recuperación híbrida denso + BM25 (RRF)")
     args = ap.parse_args()
 
     allowed_sections = {s.strip() for s in args.sections.split(",") if s.strip()}
@@ -136,28 +140,31 @@ def main():
     index = faiss.read_index(str(index_path))
     meta  = load_metadata(emb_dir)
 
+    bm25 = build_bm25([m.get("text", "") for m in meta]) if args.hybrid else None
+    if args.hybrid and bm25 is None:
+        print("⚠️ rank-bm25 no instalado; usando solo denso.")
+
     qv         = embed_query(client, args.query, model).reshape(1, -1)
     has_filter = bool(args.type or args.paper or allowed_sections
                       or args.year_start or args.year_end)
-    n_fetch    = index.ntotal if has_filter else min(index.ntotal, args.k * 5)
-    D, I       = index.search(qv, n_fetch)
+    pool = pool_size(args.k, index.ntotal, has_filter)
+    d_idx, dist_map = dense_rank(index, qv, pool)
+    if args.hybrid and bm25 is not None:
+        ranked = rrf_fuse(d_idx, bm25_rank(bm25, args.query, pool))  # [(idx, rrf)]
+    else:
+        ranked = [(i, dist_map[i]) for i in d_idx]                  # score = dist
 
     results = []
-    for dist, idx in zip(D[0].tolist(), I[0].tolist()):
-        if idx < 0 or idx >= len(meta):
+    for idx, score in ranked:
+        if idx >= len(meta):
             continue
         m = meta[idx]
-        if args.type  and m.get("type")     != args.type:
+        if not passes_filters(m, type_=args.type or None,
+                              paper=args.paper or None,
+                              sections=allowed_sections or None,
+                              year_start=args.year_start, year_end=args.year_end):
             continue
-        if args.paper and args.paper not in m.get("paper_id", ""):
-            continue
-        if allowed_sections and m.get("section_canonical") not in allowed_sections:
-            continue
-        year = m.get("year") or year_from_paper_id(m.get("paper_id", ""))
-        if (args.year_start and (year is None or year < args.year_start)) or \
-           (args.year_end   and (year is None or year > args.year_end)):
-            continue
-        results.append((dist, idx, m))
+        results.append((score, idx, m))
         if len(results) >= args.k:
             break
 
@@ -165,11 +172,12 @@ def main():
     print(args.query)
     print(f"\n=== PROJECT: {args.project}  PHASE: {args.phase}  TOP-{args.k} ===\n")
 
-    for rank, (dist, idx, m) in enumerate(results, start=1):
+    score_label = "rrf" if args.hybrid else "dist"
+    for rank, (score, idx, m) in enumerate(results, start=1):
         phase_tag = f"[{m.get('phase', '?')}] " if args.phase == "all" else ""
         year = m.get("year") or year_from_paper_id(m.get("paper_id", ""))
         print(
-            f"[{rank}] dist={dist:.4f} | {phase_tag}"
+            f"[{rank}] {score_label}={score:.4f} | {phase_tag}"
             f"paper_id={m.get('paper_id')} | year={year} | "
             f"section={m.get('section')} ({m.get('section_canonical','?')}) | type={m.get('type')}"
         )

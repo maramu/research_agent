@@ -46,6 +46,8 @@ from app_utils import (
 )
 from utils.export_refs import build_papers_zip
 from utils.constants import CANONICAL_SECTIONS, year_from_paper_id
+from utils.retrieval import (dense_rank, bm25_rank, rrf_fuse,
+                             passes_filters, pool_size)
 
 st.set_page_config(page_title="RAG", page_icon="🔍", layout="wide")
 
@@ -106,6 +108,22 @@ def load_index(project: str, phase: str, index_mtime: float):
         cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
 
     return index, meta, cfg
+
+
+@st.cache_resource(show_spinner="Construyendo índice BM25…")
+def load_bm25(project: str, phase: str, index_mtime: float):
+    from utils.retrieval import build_bm25
+    emb_dir = CATEGORIAS_DIR / project / "embeddings" / phase
+    meta_path = emb_dir / "metadata.jsonl"
+    if not meta_path.exists():
+        return None
+    texts = []
+    with meta_path.open(encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line:
+                texts.append(json.loads(line).get("text", ""))
+    return build_bm25(texts)
 
 
 @st.cache_resource(show_spinner=False)
@@ -188,6 +206,11 @@ with st.sidebar:
         ys, ye = st.slider("Rango de años", 1990, 2026, (1990, 2026))
     else:
         ys = ye = None
+    use_hybrid = st.toggle(
+        "Recuperación híbrida (denso + BM25)", value=False,
+        help="Fusiona FAISS (semántico) con BM25 (léxico exacto: siglas, cepas) "
+             "vía RRF. OFF = solo denso.",
+    )
 
     st.divider()
     st.header("Síntesis LLM")
@@ -254,6 +277,10 @@ index, meta, cfg = load_index(project, phase, _idx_mtime)
 if index is None:
     st.error("No se pudo cargar el índice. ¿Existen index.faiss y metadata.jsonl?")
     st.stop()
+
+bm25 = load_bm25(project, phase, _idx_mtime) if use_hybrid else None
+if use_hybrid and bm25 is None:
+    st.warning("rank-bm25 no instalado o índice vacío; usando solo denso.")
 
 embed_model = cfg.get("model", OLLAMA_MODEL_EMBED)
 
@@ -325,29 +352,28 @@ if not go:
 # Retrieval
 # ---------------------------------------------------------------------------
 
+_type_f = None if type_filter == "(todos)" else type_filter
+has_filter = bool(_type_f or paper_filter or sel_sections or ys or ye)
 with st.spinner("Generando embedding y buscando…"):
     ollama_client = get_ollama_client()
     qv = embed_query(ollama_client, query, embed_model).reshape(1, -1)
-    has_filter = bool(type_filter != "(todos)" or paper_filter or sel_sections
-                      or ys or ye)
-    n_fetch    = index.ntotal if has_filter else min(index.ntotal, k * 5)
-    D, I = index.search(qv, n_fetch)
+    pool = pool_size(k, index.ntotal, has_filter)
+    d_idx, dist_map = dense_rank(index, qv, pool)
+    if use_hybrid and bm25 is not None:
+        ranked = rrf_fuse(d_idx, bm25_rank(bm25, query, pool))
+    else:
+        ranked = [(i, dist_map[i]) for i in d_idx]
 
 results = []
-for dist, idx in zip(D[0].tolist(), I[0].tolist()):
-    if idx < 0 or idx >= len(meta):
+for idx, score in ranked:
+    if idx >= len(meta):
         continue
     m = meta[idx]
-    if type_filter != "(todos)" and m.get("type") != type_filter:
+    if not passes_filters(m, type_=_type_f, paper=paper_filter or None,
+                          sections=sel_sections or None,
+                          year_start=ys, year_end=ye):
         continue
-    if paper_filter and paper_filter.lower() not in m.get("paper_id", "").lower():
-        continue
-    if sel_sections and m.get("section_canonical") not in sel_sections:
-        continue
-    year = m.get("year") or year_from_paper_id(m.get("paper_id", ""))
-    if (ys and (year is None or year < ys)) or (ye and (year is None or year > ye)):
-        continue
-    results.append((dist, idx, m))
+    results.append((score, idx, m))
     if len(results) >= k:
         break
 
@@ -519,7 +545,8 @@ Respuesta:"""
 
 st.subheader(f"Chunks recuperados ({len(results)})")
 
-for rank, (dist, idx, m) in enumerate(results, start=1):
+_sl = "rrf" if (use_hybrid and bm25 is not None) else "dist"
+for rank, (score, idx, m) in enumerate(results, start=1):
     paper_id   = m.get("paper_id", "?")
     section    = m.get("section", "?")
     section_c  = m.get("section_canonical", "?")
@@ -529,10 +556,10 @@ for rank, (dist, idx, m) in enumerate(results, start=1):
     snippet    = m.get("text", "")
 
     with st.expander(
-        f"**[{rank}]** dist={dist:.4f} · `{paper_id}` · {year} · {section} ({section_c}) · {chunk_type}",
+        f"**[{rank}]** {_sl}={score:.4f} · `{paper_id}` · {year} · {section} ({section_c}) · {chunk_type}",
         expanded=(rank <= 3),
     ):
-        st.caption(f"Fase: `{phase_tag}` · Tipo: `{chunk_type}` · Distancia: {dist:.4f}")
+        st.caption(f"Fase: `{phase_tag}` · Tipo: `{chunk_type}` · {_sl}: {score:.4f}")
         st.markdown(snippet)
 
 st.divider()
