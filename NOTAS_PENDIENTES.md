@@ -728,20 +728,33 @@ Propuestas derivadas de la revisión del pipeline. Ordenadas por impacto: 32–3
 suben la calidad de recuperación (lo que más determina si el RAG es útil); 35–36
 refuerzan la robustez del procesado; 37–40 son evaluación, coste y mantenimiento.
 
-### 32. Chunking consciente de la estructura (TEI) — ALTA prioridad
+### ✅ 32. Chunking consciente de la estructura (completado 2026-06-10)
 
-GROBID ya entrega TEI con secciones (abstract, intro, métodos, resultados,
-conclusiones, referencias), pero el chunking actual aplana el texto y pierde esa
-jerarquía. Trocear **por sección** y guardar la sección como metadato del chunk.
+`section_canonical` jerárquico + etiqueta `"table"` en los chunks JSONL. Commit b097744.
 
-- Parsear `<div>`/`<head>` del TEI en `3_process_corpus.py` (o en el paso de chunking)
-  para asignar a cada chunk su sección de origen.
-- Añadir campo `section` al JSONL de chunks (p. ej. `abstract | introduction | methods | results | discussion | conclusion | other`).
-- Beneficio doble: (a) mejora la relevancia (una respuesta sobre condiciones de
-  operación debe venir de Métodos/Resultados, no de Introducción); (b) permite
-  mostrar al usuario de qué sección sale cada fragmento recuperado.
-- Prerequisito útil para el item 34 (filtrado por metadato puede incluir `section`).
-- Mayor impacto en calidad de recuperación de todo el backlog.
+**Implementación en `3_process_corpus.py`:**
+- `split_by_headings()` devuelve ahora `(título, texto, nivel)` — el nivel es el nº de `#` iniciales; el preamble recibe nivel 0.
+- Nueva función `canonical_section(title)` clasifica un título de heading en una de 7 etiquetas: `abstract | introduction | methods | results | discussion | conclusion | other`.
+- `build_chunk_records()` mantiene un mapa `ancestros: Dict[int, Tuple[str, str]]`. Al procesar un heading nivel L: actualiza el mapa y elimina niveles > L; busca el canonical más cercano subiendo de L a 1 que no sea `"other"`.
+- Subsecciones descriptivas (p. ej. "Reactor operation", "Microbial community analysis") heredan el canonical del heading padre (methods/results).
+- Chunks de tabla (`type=="table"`): `section_canonical = "table"` fijo.
+- El campo `section` (título hoja crudo, lo usa `8_query_rag.py`) queda intacto.
+
+**Verificado en `anoxic_biogas_biodesulfurization` (943 chunks):**
+
+| section_canonical | chunks | % |
+|---|---|---|
+| other | 363 | 38.5% |
+| methods | 167 | 17.7% |
+| results | 143 | 15.2% |
+| table | 89 | 9.4% |
+| conclusion | 73 | 7.7% |
+| introduction | 67 | 7.1% |
+| abstract | 41 | 4.3% |
+
+El `other` residual (38.5%) es cola larga de títulos descriptivos no-IMRaD (subsecciones muy específicas sin patrón de keyword reconocible) — residuo legítimo. FAISS re-indexado con `--force`.
+
+**Pendiente:** re-trocear + re-indexar el resto de categorías con `3_process_corpus.py --force` para poblar el campo (no es retroactivo).
 
 ### 33. Recuperación híbrida (denso + BM25) + reranking — ALTA prioridad
 
