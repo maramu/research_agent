@@ -719,3 +719,110 @@ MVP: 2-3 libros como proyecto ad-hoc adaptado, validar utilidad antes
 de productizar.
 
 Considerar primero: terminar items 4, 7, 15, 17-25, 30.
+
+---
+
+## Mejoras de calidad RAG y robustez (2026-06-10)
+
+Propuestas derivadas de la revisión del pipeline. Ordenadas por impacto: 32–34
+suben la calidad de recuperación (lo que más determina si el RAG es útil); 35–36
+refuerzan la robustez del procesado; 37–40 son evaluación, coste y mantenimiento.
+
+### 32. Chunking consciente de la estructura (TEI) — ALTA prioridad
+
+GROBID ya entrega TEI con secciones (abstract, intro, métodos, resultados,
+conclusiones, referencias), pero el chunking actual aplana el texto y pierde esa
+jerarquía. Trocear **por sección** y guardar la sección como metadato del chunk.
+
+- Parsear `<div>`/`<head>` del TEI en `3_process_corpus.py` (o en el paso de chunking)
+  para asignar a cada chunk su sección de origen.
+- Añadir campo `section` al JSONL de chunks (p. ej. `abstract | introduction | methods | results | discussion | conclusion | other`).
+- Beneficio doble: (a) mejora la relevancia (una respuesta sobre condiciones de
+  operación debe venir de Métodos/Resultados, no de Introducción); (b) permite
+  mostrar al usuario de qué sección sale cada fragmento recuperado.
+- Prerequisito útil para el item 34 (filtrado por metadato puede incluir `section`).
+- Mayor impacto en calidad de recuperación de todo el backlog.
+
+### 33. Recuperación híbrida (denso + BM25) + reranking — ALTA prioridad
+
+FAISS es solo denso: captura semántica pero se le escapan los *matches* léxicos
+exactos que importan en el dominio (siglas `NR-SOB`, `H2S`, `TiO2`, nombres de
+cepas como `Acidithiobacillus`, códigos `PHA/PHB`).
+
+- Añadir índice BM25 por categoría con `rank-bm25` (en memoria, suficiente para
+  miles de papers; sin montar Elasticsearch). Construir el índice desde los mismos
+  chunks JSONL.
+- Fusionar resultados denso + BM25 con **Reciprocal Rank Fusion** (RRF): combina por
+  posición sin normalizar puntuaciones de escalas distintas.
+- Reranking opcional sobre el top-N fusionado con `bge-reranker` (vía Ollama) o un
+  cross-encoder pequeño, antes de pasar al LLM de síntesis.
+- Tocar `8_query_rag.py` y la capa de retrieval de `2_RAG.py` / `7_Revision.py`.
+  Toggle en la web para activar/desactivar híbrido y comparar.
+
+### 34. Filtrado por metadato en la query — ALTA prioridad
+
+Permitir filtrar **antes/durante** la recuperación por categoría, rango de años,
+revista y (si está el item 32) sección.
+
+- Implementar con `IndexIDMap` + post-filtrado sobre `metadata.jsonl`, o índice por
+  categoría ya existente + filtro de año/revista en el set de candidatos.
+- Reduce ruido cuando la pregunta es claramente de una categoría/periodo concreto.
+- UI: selectores de año (rango) y revista en `2_RAG.py`, además del filtro de
+  categoría/fase ya presente.
+
+### 35. Fallback OCR para PDFs escaneados — MEDIA prioridad
+
+GROBID no extrae nada de un PDF que es imagen → entra vacío al índice.
+
+- Detectar "texto extraído ≈ 0 caracteres" tras `3_process_corpus.py` y disparar OCR.
+- `ocrmypdf` (Tesseract) genera un PDF con capa de texto; reintentar GROBID sobre él.
+- Idiomas: `eng` (corpus mayoritariamente en inglés).
+- Encaja con la carpeta de cuarentena (item 18): si tras OCR sigue vacío → cuarentena.
+
+### 36. Idempotencia y reanudación por documento — MEDIA prioridad
+
+Estado explícito por PDF (descargado → renombrado → extraído → resumido → indexado)
+para que un fallo a mitad no obligue a reprocesar todo ni deje entradas a medias.
+
+- Registro de estado por `paper_id`/`stable_id` (JSON o columna en manifest).
+- Complementa el indexado incremental de FAISS (item FAISS incremental, 2026-06-04)
+  y el skip logic existente, dándole trazabilidad y reanudación explícita.
+- Útil tras timeouts del job semanal o caídas de VPN a mitad de ingesta.
+
+### 37. Set de evaluación del RAG (golden Q&A) — MEDIA prioridad
+
+Conjunto de pares pregunta/respuesta de referencia por categoría que se corre tras
+cualquier cambio de chunking, embeddings, modelo o estrategia de retrieval.
+
+- 5–10 preguntas por categoría con los `paper_id`/secciones esperados.
+- Métricas de recuperación (hit@k, MRR) y, opcionalmente, evaluación de la síntesis.
+- Es la única forma objetiva de saber si los items 32/33/34 mejoran o empeoran.
+- Guardar en `metadatos/eval/golden_<categoria>.jsonl` + script `eval_rag.py`.
+
+### 38. Batch API de Anthropic para resúmenes — BAJA prioridad
+
+Los resúmenes/metadatos no necesitan tiempo real → procesar por lotes abarata.
+
+- Usar la Batch API de Anthropic para `3b_summarize.py` cuando el provider sea Claude.
+- Cachear el resumen por DOI/`stable_id` para no recalcular al reprocesar.
+- Solo aplica si se usa Claude para resúmenes; el default sigue siendo qwen3:14b local.
+
+### 39. Tests pytest + verificación AST en CI ligero — MEDIA prioridad
+
+Formalizar como tests la verificación AST que ya se incluye en los prompts de Claude Code.
+
+- `pytest` sobre `_clean_doi`, `DOI_REGEX` (incluido el caso Wiley/ACS SICI con `<>`),
+  `sanitize_filename`/`shorten_title` y `_norm` de coherencia PDF/MD.
+- Tests de regresión para los bugs ya documentados (guiones vs guiones bajos,
+  ligaduras Unicode, sufijos de DOI).
+- Opcional: hook pre-commit que corra `pytest` + parseo AST de los scripts tocados.
+
+### 40. Backup automático de FAISS + categorias a research_bk — MEDIA prioridad
+
+Distinto del item 27 (backup de config): aquí se respalda el **corpus y los índices**.
+
+- Snapshot programado (LaunchAgent) de los índices FAISS y de `categorias/` al NAS
+  Synology `research_bk`.
+- Ahora que todo vive en el SSD Crucial X9 de `pciq22`, el NAS queda como única copia.
+- Recordar restricciones NAS ya documentadas: usar `shutil.copy` (no `copy2`),
+  evitar `mv` (usar `cp`), `Path.mkdir()` puede fallar en el mount bajo Python 3.13.
