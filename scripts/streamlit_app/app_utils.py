@@ -476,6 +476,64 @@ def get_category_stats(category: str) -> Dict[str, Any]:
     }
 
 
+def category_summary_row(category: str) -> Dict[str, Any]:
+    """Fila-resumen de procesado de una categoría.
+
+    Mismas columnas que la tabla de la portada (app.py) y la pestaña
+    «Pendientes» (1_Ingestar.py): PDFs, MD limpio, Resúmenes, Chunks, Metadata,
+    FAISS (✓/✗), Paquetes y las Brechas detectadas comparando md_clean con el
+    resto de artefactos.
+    """
+    stats = get_category_stats(category)
+    expected = int(stats.get("md_clean") or stats.get("pdfs") or 0)
+    missing_md = max(0, int(stats.get("pdfs", 0)) - int(stats.get("md_clean", 0)))
+    missing_summaries = max(0, expected - int(stats.get("summaries", 0)))
+    missing_chunks = max(0, expected - int(stats.get("chunks", 0)))
+    missing_metadata = max(0, expected - int(stats.get("metadata", 0)))
+
+    gaps = []
+    if missing_md:
+        gaps.append(f"MD limpio: {missing_md}")
+    if missing_summaries:
+        gaps.append(f"Resúmenes: {missing_summaries}")
+    if missing_chunks:
+        gaps.append(f"Chunks: {missing_chunks}")
+    if missing_metadata:
+        gaps.append(f"Metadata: {missing_metadata}")
+
+    return {
+        "Categoría": category,
+        "PDFs": int(stats.get("pdfs", 0)),
+        "MD limpio": int(stats.get("md_clean", 0)),
+        "Resúmenes": int(stats.get("summaries", 0)),
+        "Chunks": int(stats.get("chunks", 0)),
+        "Metadata": int(stats.get("metadata", 0)),
+        "FAISS": "✓" if stats.get("embeddings") else "✗",
+        "Paquetes": int(stats.get("packages", 0)),
+        "Brechas": ", ".join(gaps) if gaps else "Completo",
+    }
+
+
+def get_categories_summary(
+    categories: Optional[List[str]] = None,
+) -> List[Dict[str, Any]]:
+    """Resumen por categoría (una fila por categoría con PDFs).
+
+    Reutiliza `get_category_stats` para producir las mismas columnas que la
+    portada / pestaña Pendientes. Si `categories` es None, recorre todas las
+    categorías existentes en el NAS.
+    """
+    if categories is None:
+        categories = list_existing_categories()
+    rows: List[Dict[str, Any]] = []
+    for cat in categories:
+        stats = get_category_stats(cat)
+        if stats.get("pdfs", 0) <= 0:
+            continue
+        rows.append(category_summary_row(cat))
+    return rows
+
+
 def get_category_quality(category: str) -> dict:
     """
     Lee papers_metadata.jsonl y agrega métricas de calidad.

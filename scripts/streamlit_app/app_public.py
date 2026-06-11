@@ -20,6 +20,7 @@ if not check_password("PUBLIC_APP_PASSWORD"):
 pg = st.navigation([
     st.Page("pages/2_RAG.py", title="RAG", icon="🔍"),
     st.Page("pages/7_Revision.py", title="Revisión bibliográfica", icon="📚"),
+    st.Page("pages/11_Articulos.py", title="Artículos", icon="📋"),
 ])
 
 pg.run()
