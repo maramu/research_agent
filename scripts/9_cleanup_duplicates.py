@@ -506,6 +506,67 @@ def delete_secondary_files(rec: PaperRecord, base: Path) -> list[Path]:
     return deleted
 
 
+def quarantine_paper(category: str, paper_id: str, base: Path, dest_root: Path) -> tuple[list[tuple[Path, Path]], bool]:
+    """Mueve los artefactos de un paper a cuarentena (reversible) y lo quita de
+    papers_metadata.jsonl. Devuelve (lista de (origen, destino) movidos, metadata_actualizada)."""
+    project_dir = base / category
+    dest_dir = Path(dest_root) / category
+    moved: list[tuple[Path, Path]] = []
+
+    # Artefactos estándar (pdf, tei, md_clean, summary, chunks) vía candidate_paths
+    paths = list(candidate_paths(project_dir, paper_id))
+    # per_paper/<stem>*
+    per_paper = project_dir / "metadata" / "per_paper"
+    if per_paper.exists():
+        paths.extend(sorted(per_paper.glob(f"{paper_id}*")))
+
+    for path in paths:
+        if path.exists():
+            rel = path.relative_to(project_dir)
+            target = dest_dir / rel
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(path), str(target))   # mismo volumen (SSD) → rename rápido
+            moved.append((path, target))
+            log.info("Cuarentena: %s -> %s", path, target)
+
+    # Quitar del papers_metadata.jsonl por file_key del stem (con backup .bak)
+    meta_path = project_dir / "metadata" / "papers_metadata.jsonl"
+    meta_updated = False
+    if meta_path.exists():
+        target_key = file_key(paper_id)
+        kept: list[str] = []
+        removed = 0
+        with meta_path.open(encoding="utf-8") as f:
+            for line in f:
+                s = line.strip()
+                if not s:
+                    continue
+                try:
+                    data = json.loads(s)
+                except Exception:
+                    kept.append(line.rstrip("\n")); continue
+                stem, _ = infer_stem(data)
+                if stem and file_key(stem) == target_key:
+                    removed += 1
+                    continue
+                kept.append(line.rstrip("\n"))
+        if removed:
+            shutil.copy(meta_path, meta_path.with_name(meta_path.name + ".bak"))
+            meta_path.write_text("\n".join(kept) + ("\n" if kept else ""), encoding="utf-8")
+            meta_updated = True
+            log.info("Metadata: %d línea(s) quitada(s) de %s", removed, meta_path)
+
+    # Manifiesto para poder restaurar
+    if moved:
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        manifest = dest_dir / f"_manifest_{paper_id}.json"
+        manifest.write_text(json.dumps(
+            {"category": category, "paper_id": paper_id,
+             "moved": [[str(o), str(t)] for o, t in moved]},
+            indent=2, ensure_ascii=False), encoding="utf-8")
+    return moved, meta_updated
+
+
 def rewrite_metadata(decisions: list[DuplicateDecision]) -> None:
     removals_by_meta: dict[Path, set[int]] = defaultdict(set)
     for dec in decisions:
