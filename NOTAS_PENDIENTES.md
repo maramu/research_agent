@@ -4,6 +4,49 @@
 
 ## Verificaciones completadas
 
+### ✅ Sesión 2026-06-10/11 — items 32/33/34, chunking robusto, páginas Duplicados/Artículos, gestión DOIs y revista
+
+Resumen de la sesión (detalle ampliado en los bloques siguientes y en ESTADO.md):
+
+- **Item 32 — ROLLOUT COMPLETO:** las 8 categorías re-troceadas (`3_process_corpus.py
+  --force-md`, re-chunk desde TEI existente, sin GROBID) + re-indexadas
+  (`5_build_embeddings.py --force`). Cierra el "pendiente: re-trocear el resto".
+  `section_canonical` + `year` poblados en todas.
+- **Item 33 — recuperación híbrida densa+BM25+RRF ✅** (commit 17be44b): nuevo
+  `scripts/utils/retrieval.py` (`tokenize`, `build_bm25`, `dense_rank`, `bm25_rank`,
+  `rrf_fuse` con RRF_K=60, `passes_filters`, `pool_size`); BM25 en memoria al vuelo desde
+  `metadata.jsonl`; flag `--hybrid` en `8_query_rag.py`; toggle OFF por defecto en
+  `2_RAG`/`7_Revision`; `rank-bm25` en requirements. RERANKING aplazado a fase 2 (item 37).
+- **Item 34 ✅** (commits d9f7a54, 9345c78): filtrado por sección (`--sections`) y por año
+  (`--year-start`/`--year-end`) en `8_query_rag.py` + UI en `2_RAG`/`7_Revision`;
+  `CANONICAL_SECTIONS` y `year_from_paper_id` en `utils/constants.py`; `5_build_embeddings.py`
+  denormaliza `year` en `metadata.jsonl`. La REVISTA (descartada en su día) ahora SÍ:
+  extracción desde TEI en `4_extract_metadata.py` + filtro/columna en la página Artículos.
+- **Fix robustez de chunking** (commits 6454008, a05bb14): `MAX_EMBED_CHARS` +
+  `_split_to_max_chars` en `3_process_corpus.py` (texto Y tablas — antes las tablas se emitían
+  enteras) + truncación REACTIVA por contexto en `5_build_embeddings.py` (captura
+  `ResponseError`, trunca y reintenta; el `text` de metadata queda completo).
+- **Página Duplicados** (`10_Duplicados.py`, solo privada; commit fb320a9): detección en vivo
+  título+hash, cuarentena REVERSIBLE (mueve a `/Volumes/research/quarantine/duplicates/<ts>/`
+  + `_manifest`, quita la línea de `papers_metadata.jsonl` con `.bak`) vía `quarantine_paper()`
+  en `9_cleanup_duplicates.py`; guard de falsos positivos en grupos por título (≥2 PDFs o ≥2
+  DOIs → "No es duplicado" por defecto + aviso); `importlib` con registro en `sys.modules`
+  antes de `exec_module` (dataclass Python 3.13).
+- **Página Artículos** (`11_Articulos.py`, privada+pública; commit 37d0e7c): resumen por
+  categoría (`get_categories_summary`/`category_summary_row` en `app_utils.py`, columna "Sin
+  DOI") + listado desde `papers_metadata.jsonl` (filtros texto/año/revista/DOI, DOI como
+  `LinkColumn`, autores legibles `_fmt_authors`, export CSV).
+- **Gestión de DOIs faltantes** (privada; commits b9e4eea, 9e95227): columna Sin DOI, filtro,
+  asignación manual + sugerencia Crossref (`crossref_suggest` con título+apellido1+año,
+  `mailto=UNPAYWALL_EMAIL`), escritura a `papers_metadata.jsonl` (`.bak`) + upsert
+  `doi_manual.xlsx` (`assign_dois`).
+- **`4_extract_metadata.py`** (commits a1c377e, 622d0a6): revista desde TEI
+  (`monogr/title[@level='j']` + fallback); fallback de DOI a `doi_manual.xlsx`; preservación de
+  `doi`/`journal` no vacíos al reextraer; salta TEI huérfanos sin `md_clean` (imprime la lista)
+  → la metadata refleja el corpus real, sin papers fantasma.
+
+---
+
 ### ✅ Item 34 — Filtrado por sección y año en la query (2026-06-11)
 - utils/constants.py: CANONICAL_SECTIONS (abstract, introduction, methods, results,
   discussion, conclusion, table, other) y year_from_paper_id() como fuente única.
@@ -601,13 +644,20 @@ que detecta y rellenar papers sin `stable_id` (los procesados antes de este íte
 Una vez implementado, el informe mensual de calidad (revisión mensual) sale
 gratis como agregación de estos campos.
 
-### 18. Carpeta de cuarentena — MEDIA prioridad
+### 18. Carpeta de cuarentena — MEDIA prioridad (parcialmente cubierto)
 
 Crear `/Volumes/research/quarantine/` para documentos dudosos:
 PDF sin texto extraíble, muy corto, sin DOI ni título fiable, material
 suplementario, duplicado dudoso.
 
 Desde Streamlit: aceptar / rechazar / mover a categoría / borrar.
+
+**Parcialmente cubierto (2026-06-11):** la página Duplicados (`10_Duplicados.py`) ya
+implementa cuarentena REVERSIBLE para duplicados — mueve PDF + artefactos a
+`/Volumes/research/quarantine/duplicates/<ts>/` con `_manifest` y quita la línea de
+`papers_metadata.jsonl` (con `.bak`) vía `quarantine_paper()` en `9_cleanup_duplicates.py`.
+Pendiente: extender la cuarentena al resto de casos dudosos (PDF sin texto, muy corto,
+sin DOI/título fiable, material suplementario) y el OCR del item 35.
 
 ### ✅ 19. Detección avanzada de duplicados (completado 2026-06-01)
 
@@ -680,7 +730,12 @@ Paquetes exportables por tema:
 ```
 
 Facilita trabajo de grupo y dirección de alumnos.
-Parcialmente completado por items 10+11+22+23, salbo que quiera un excel con los datos tabulados
+Parcialmente completado por items 10+11+22+23, salbo que quiera un excel con los datos tabulados.
+
+**Cubierto en gran parte (2026-06-11):** la página Artículos (`11_Articulos.py`, privada+pública)
+ofrece el catálogo bibliográfico filtrable (texto/año/revista/DOI) con resumen por categoría y
+**export CSV** de la vista filtrada — equivale al `index.xlsx`/tabla de datos del paquete. Junto
+con el ZIP de papers + BibTeX (items 10/11/22/23) cubre la mayor parte de la colección por tema.
 
 ### ✅ 25. corpus_manifest.json (completado 2026-06-01)
 
