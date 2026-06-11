@@ -76,6 +76,23 @@ def _pdf_bytes(category, paper_id):
     return None, None
 
 
+def _has_pdf(category, paper_id):
+    for p in cleanup.candidate_paths(CATEGORIAS_DIR / category, paper_id):
+        if p.suffix.lower() == ".pdf" and p.exists():
+            return True
+    return False
+
+
+def _default_keep_index(papers):
+    # prioridad: tiene PDF > stem limpio Crossref > orden original
+    order = sorted(range(len(papers)), key=lambda i: (
+        not _has_pdf(papers[i]["category"], papers[i]["paper_id"]),
+        not cleanup._is_clean_stem(papers[i]["paper_id"]),
+        i,
+    ))
+    return order[0]
+
+
 KEEP_ALL_LABEL = "✅ No es duplicado — conservar todos"
 
 
@@ -91,16 +108,12 @@ def render_group(section: str, gi: int, group: dict) -> None:
     if section == "title":
         header = group.get("norm_title", "")
         st.markdown(f"**Título:** {header}")
-        default_index = 0
     else:
         header = group.get("sha256", "")
         st.markdown(f"**SHA-256:** `{header}`")
-        # Default: primer candidato con stem limpio Crossref si existe.
-        default_index = 0
-        for i, c in enumerate(papers):
-            if cleanup._is_clean_stem(c["paper_id"]):
-                default_index = i
-                break
+
+    # Default: prioriza candidato con PDF presente y stem limpio Crossref.
+    default_index = _default_keep_index(papers)
 
     labels = [_candidate_label(c) for c in papers]
     options = labels + [KEEP_ALL_LABEL]
