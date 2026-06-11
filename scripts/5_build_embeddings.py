@@ -186,12 +186,25 @@ def iter_chunks(chunks_dir: Path, phase_filter: str):
 
 
 def embed_texts(client: ollama.Client, texts: list, model: str) -> list:
+    """Embeddea uno a uno. Si un chunk excede el contexto del modelo, lo trunca
+    progresivamente (2/3 cada vez) y reintenta: la densidad en tokens del texto
+    con fórmulas/subíndices puede superar el contexto aun con pocos caracteres."""
     out = []
     for text in texts:
-        if len(text) > MAX_EMBED_CHARS:
-            print(f"  ⚠️ chunk de {len(text)} chars truncado a {MAX_EMBED_CHARS} para embeber")
-            text = text[:MAX_EMBED_CHARS]
-        out.append(np.array(client.embeddings(model=model, prompt=text)["embedding"], dtype="float32"))
+        t = text if len(text) <= MAX_EMBED_CHARS else text[:MAX_EMBED_CHARS]
+        for _ in range(8):
+            try:
+                resp = client.embeddings(model=model, prompt=t)
+                out.append(np.array(resp["embedding"], dtype="float32"))
+                break
+            except Exception as e:
+                if "context length" in str(e).lower() and len(t) > 400:
+                    t = t[: max(400, (len(t) * 2) // 3)]
+                    print(f"  ⚠️ chunk excede contexto; truncado a {len(t)} chars y reintentando")
+                else:
+                    raise
+        else:
+            raise RuntimeError("No se pudo embeber un chunk ni tras truncarlo al mínimo")
     return out
 
 
