@@ -41,6 +41,7 @@ st.title("🧹 Revisión de duplicados")
 _spec = importlib.util.spec_from_file_location(
     "cleanup_dups", str(SCRIPTS_DIR / "9_cleanup_duplicates.py"))
 cleanup = importlib.util.module_from_spec(_spec)
+sys.modules[_spec.name] = cleanup          # <-- necesario para @dataclass
 _spec.loader.exec_module(cleanup)
 
 
