@@ -462,6 +462,28 @@ def get_category_stats(category: str) -> Dict[str, Any]:
         if sub.is_dir()
     )
 
+    # ── DOI faltantes desde papers_metadata.jsonl ──
+    n_sin_doi = 0
+    n_total_meta = 0
+    jsonl_path = cat_dir / "metadata" / "papers_metadata.jsonl"
+    if jsonl_path.exists():
+        try:
+            with jsonl_path.open(encoding="utf-8") as f:
+                for line in f:
+                    s = line.strip()
+                    if not s:
+                        continue
+                    try:
+                        d = json.loads(s)
+                    except Exception:
+                        continue
+                    n_total_meta += 1
+                    doi = d.get("doi", "")
+                    if not doi or not str(doi).strip():
+                        n_sin_doi += 1
+        except Exception:
+            pass
+
     return {
         "exists":     True,
         "pdfs":       n_pdfs,
@@ -473,6 +495,8 @@ def get_category_stats(category: str) -> Dict[str, Any]:
         "embeddings": has_embeddings,
         "packages":   count("notebooklm_packages", "*"),
         "pending":    pending,
+        "n_sin_doi":  n_sin_doi,
+        "n_total_meta": n_total_meta,
     }
 
 
@@ -511,6 +535,7 @@ def category_summary_row(category: str) -> Dict[str, Any]:
         "FAISS": "✓" if stats.get("embeddings") else "✗",
         "Paquetes": int(stats.get("packages", 0)),
         "Brechas": ", ".join(gaps) if gaps else "Completo",
+        "Sin DOI": int(stats.get("n_sin_doi", 0)),
     }
 
 

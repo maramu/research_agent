@@ -13,12 +13,18 @@ No ejecuta nada sobre el corpus: solo lee papers_metadata.jsonl por categoría.
 
 from __future__ import annotations
 
+import copy
 import json
+import os
+import shutil
 import sys
-from datetime import datetime
+import time
+from datetime import datetime, date
 from pathlib import Path
 
+import openpyxl
 import pandas as pd
+import requests
 import streamlit as st
 
 # Permitir import de app_utils.py de la carpeta padre (mismo patrón que 2_RAG.py)
@@ -29,9 +35,143 @@ for _d in (str(STREAMLIT_APP_DIR), str(SCRIPTS_DIR)):
         sys.path.insert(0, _d)
 
 from app_utils import (
-    CATEGORIAS_DIR, check_password, is_public_app,
+    CATEGORIAS_DIR, DOI_MANUAL_XLSX, METADATOS_DIR,
+    check_password, is_public_app,
     list_existing_categories, get_categories_summary,
 )
+
+# ── Helpers para DOI ──
+
+# Email para Crossref (usa UNPAYWALL_EMAIL de config/.env como mailto educado)
+_CROSSREF_MAILTO = os.getenv("UNPAYWALL_EMAIL", "")
+
+
+def crossref_suggest(title: str, mailto: str = "") -> list[dict]:
+    """Busca candidatos de DOI en Crossref por título bibliográfico."""
+    if not title or not title.strip():
+        return []
+    try:
+        params = {"query.bibliographic": title.strip(), "rows": 3}
+        if not mailto:
+            mailto = _CROSSREF_MAILTO
+        if mailto:
+            params["mailto"] = mailto
+        r = requests.get(
+            "https://api.crossref.org/works",
+            params=params, timeout=15,
+        )
+        items = r.json().get("message", {}).get("items", [])
+    except Exception:
+        return []
+    out = []
+    for it in items:
+        out.append({
+            "doi":     it.get("DOI", ""),
+            "title":   (it.get("title") or [""])[0],
+            "year":    (it.get("issued", {}).get("date-parts", [[None]])[0] or [None])[0],
+            "journal": (it.get("container-title") or [""])[0],
+        })
+    return out
+
+
+def assign_dois(category: str, updates: dict) -> int:
+    """Actualiza papers_metadata.jsonl y doi_manual.xlsx con DOIs nuevos.
+
+    Args:
+        category: Nombre de la categoría.
+        updates:  {paper_id: {"doi": str, "journal": str|None}}.
+
+    Ambas escrituras hacen backup .bak previo.
+    Devuelve el número de registros actualizados en el jsonl.
+    """
+    if not updates:
+        return 0
+
+    meta = CATEGORIAS_DIR / category / "metadata" / "papers_metadata.jsonl"
+    changed = 0
+    if meta.exists():
+        # Backup del jsonl
+        bak = meta.with_suffix(meta.suffix + ".bak")
+        shutil.copy(meta, bak)
+        lines = []
+        with meta.open(encoding="utf-8") as f:
+            for line in f:
+                s = line.strip()
+                if not s:
+                    continue
+                d = json.loads(s)
+                pid = d.get("paper_id") or d.get("stable_id") or ""
+                if pid in updates and updates[pid].get("doi"):
+                    d["doi"] = updates[pid]["doi"]
+                    if updates[pid].get("journal") and not d.get("journal"):
+                        d["journal"] = updates[pid]["journal"]
+                    changed += 1
+                lines.append(json.dumps(d, ensure_ascii=False))
+        meta.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    # ── Upsert en doi_manual.xlsx (mismo esquema que 1_rename_papers_by_doi.py) ──
+    doi_xlsx = DOI_MANUAL_XLSX
+
+    # Backup del xlsx
+    if doi_xlsx.exists():
+        bak_xlsx = doi_xlsx.with_name(doi_xlsx.name + ".bak")
+        shutil.copy(doi_xlsx, bak_xlsx)
+
+    if doi_xlsx.exists():
+        wb = openpyxl.load_workbook(doi_xlsx)
+        ws = wb.active
+        # Leer existentes: {nombre_archivo -> row_idx (1-based)}
+        existing: dict[str, int] = {}
+        if ws.max_row is not None and ws.max_row >= 2:
+            for row_idx in range(2, ws.max_row + 1):
+                val = ws.cell(row=row_idx, column=1).value
+                if val is not None:
+                    existing[str(val).strip()] = row_idx
+        # Localizar columna fecha_inclusion (o añadirla)
+        n_cols = ws.max_column or 2
+        header = [ws.cell(row=1, column=c).value for c in range(1, n_cols + 1)]
+        hl = [str(h).strip().lower() if h is not None else "" for h in header]
+        if "fecha_inclusion" in hl:
+            fecha_col = hl.index("fecha_inclusion") + 1
+        else:
+            fecha_col = n_cols + 1
+            ws.cell(row=1, column=fecha_col).value = "fecha_inclusion"
+        today = date.today().isoformat()
+        for pid, udata in updates.items():
+            doi = udata.get("doi", "")
+            if not doi:
+                continue
+            # En doi_manual la clave es nombre_archivo (stem del PDF con .pdf)
+            nombre = pid + ".pdf"
+            if nombre in existing:
+                row_idx = existing[nombre]
+                if not ws.cell(row=row_idx, column=2).value:
+                    ws.cell(row=row_idx, column=2).value = doi
+            else:
+                row_data = [None] * fecha_col
+                row_data[0] = nombre
+                row_data[1] = doi
+                row_data[fecha_col - 1] = today
+                ws.append(row_data)
+                existing[nombre] = ws.max_row
+        wb.save(doi_xlsx)
+    else:
+        # Crear xlsx nuevo con cabecera
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.append(["nombre_archivo", "doi", "fecha_inclusion"])
+        today = date.today().isoformat()
+        for pid, udata in updates.items():
+            doi = udata.get("doi", "")
+            if not doi:
+                continue
+            ws.append([pid + ".pdf", doi, today])
+        wb.save(doi_xlsx)
+
+    return changed
+
+
+# ── Fin helpers DOI ─────────────────────────────────────────────────────────
 
 st.set_page_config(page_title="Artículos", page_icon="📋", layout="wide")
 
@@ -175,7 +315,12 @@ with c3:
     else:
         ys = ye = None
 with c4:
-    solo_doi = st.checkbox("Solo con DOI", value=False)
+    doi_filter = st.radio(
+        "DOI", options=["Todos", "Con DOI", "Sin DOI"],
+        index=0, horizontal=True, key="doi_filter",
+    )
+    solo_doi = (doi_filter == "Con DOI")
+    solo_sin_doi = (doi_filter == "Sin DOI")
 
 
 # ── Aplicar filtros en cascada ───────────────────────────────────────────────
@@ -204,7 +349,9 @@ if ys is not None and ye is not None:
         r for r in filtered
         if (_y := _year_int(r["year"])) is not None and ys <= _y <= ye
     ]
-if solo_doi:
+if solo_sin_doi:
+    filtered = [r for r in filtered if not str(r["doi"]).strip()]
+elif solo_doi:
     filtered = [r for r in filtered if str(r["doi"]).strip()]
 
 st.caption(f"**{len(filtered)}** artículo(s) tras filtrar (de {len(rows)} cargados).")
@@ -269,3 +416,147 @@ st.download_button(
     file_name=f"articulos_{_slug}_{_today}.csv",
     mime="text/csv",
 )
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# ✏️ Asignar DOIs faltantes (SOLO INSTANCIA PRIVADA)
+# ───────────────────────────────────────────────────────────────────────────
+if not PUBLIC:
+    st.divider()
+    st.subheader("✏️ Asignar DOIs faltantes")
+
+    # Solo permitir edición si hay una categoría concreta seleccionada
+    if sel == TODAS:
+        st.info(
+            "Selecciona una categoría concreta en el selector de arriba "
+            "para habilitar la edición de DOIs."
+        )
+    else:
+        # Subconjunto sin DOI de la categoría actual
+        sin_doi_rows = load_articles(sel, _meta_mtime(sel))
+        sin_doi_rows = [r for r in sin_doi_rows if not str(r["doi"]).strip()]
+
+        if not sin_doi_rows:
+            st.success("Todos los artículos de esta categoría tienen DOI. ¡Perfecto!")
+        else:
+            st.caption(
+                f"{len(sin_doi_rows)} artículo(s) sin DOI en **{sel}** "
+                f"(de {len(rows)} cargados)."
+            )
+
+            # ── Botón: sugerir desde Crossref ──
+            sug_key = f"doi_suggestions_{sel}"
+            ccol1, ccol2 = st.columns([3, 1])
+            with ccol1:
+                if st.button("🔎 Sugerir desde Crossref (visibles)", use_container_width=True):
+                    with st.spinner(f"Consultando Crossref para {len(sin_doi_rows)} artículos…"):
+                        suggestions = {}
+                        n_sug = 0
+                        for i, r in enumerate(sin_doi_rows):
+                            title = r.get("title", "")
+                            if title:
+                                cands = crossref_suggest(title)
+                                if cands:
+                                    suggestions[r["paper_id"]] = cands[0]
+                                    n_sug += 1
+                            if i < len(sin_doi_rows) - 1:
+                                time.sleep(0.3)
+                        st.session_state[sug_key] = suggestions
+                        st.success(
+                            f"Crossref encontró {n_sug} candidato(s) "
+                            f"de {len(sin_doi_rows)}."
+                        )
+                        st.rerun()
+            with ccol2:
+                if st.button("🗑️ Limpiar", use_container_width=True):
+                    st.session_state.pop(sug_key, None)
+                    st.rerun()
+
+            suggestions = st.session_state.get(sug_key, {})
+
+            # Construir dataframe para el editor
+            editor_rows = []
+            for r in sin_doi_rows:
+                pid = r["paper_id"]
+                sug = suggestions.get(pid, {})
+                editor_rows.append({
+                    "paper_id":      pid,
+                    "title":         r.get("title", ""),
+                    "year":          r.get("year", ""),
+                    "journal":       r.get("journal", ""),
+                    "doi_sugerido":  sug.get("doi", ""),
+                    "match_titulo":  sug.get("title", ""),
+                    "match_año":     sug.get("year", ""),
+                    "match_revista": sug.get("journal", ""),
+                    "doi":           "",   # EDITABLE por el usuario
+                })
+
+            if not editor_rows:
+                st.info("No hay filas para editar.")
+            else:
+                df_editor = pd.DataFrame(editor_rows)
+
+                col_cfg = {
+                    "paper_id":      st.column_config.TextColumn("paper_id", disabled=True),
+                    "title":         st.column_config.TextColumn("Título", disabled=True, width="large"),
+                    "year":          st.column_config.NumberColumn("Año", disabled=True, width="small"),
+                    "journal":       st.column_config.TextColumn("Revista", disabled=True, width="medium"),
+                    "doi_sugerido":  st.column_config.TextColumn("DOI sugerido", disabled=True, width="medium"),
+                    "match_titulo":  st.column_config.TextColumn("Match título", disabled=True, width="large"),
+                    "match_año":     st.column_config.NumberColumn("Match año", disabled=True, width="small"),
+                    "match_revista": st.column_config.TextColumn("Match revista", disabled=True, width="medium"),
+                    "doi":           st.column_config.TextColumn("✏️ DOI (editable)", width="medium"),
+                }
+
+                editor_key = f"doi_editor_df_{sel}"
+                if editor_key not in st.session_state:
+                    st.session_state[editor_key] = copy.deepcopy(df_editor)
+                else:
+                    # Merge suggestions into existing editor df
+                    sess_df = st.session_state[editor_key]
+                    for _, row in sess_df.iterrows():
+                        pid = row["paper_id"]
+                        sug = suggestions.get(pid, {})
+                        if sug.get("doi") and not str(row.get("doi", "")).strip():
+                            sess_df.at[_, "doi_sugerido"] = sug.get("doi", "")
+                            sess_df.at[_, "match_titulo"] = sug.get("title", "")
+                            sess_df.at[_, "match_año"] = sug.get("year", "")
+                            sess_df.at[_, "match_revista"] = sug.get("journal", "")
+                    df_editor = sess_df
+
+                edited = st.data_editor(
+                    df_editor,
+                    column_config=col_cfg,
+                    hide_index=True,
+                    use_container_width=True,
+                    num_rows="fixed",
+                    key=f"doi_data_editor_{sel}",
+                )
+                st.session_state[editor_key] = edited
+
+                # Botón guardar
+                if st.button("💾 Guardar DOIs", type="primary", use_container_width=True):
+                    updates = {}
+                    for _, row in edited.iterrows():
+                        doi_val = str(row.get("doi", "")).strip()
+                        if doi_val:
+                            updates[row["paper_id"]] = {
+                                "doi": doi_val,
+                                "journal": str(row.get("journal", "")).strip() or None,
+                            }
+                    if not updates:
+                        st.warning("No hay DOIs nuevos para guardar.")
+                    else:
+                        n_changed = assign_dois(sel, updates)
+                        st.success(
+                            f"✓ {n_changed} registro(s) actualizado(s) en "
+                            f"papers_metadata.jsonl y doi_manual.xlsx. "
+                            f"Backups guardados con extensión .bak."
+                        )
+                        # Invalidar caché del listado (bump nonce)
+                        st.session_state["art_nonce"] = (
+                            st.session_state.get("art_nonce", 0) + 1
+                        )
+                        st.session_state.pop(editor_key, None)
+                        st.session_state.pop(sug_key, None)
+                        st.rerun()
