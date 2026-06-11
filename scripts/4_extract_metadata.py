@@ -69,6 +69,7 @@ import json
 import os
 import re
 import shutil
+import unicodedata
 from datetime import date
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -345,6 +346,22 @@ def infer_paper_id(p: Path) -> str:
     return name
 
 
+def _norm(s: str) -> str:
+    """Normalización de coherencia PDF/MD (igual que 6_Mantenimiento.py)."""
+    s = unicodedata.normalize("NFKC", s)
+    s = re.sub(r"[\s\.\-,]+", "_", s).lower()
+    s = re.sub(r"_+", "_", s)
+    return s.strip("_")
+
+
+def _tei_stem(name: str) -> str:
+    """Stem de un fichero TEI sin sufijos .grobid.tei.xml / .tei.xml / .xml."""
+    for suf in (".grobid.tei.xml", ".tei.xml", ".xml"):
+        if name.lower().endswith(suf):
+            return name[: -len(suf)]
+    return name
+
+
 def _doi_slug(doi: str) -> str:
     return re.sub(r"[^a-z0-9]+", "_", doi.lower()).strip("_")
 
@@ -567,8 +584,17 @@ def main():
         bak = papers_meta_path.with_suffix(papers_meta_path.suffix + ".bak")
         shutil.copy(papers_meta_path, bak)
 
+    # Solo emitir metadata para TEI con md_clean correspondiente: evita papers
+    # fantasma (TEI huérfanos de dedup/renombrados). Stems normalizados (_norm).
+    md_dir = base / project / "md_clean"
+    md_stems = set()
+    if md_dir.exists():
+        for p in md_dir.glob("*.clean.md"):
+            md_stems.add(_norm(p.name[: -len(".clean.md")]))
+
     total_refs    = 0
     papers_written = 0
+    orphans: List[str] = []
 
     with papers_meta_path.open("w", encoding="utf-8") as f_meta, \
          refs_path.open("w", encoding="utf-8") as f_refs:
@@ -583,6 +609,13 @@ def main():
 
             paper_id = infer_paper_id(tei_file)
             phase    = phase_from_path(tei_file)
+
+            # Saltar TEI huérfanos: sin md_clean correspondiente no se emite
+            # metadata (restos de dedup/renombrados).
+            tei_stem = _tei_stem(tei_file.name)
+            if _norm(tei_stem) not in md_stems:
+                orphans.append(tei_stem)
+                continue
 
             title      = extract_title(root, ns)
             doi        = extract_doi(root, ns)
@@ -659,6 +692,9 @@ def main():
 
     print(f"✅ Papers procesados : {papers_written}")
     print(f"✅ Referencias       : {total_refs}")
+    print(f"⏭️  TEI huérfanos saltados (sin md_clean): {len(orphans)}")
+    for stem in sorted(orphans):
+        print(f"     - {stem}")
     print(f"📄 Metadata JSONL   : {papers_meta_path}")
     print(f"📚 References JSONL : {refs_path}")
     print(f"📁 Por-paper en     : {per_paper_dir}")
