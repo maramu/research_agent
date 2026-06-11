@@ -101,19 +101,33 @@ def _candidate_label(c) -> str:
             f"DOI {c.get('doi', '') or '—'}")
 
 
-def render_group(section: str, gi: int, group: dict) -> None:
+def render_group(section: str, gi: int, group: dict, is_title: bool) -> None:
     """Renderiza un grupo de duplicados (común a título y hash)."""
     papers = group["papers"]
 
-    if section == "title":
+    if is_title:
         header = group.get("norm_title", "")
         st.markdown(f"**Título:** {header}")
     else:
         header = group.get("sha256", "")
         st.markdown(f"**SHA-256:** `{header}`")
 
-    # Default: prioriza candidato con PDF presente y stem limpio Crossref.
-    default_index = _default_keep_index(papers)
+    if is_title:
+        # Guard falsos positivos: varios PDFs reales y/o DOIs distintos sugieren
+        # papers diferentes con el mismo título normalizado → no borrar por defecto.
+        pdfs_con = sum(1 for c in papers if _has_pdf(c["category"], c["paper_id"]))
+        dois = {(c.get("doi") or "").strip() for c in papers if (c.get("doi") or "").strip()}
+        riesgo = pdfs_con >= 2 or len(dois) >= 2
+        if riesgo:
+            st.warning(
+                "⚠️ Varios candidatos con PDF y/o DOIs distintos: posible falso positivo "
+                "(mismo título, papers diferentes). Por defecto NO se borra — revisa antes.")
+            default_index = len(papers)            # índice de "conservar todos"
+        else:
+            default_index = _default_keep_index(papers)
+    else:
+        # Hash-dups: byte-idénticos = duplicados reales, sin guard.
+        default_index = _default_keep_index(papers)
 
     labels = [_candidate_label(c) for c in papers]
     options = labels + [KEEP_ALL_LABEL]
@@ -150,14 +164,14 @@ with tab_title:
         st.success("Sin duplicados por título.")
     else:
         for gi, group in enumerate(title_dups):
-            render_group("title", gi, group)
+            render_group("title", gi, group, is_title=True)
 
 with tab_hash:
     if not hash_dups:
         st.success("Sin duplicados por hash PDF.")
     else:
         for gi, group in enumerate(hash_dups):
-            render_group("hash", gi, group)
+            render_group("hash", gi, group, is_title=False)
 
 
 # ── Cálculo de a-cuarentena ──────────────────────────────────────────────────
