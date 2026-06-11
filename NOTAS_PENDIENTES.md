@@ -4,6 +4,61 @@
 
 ## Verificaciones completadas
 
+### ✅ Item 34 — Filtrado por sección y año en la query (2026-06-11)
+- utils/constants.py: CANONICAL_SECTIONS (abstract, introduction, methods, results,
+  discussion, conclusion, table, other) y year_from_paper_id() como fuente única.
+- 8_query_rag.py: --sections (filtra section_canonical), --year-start/--year-end
+  (rango inclusivo). Año resuelto por m['year'] con fallback regex sobre paper_id.
+- 5_build_embeddings.py: denormaliza `year` en cada registro de metadata.jsonl
+  (_load_pid2year desde papers_metadata.jsonl con lookup tolerante de campo +
+  fallback year_from_paper_id).
+- 2_RAG.py / 7_Revision.py: multiselect de secciones + filtro de año opt-in (checkbox + slider).
+- Revista: descartada explícitamente.
+- Verificado en anoxic: --sections methods,results excluye introduction/abstract/other;
+  --year-start 2020 deja fuera el review de 2008. El año funciona ya por fallback regex
+  y pasa a autoritativo (TEI) tras re-indexar.
+
+---
+
+### ✅ Item 33 (v1) — Recuperación híbrida denso + BM25 con RRF (2026-06-11)
+- requirements.txt: rank-bm25.
+- scripts/utils/retrieval.py (NUEVO): tokenize, build_bm25, dense_rank, bm25_rank,
+  rrf_fuse (RRF_K=60), passes_filters (centraliza filtros items 32/34), pool_size.
+- BM25 al vuelo desde metadata.jsonl (sin artefacto, sin re-index; orden alineado con
+  vectores FAISS). Cacheado por mtime en Streamlit (load_bm25); one-shot en CLI.
+- 8_query_rag.py: --hybrid. 2_RAG.py / 7_Revision.py: toggle "Recuperación híbrida"
+  OFF por defecto; etiqueta rrf/dist en resultados.
+- Verificado A/B con query de siglas (NR-SOB): el híbrido sube matches léxicos y papers
+  de comunidad microbiana que el denso no traía en top-8.
+- Reranking: PENDIENTE (fase 2), ligado al item 37 — sin set de evaluación no se puede
+  medir, y el soporte de rerank en Ollama es dudoso.
+
+---
+
+### ✅ Fix robustez de chunking — tope de tamaño + truncado reactivo (2026-06-11)
+- Problema: chunks que exceden el contexto de bge-m3 (8192 tokens). Dos fugas: (1) las
+  tablas se emitían enteras sin trocear en build_chunk_records; (2) el tope por palabras
+  no controla tokens — el texto de GROBID con fórmulas/subíndices espaciados (H 2 S,
+  S-SO 4 2-) puede superar 1 token/char, así que <8000 chars ya revientan el contexto.
+- utils/constants.py: MAX_EMBED_CHARS = 8000.
+- 3_process_corpus.py: helper _split_to_max_chars aplicado al texto (renumerando
+  section_part) y a las tablas (antes iban enteras); section_part añadido a registros
+  de tabla.
+- 5_build_embeddings.py: embed_texts con truncado REACTIVO — captura el error de contexto
+  y trunca 2/3 hasta que entra (el truncado fijo por chars no bastaba). El campo `text`
+  de metadata queda completo; solo el vector usa el texto truncado.
+- Verificado: microalgae embebía con un chunk truncado a 3635 chars (~2,25 tokens/char) y completó.
+
+---
+
+### ✅ Item 32 — rollout completado (2026-06-11)
+- Re-troceadas + re-indexadas las 8 categorías con 3_process_corpus.py --force-md
+  (re-chunk desde TEI existente, sin GROBID) + 5_build_embeddings.py --force --model bge-m3.
+- section_canonical y year poblados en metadata.jsonl de todas las categorías; tablas
+  capadas; FAISS reconstruido. Cierra el "pendiente: re-trocear el resto" del item 32 (2026-06-10).
+
+---
+
 ### ✅ Pipeline ingesta Scopus — fixes robustez (2026-06-09)
 
 Serie de fixes críticos detectados durante la ingesta manual tras corte de luz:
@@ -728,7 +783,7 @@ Propuestas derivadas de la revisión del pipeline. Ordenadas por impacto: 32–3
 suben la calidad de recuperación (lo que más determina si el RAG es útil); 35–36
 refuerzan la robustez del procesado; 37–40 son evaluación, coste y mantenimiento.
 
-### ✅ 32. Chunking consciente de la estructura (completado 2026-06-10)
+### ✅ 32. Chunking consciente de la estructura (completado 2026-06-10; rollout completado 2026-06-11)
 
 `section_canonical` jerárquico + etiqueta `"table"` en los chunks JSONL. Commit b097744.
 
@@ -754,8 +809,9 @@ refuerzan la robustez del procesado; 37–40 son evaluación, coste y mantenimie
 
 El `other` residual (38.5%) es cola larga de títulos descriptivos no-IMRaD (subsecciones muy específicas sin patrón de keyword reconocible) — residuo legítimo. FAISS re-indexado con `--force`.
 
-**Pendiente:** re-trocear + re-indexar el resto de categorías con `3_process_corpus.py --force` para poblar el campo (no es retroactivo).
+**✅ Rollout completado (2026-06-11):** re-troceadas + re-indexadas las 8 categorías con `3_process_corpus.py --force-md` + `5_build_embeddings.py --force --model bge-m3`. `section_canonical` y `year` poblados en todas; tablas capadas; FAISS reconstruido.
 
+### ✅ v1 (híbrido denso+BM25+RRF) 2026-06-11; reranking en fase 2, pendiente
 ### 33. Recuperación híbrida (denso + BM25) + reranking — ALTA prioridad
 
 FAISS es solo denso: captura semántica pero se le escapan los *matches* léxicos
@@ -772,6 +828,7 @@ cepas como `Acidithiobacillus`, códigos `PHA/PHB`).
 - Tocar `8_query_rag.py` y la capa de retrieval de `2_RAG.py` / `7_Revision.py`.
   Toggle en la web para activar/desactivar híbrido y comparar.
 
+### ✅ 2026-06-11 (sección + año; revista descartada)
 ### 34. Filtrado por metadato en la query — ALTA prioridad
 
 Permitir filtrar **antes/durante** la recuperación por categoría, rango de años,
@@ -802,7 +859,11 @@ para que un fallo a mitad no obligue a reprocesar todo ni deje entradas a medias
   y el skip logic existente, dándole trazabilidad y reanudación explícita.
 - Útil tras timeouts del job semanal o caídas de VPN a mitad de ingesta.
 
-### 37. Set de evaluación del RAG (golden Q&A) — MEDIA prioridad
+### 37. Set de evaluación del RAG (golden Q&A) — MEDIA prioridad (siguiente paso natural)
+
+**Siguiente paso natural tras 32/33/34 (2026-06-11):** es la única forma de medir si el
+chunking estructural (32), el híbrido denso+BM25 (33) y los filtros sección/año (34)
+mejoran o empeoran, y de justificar objetivamente el reranking pendiente de la fase 2 del item 33.
 
 Conjunto de pares pregunta/respuesta de referencia por categoría que se corre tras
 cualquier cambio de chunking, embeddings, modelo o estrategia de retrieval.
@@ -839,3 +900,8 @@ Distinto del item 27 (backup de config): aquí se respalda el **corpus y los ín
 - Ahora que todo vive en el SSD Crucial X9 de `pciq22`, el NAS queda como única copia.
 - Recordar restricciones NAS ya documentadas: usar `shutil.copy` (no `copy2`),
   evitar `mv` (usar `cp`), `Path.mkdir()` puede fallar en el mount bajo Python 3.13.
+
+### 41. Limpiar el índice viejo all__bge-m3 de anoxic — BAJA prioridad
+
+Fase divergente sin `section_canonical`/`year` en sus chunks. Borrar o re-indexar para
+que no compita con el índice canónico al vuelo (items 32/34).
