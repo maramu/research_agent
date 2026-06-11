@@ -13,7 +13,6 @@ No ejecuta nada sobre el corpus: solo lee papers_metadata.jsonl por categoría.
 
 from __future__ import annotations
 
-import copy
 import json
 import os
 import shutil
@@ -46,12 +45,56 @@ from app_utils import (
 _CROSSREF_MAILTO = os.getenv("UNPAYWALL_EMAIL", "")
 
 
-def crossref_suggest(title: str, mailto: str = "") -> list[dict]:
-    """Busca candidatos de DOI en Crossref por título bibliográfico."""
+def _fmt_authors(authors):
+    """Convierte la lista de autores (dicts/strings) en texto legible."""
+    if not authors:
+        return ""
+    if isinstance(authors, str):
+        return authors
+    out = []
+    for a in authors:
+        if isinstance(a, dict):
+            fn = (a.get("forename") or "").strip()
+            sn = (a.get("surname") or "").strip()
+            nombre = (fn + " " + sn).strip() or (a.get("full") or "").strip()
+        else:
+            nombre = str(a)
+        if nombre:
+            out.append(nombre)
+    return "; ".join(out)
+
+
+def _first_author_surname(authors) -> str:
+    """Apellido del primer autor (best-effort) para afinar Crossref."""
+    if not authors:
+        return ""
+    if isinstance(authors, list):
+        a = authors[0]
+        if isinstance(a, dict):
+            return (a.get("surname") or "").strip() or (a.get("full") or "").strip()
+        return str(a).strip()
+    if isinstance(authors, str):
+        first = authors.split(";")[0].split(",")[0].strip()
+        return first.split()[-1] if first else ""
+    return ""
+
+
+def crossref_suggest(title: str, mailto: str = "",
+                     author: str = "", year: str = "") -> list[dict]:
+    """Busca candidatos de DOI en Crossref por título bibliográfico.
+
+    Si están disponibles, añade apellido del primer autor y año a la
+    query.bibliographic para mejorar la precisión del match. El contrato
+    de salida (doi/title/year/journal) no cambia.
+    """
     if not title or not title.strip():
         return []
     try:
-        params = {"query.bibliographic": title.strip(), "rows": 3}
+        biblio = title.strip()
+        extra = " ".join(p for p in (str(author).strip(), str(year).strip()) if p)
+        if extra:
+            biblio = f"{biblio} {extra}"
+        params = {"query.bibliographic": biblio, "rows": 3}
         if not mailto:
             mailto = _CROSSREF_MAILTO
         if mailto:
@@ -239,9 +282,9 @@ def load_articles(category: str, mtime: float) -> list[dict]:
                     d = json.loads(s)
                 except Exception:
                     continue
-                authors = d.get("authors")
-                if isinstance(authors, list):
-                    authors = ", ".join(str(a) for a in authors)
+                authors_raw = d.get("authors")
+                authors = _fmt_authors(authors_raw)
+                first_author = _first_author_surname(authors_raw)
                 refs = d.get("references")
                 n_refs = len(refs) if isinstance(refs, list) else (d.get("n_references") or "")
                 rows.append({
@@ -251,6 +294,7 @@ def load_articles(category: str, mtime: float) -> list[dict]:
                     "journal":       d.get("journal") or d.get("venue") or "",
                     "doi":           d.get("doi") or "",
                     "authors":       authors or "",
+                    "first_author":  first_author,
                     "n_refs":        n_refs,
                     "quality_score": d.get("quality_score"),
                     "source_type":   d.get("source_type") or "",
@@ -446,6 +490,7 @@ if not PUBLIC:
 
             # ── Botón: sugerir desde Crossref ──
             sug_key = f"doi_suggestions_{sel}"
+            nonce = st.session_state.get("doi_editor_nonce", 0)
             ccol1, ccol2 = st.columns([3, 1])
             with ccol1:
                 if st.button("🔎 Sugerir desde Crossref (visibles)", use_container_width=True):
@@ -455,13 +500,20 @@ if not PUBLIC:
                         for i, r in enumerate(sin_doi_rows):
                             title = r.get("title", "")
                             if title:
-                                cands = crossref_suggest(title)
+                                cands = crossref_suggest(
+                                    title,
+                                    author=r.get("first_author", ""),
+                                    year=str(r.get("year") or ""),
+                                )
                                 if cands:
                                     suggestions[r["paper_id"]] = cands[0]
                                     n_sug += 1
                             if i < len(sin_doi_rows) - 1:
                                 time.sleep(0.3)
                         st.session_state[sug_key] = suggestions
+                        # Bump del nonce → fuerza reset del st.data_editor con
+                        # los DOIs sugeridos pre-rellenados.
+                        st.session_state["doi_editor_nonce"] = nonce + 1
                         st.success(
                             f"Crossref encontró {n_sug} candidato(s) "
                             f"de {len(sin_doi_rows)}."
@@ -470,25 +522,32 @@ if not PUBLIC:
             with ccol2:
                 if st.button("🗑️ Limpiar", use_container_width=True):
                     st.session_state.pop(sug_key, None)
+                    # Bump del nonce → resetea el estado del editor.
+                    st.session_state["doi_editor_nonce"] = nonce + 1
                     st.rerun()
 
             suggestions = st.session_state.get(sug_key, {})
 
-            # Construir dataframe para el editor
+            # Construir dataframe para el editor: una sola columna DOI editable
+            # (pre-rellenada con la sugerencia) + verificación Crossref disabled.
             editor_rows = []
             for r in sin_doi_rows:
                 pid = r["paper_id"]
                 sug = suggestions.get(pid, {})
+                match_parts = [
+                    str(sug.get("title") or "").strip(),
+                    str(sug.get("year") or "").strip(),
+                    str(sug.get("journal") or "").strip(),
+                ]
+                match_txt = " · ".join(p for p in match_parts if p)
                 editor_rows.append({
-                    "paper_id":      pid,
-                    "title":         r.get("title", ""),
-                    "year":          r.get("year", ""),
-                    "journal":       r.get("journal", ""),
-                    "doi_sugerido":  sug.get("doi", ""),
-                    "match_titulo":  sug.get("title", ""),
-                    "match_año":     sug.get("year", ""),
-                    "match_revista": sug.get("journal", ""),
-                    "doi":           "",   # EDITABLE por el usuario
+                    "paper_id":     pid,
+                    "title":        r.get("title", ""),
+                    "year":         r.get("year", ""),
+                    "journal":      r.get("journal", ""),
+                    # DOI editable, pre-rellenado con la sugerencia si existe
+                    "doi":          str(sug.get("doi") or ""),
+                    "match":        match_txt,
                 })
 
             if not editor_rows:
@@ -497,44 +556,28 @@ if not PUBLIC:
                 df_editor = pd.DataFrame(editor_rows)
 
                 col_cfg = {
-                    "paper_id":      st.column_config.TextColumn("paper_id", disabled=True),
-                    "title":         st.column_config.TextColumn("Título", disabled=True, width="large"),
-                    "year":          st.column_config.NumberColumn("Año", disabled=True, width="small"),
-                    "journal":       st.column_config.TextColumn("Revista", disabled=True, width="medium"),
-                    "doi_sugerido":  st.column_config.TextColumn("DOI sugerido", disabled=True, width="medium"),
-                    "match_titulo":  st.column_config.TextColumn("Match título", disabled=True, width="large"),
-                    "match_año":     st.column_config.NumberColumn("Match año", disabled=True, width="small"),
-                    "match_revista": st.column_config.TextColumn("Match revista", disabled=True, width="medium"),
-                    "doi":           st.column_config.TextColumn("✏️ DOI (editable)", width="medium"),
+                    "paper_id": st.column_config.TextColumn("paper_id", disabled=True),
+                    "title":    st.column_config.TextColumn("Título", disabled=True, width="large"),
+                    "year":     st.column_config.NumberColumn("Año", disabled=True, width="small"),
+                    "journal":  st.column_config.TextColumn("Revista", disabled=True, width="medium"),
+                    "doi":      st.column_config.TextColumn(
+                        "✏️ DOI (editable)", disabled=False, width="medium"),
+                    "match":    st.column_config.TextColumn(
+                        "Coincidencia Crossref (título · año · revista)",
+                        disabled=True, width="large"),
                 }
-
-                editor_key = f"doi_editor_df_{sel}"
-                if editor_key not in st.session_state:
-                    st.session_state[editor_key] = copy.deepcopy(df_editor)
-                else:
-                    # Merge suggestions into existing editor df
-                    sess_df = st.session_state[editor_key]
-                    for _, row in sess_df.iterrows():
-                        pid = row["paper_id"]
-                        sug = suggestions.get(pid, {})
-                        if sug.get("doi") and not str(row.get("doi", "")).strip():
-                            sess_df.at[_, "doi_sugerido"] = sug.get("doi", "")
-                            sess_df.at[_, "match_titulo"] = sug.get("title", "")
-                            sess_df.at[_, "match_año"] = sug.get("year", "")
-                            sess_df.at[_, "match_revista"] = sug.get("journal", "")
-                    df_editor = sess_df
 
                 edited = st.data_editor(
                     df_editor,
                     column_config=col_cfg,
+                    column_order=["paper_id", "title", "year", "journal", "doi", "match"],
                     hide_index=True,
                     use_container_width=True,
                     num_rows="fixed",
-                    key=f"doi_data_editor_{sel}",
+                    key=f"doi_data_editor_{sel}_{nonce}",
                 )
-                st.session_state[editor_key] = edited
 
-                # Botón guardar
+                # Botón guardar — leer DOIs del DataFrame DEVUELTO por el editor
                 if st.button("💾 Guardar DOIs", type="primary", use_container_width=True):
                     updates = {}
                     for _, row in edited.iterrows():
@@ -557,6 +600,6 @@ if not PUBLIC:
                         st.session_state["art_nonce"] = (
                             st.session_state.get("art_nonce", 0) + 1
                         )
-                        st.session_state.pop(editor_key, None)
                         st.session_state.pop(sug_key, None)
+                        st.session_state["doi_editor_nonce"] = nonce + 1
                         st.rerun()
