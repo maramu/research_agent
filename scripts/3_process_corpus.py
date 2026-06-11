@@ -72,6 +72,11 @@ if _ENV_FILE.exists():
 else:
     load_dotenv()
 
+try:
+    from utils.constants import MAX_EMBED_CHARS
+except Exception:
+    MAX_EMBED_CHARS = 8000
+
 TEI_NS = {"tei": "http://www.tei-c.org/ns/1.0"}
 
 DEFAULT_BASE   = "/Volumes/research/categorias"
@@ -480,6 +485,41 @@ def write_jsonl(path: Path, records: List[Dict]) -> None:
             f.write(json.dumps(r, ensure_ascii=False) + "\n")
 
 
+def _split_to_max_chars(text: str, max_chars: int) -> List[str]:
+    """Trocea text en piezas de <= max_chars respetando párrafos/palabras.
+    Devuelve [text] si ya cabe; [] si está vacío."""
+    text = (text or "").strip()
+    if not text:
+        return []
+    if len(text) <= max_chars:
+        return [text]
+    out: List[str] = []
+    cur = ""
+    for para in text.split("\n\n"):
+        para = para.strip()
+        if not para:
+            continue
+        if len(para) > max_chars:
+            if cur:
+                out.append(cur); cur = ""
+            piece = ""
+            for w in para.split():
+                if piece and len(piece) + 1 + len(w) > max_chars:
+                    out.append(piece); piece = ""
+                piece = f"{piece} {w}".strip()
+                while len(piece) > max_chars:      # token atómico gigante
+                    out.append(piece[:max_chars]); piece = piece[max_chars:]
+            if piece:
+                cur = piece
+        elif cur and len(cur) + 2 + len(para) > max_chars:
+            out.append(cur); cur = para
+        else:
+            cur = f"{cur}\n\n{para}".strip() if cur else para
+    if cur:
+        out.append(cur)
+    return out
+
+
 def build_chunk_records(
     md_clean: str,
     tables: List[Dict],
@@ -521,7 +561,28 @@ def build_chunk_records(
                 sec_canonical = ancestors[lvl][1]
                 break
 
-        for part_i, ch in enumerate(chunk_text(sec_text, target_words, overlap_words), start=1):
+        part_i = 0
+        for ch in chunk_text(sec_text, target_words, overlap_words):
+            for piece in _split_to_max_chars(ch, MAX_EMBED_CHARS):
+                part_i += 1
+                records.append({
+                    "phase":             phase,
+                    "paper_id":          paper_id,
+                    "paper_title":       paper_title,
+                    "source_pdf":        str(source_pdf),
+                    "source_tei":        str(source_tei),
+                    "source_md_clean":   str(source_md_clean),
+                    "section":           sec_title,
+                    "section_canonical": sec_canonical,
+                    "type":              "text",
+                    "chunk_index":       chunk_index,
+                    "section_part":      part_i,
+                    "text":              piece,
+                })
+                chunk_index += 1
+
+    for t_i, tb in enumerate(tables, start=1):
+        for part_i, piece in enumerate(_split_to_max_chars(tb["text"], MAX_EMBED_CHARS), start=1):
             records.append({
                 "phase":             phase,
                 "paper_id":          paper_id,
@@ -529,31 +590,15 @@ def build_chunk_records(
                 "source_pdf":        str(source_pdf),
                 "source_tei":        str(source_tei),
                 "source_md_clean":   str(source_md_clean),
-                "section":           sec_title,
-                "section_canonical": sec_canonical,
-                "type":              "text",
+                "section":           tb.get("title", f"Table {t_i}"),
+                "section_canonical": "table",
+                "type":              "table",
                 "chunk_index":       chunk_index,
+                "table_id":          tb.get("table_id", ""),
                 "section_part":      part_i,
-                "text":              ch,
+                "text":              piece,
             })
             chunk_index += 1
-
-    for t_i, tb in enumerate(tables, start=1):
-        records.append({
-            "phase":             phase,
-            "paper_id":          paper_id,
-            "paper_title":       paper_title,
-            "source_pdf":        str(source_pdf),
-            "source_tei":        str(source_tei),
-            "source_md_clean":   str(source_md_clean),
-            "section":           tb.get("title", f"Table {t_i}"),
-            "section_canonical": "table",
-            "type":              "table",
-            "chunk_index":       chunk_index,
-            "table_id":          tb.get("table_id", ""),
-            "text":              tb["text"],
-        })
-        chunk_index += 1
 
     return records
 

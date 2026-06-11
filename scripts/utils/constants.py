@@ -9,6 +9,9 @@ import re
 # Cambiar aquí afecta a todos los puntos de uso.
 OLLAMA_MODEL_EMBED = "bge-m3"
 
+# Tope de caracteres por chunk (proxy conservador del contexto de bge-m3, 8192 tokens).
+MAX_EMBED_CHARS = 8000
+
 CANONICAL_CATEGORIES = [
     "biological_gas_odor_treatment",
     "anoxic_biogas_biodesulfurization",

@@ -89,7 +89,7 @@ else:
 _SCRIPTS_DIR = Path(__file__).parent
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
-from utils.constants import OLLAMA_MODEL_EMBED, year_from_paper_id  # noqa: E402
+from utils.constants import OLLAMA_MODEL_EMBED, year_from_paper_id, MAX_EMBED_CHARS  # noqa: E402
 
 DEFAULT_BASE       = "/Volumes/research/categorias"
 DEFAULT_MODEL      = OLLAMA_MODEL_EMBED
@@ -186,11 +186,13 @@ def iter_chunks(chunks_dir: Path, phase_filter: str):
 
 
 def embed_texts(client: ollama.Client, texts: list, model: str) -> list:
-    """Embedding de una lista de textos usando Ollama (uno a uno)."""
-    return [
-        np.array(client.embeddings(model=model, prompt=text)["embedding"], dtype="float32")
-        for text in texts
-    ]
+    out = []
+    for text in texts:
+        if len(text) > MAX_EMBED_CHARS:
+            print(f"  ⚠️ chunk de {len(text)} chars truncado a {MAX_EMBED_CHARS} para embeber")
+            text = text[:MAX_EMBED_CHARS]
+        out.append(np.array(client.embeddings(model=model, prompt=text)["embedding"], dtype="float32"))
+    return out
 
 
 def _model_suffix(model: str) -> str:
