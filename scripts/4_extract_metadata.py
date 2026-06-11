@@ -68,6 +68,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 from datetime import date
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -84,6 +85,7 @@ else:
 DEFAULT_BASE = "/Volumes/research/categorias"
 
 _CACHE_PATH = Path("/Volumes/research/metadatos/descarga_cache.json")
+_DOI_MANUAL_PATH = Path("/Volumes/research/metadatos/doi_manual.xlsx")
 _METHOD_TO_SOURCE: Dict[str, tuple] = {
     "semantic_scholar":  ("semantic_scholar",  "open_access"),
     "unpaywall":         ("unpaywall",          "open_access"),
@@ -187,7 +189,11 @@ def extract_title(root: ET.Element, ns: Dict) -> Optional[str]:
 
 
 def extract_journal(root: ET.Element, ns: Dict) -> Optional[str]:
+    # Preferir el título de revista del monogr (level="j"); con fallback al
+    # primer monogr/title si GROBID no anotó el nivel.
     return find_first_text(root, [
+        ".//tei:teiHeader/tei:fileDesc/tei:sourceDesc//tei:monogr/tei:title[@level='j']",
+        ".//tei:teiHeader//tei:sourceDesc//tei:monogr/tei:title[@level='j']",
         ".//tei:teiHeader/tei:fileDesc/tei:sourceDesc//tei:monogr/tei:title",
         ".//tei:teiHeader//tei:sourceDesc//tei:monogr/tei:title",
     ], ns)
@@ -359,6 +365,104 @@ def _norm_doi(doi: str) -> str:
     return doi.rstrip("/")
 
 
+def _clean_doi(doi: str) -> str:
+    """Limpia un DOI (quita prefijos URL) sin alterar el caso del sufijo."""
+    doi = str(doi).strip()
+    for prefix in ("https://doi.org/", "http://doi.org/",
+                   "https://dx.doi.org/", "http://dx.doi.org/"):
+        if doi.lower().startswith(prefix):
+            doi = doi[len(prefix):]
+            break
+    return doi.strip().rstrip("/")
+
+
+def normalize_title(s: str) -> str:
+    """Normaliza un título para comparación laxa (minúsculas, alfanumérico)."""
+    return re.sub(r"[^a-z0-9]+", " ", (s or "").lower()).strip()
+
+
+def _strip_pdf(name: str) -> str:
+    """Clave de doi_manual: stem del PDF en minúsculas, sin extensión .pdf."""
+    n = str(name).strip()
+    if n.lower().endswith(".pdf"):
+        n = n[:-4]
+    return n.strip().lower()
+
+
+def _load_doi_manual(path: Path) -> tuple:
+    """Carga doi_manual.xlsx como mapas de fallback de DOI.
+
+    Devuelve (by_name, by_title): {stem_pdf: doi} y {titulo_normalizado: doi}.
+    Lee todas las hojas; busca columnas nombre_archivo/filename, doi y
+    (opcional) titulo/title. Degrada a mapas vacíos si openpyxl no está o el
+    fichero no existe/es ilegible.
+    """
+    by_name: Dict[str, str] = {}
+    by_title: Dict[str, str] = {}
+    if not path.exists():
+        return by_name, by_title
+    try:
+        import openpyxl
+        wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+    except Exception:
+        return by_name, by_title
+    try:
+        for ws in wb.worksheets:
+            it = ws.iter_rows(values_only=True)
+            header = next(it, None)
+            if not header:
+                continue
+            hl = [str(h).strip().lower() if h is not None else "" for h in header]
+            name_idx = next((i for i, h in enumerate(hl)
+                             if h in ("nombre_archivo", "filename")), None)
+            doi_idx = next((i for i, h in enumerate(hl) if h == "doi"), None)
+            title_idx = next((i for i, h in enumerate(hl)
+                              if h in ("titulo", "title", "título")), None)
+            if name_idx is None or doi_idx is None:
+                continue
+            for row in it:
+                if row is None or len(row) <= doi_idx:
+                    continue
+                doi_raw = row[doi_idx]
+                doi_s = _clean_doi(doi_raw) if doi_raw else ""
+                if not doi_s:
+                    continue
+                if name_idx < len(row) and row[name_idx]:
+                    by_name[_strip_pdf(str(row[name_idx]))] = doi_s
+                if (title_idx is not None and title_idx < len(row)
+                        and row[title_idx]):
+                    by_title[normalize_title(str(row[title_idx]))] = doi_s
+    finally:
+        try:
+            wb.close()
+        except Exception:
+            pass
+    return by_name, by_title
+
+
+def _load_prev_meta(path: Path) -> Dict[str, dict]:
+    """Lee papers_metadata.jsonl previo en {paper_id: registro} (si existe)."""
+    prev: Dict[str, dict] = {}
+    if not path.exists():
+        return prev
+    try:
+        with path.open(encoding="utf-8") as fp:
+            for line in fp:
+                s = line.strip()
+                if not s:
+                    continue
+                try:
+                    d = json.loads(s)
+                except Exception:
+                    continue
+                pid = d.get("paper_id") or d.get("stable_id")
+                if pid:
+                    prev[pid] = d
+    except Exception:
+        return {}
+    return prev
+
+
 def _infer_provenance(doi: Optional[str], project: str, cache: dict, source_type: str = "") -> dict:
     base = {
         "source_type":     source_type or "manual",
@@ -432,6 +536,7 @@ def main():
     tei_dir     = Path(args.tei_dir) if args.tei_dir else (base / project / "tei")
     source_type = args.source_type or ""
     prov_cache  = _load_prov_cache(_CACHE_PATH)
+    doi_manual_by_name, doi_manual_by_title = _load_doi_manual(_DOI_MANUAL_PATH)
 
     if not tei_dir.exists():
         raise SystemExit(f"No existe TEI dir: {tei_dir}")
@@ -454,6 +559,13 @@ def main():
         raise SystemExit(f"No hay TEI .xml en: {tei_dir}")
 
     print(f"TEI encontrados: {len(tei_files)}")
+
+    # Durabilidad: leer el JSONL previo (para preservar doi/journal no vacíos)
+    # y hacer backup .bak antes de reescribirlo.
+    prev_meta = _load_prev_meta(papers_meta_path)
+    if papers_meta_path.exists():
+        bak = papers_meta_path.with_suffix(papers_meta_path.suffix + ".bak")
+        shutil.copy(papers_meta_path, bak)
 
     total_refs    = 0
     papers_written = 0
@@ -481,6 +593,22 @@ def main():
             highlights = extract_highlights(root, ns)
             refs       = extract_references(root, ns)
 
+            # ── Durabilidad de DOI/revista ──
+            # 1) Si el TEI no trae DOI, intenta doi_manual.xlsx (por nombre de
+            #    archivo y, en segundo intento, por título normalizado).
+            if not doi:
+                cand = doi_manual_by_name.get(_strip_pdf(paper_id))
+                if not cand and title:
+                    cand = doi_manual_by_title.get(normalize_title(title))
+                if cand:
+                    doi = cand
+            # 2) No machacar doi/journal previos no vacíos con un vacío del TEI.
+            prev = prev_meta.get(paper_id, {})
+            if not doi and prev.get("doi"):
+                doi = prev["doi"]
+            if not journal and prev.get("journal"):
+                journal = prev["journal"]
+
             md_clean_path = base / project / "md_clean" / f"{paper_id}.clean.md"
             quality = compute_quality(title, doi, year, authors, abstract, refs,
                                       md_clean_path=md_clean_path)
@@ -493,7 +621,7 @@ def main():
                 "stable_id":       _doi_slug(doi) if doi else paper_id,
                 "title":           title,
                 "doi":             doi,
-                "journal":         journal,
+                "journal":         journal or "",
                 "year":            year,
                 "authors":         authors,
                 "abstract":        abstract,
