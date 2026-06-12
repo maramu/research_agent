@@ -54,6 +54,12 @@
 
 ## Estructura del proyecto
 
+> **Documentación del proyecto:**
+> - **ESTADO.md** (este fichero) — estado y arquitectura actuales del proyecto.
+> - **Mejoras_pendientes.md** — backlog vivo + orden de prioridad.
+> - **Mejoras_realizadas.md** — histórico de trabajo completado (append-only, lo más nuevo arriba).
+> - **Mejoras_copia20260612.md** — copia congelada del backlog original (referencia histórica).
+
 ```
 research_agent/
 ├── config/
@@ -335,25 +341,7 @@ Editor visual disponible en la página **📚 Scopus_queries** de la web.
 
 ## Plan pendiente (por orden)
 
-1. ~~**`0_scopus_api.py`**~~ ✅ — consulta Scopus API con queries personalizadas
-2. ~~**Orquestador + ingesta continua**~~ ✅ — `pipeline.py` + `run_pipeline.py`
-3. ~~**Interfaz web Streamlit**~~ ✅ — 5 páginas + servicio launchd 24/7
-4. ~~**RAG multi-provider + cost tracking**~~ ✅ — Ollama / Anthropic / OpenAI con streaming y contador mensual
-5. ~~**Re-embeddear con bge-m3**~~ ✅ — bge-m3 es el modelo de producción; `utils/constants.py` es la fuente de verdad
-6. ~~**Mejorar editor keywords**~~ ✅ — textarea por categoría, una keyword por línea, sin dependencias extra
-7. **Cron/launchd para ingesta semanal automática** — pendiente:
-   ```bash
-   0 6 * * 1  cd /Volumes/Disco/proyectos/research_agent/scripts && \
-              /Users/martinramirez/venvs/rag_papers/bin/python run_pipeline.py scopus --recent-days 7
-   ```
-8. ~~**Procedencia PDFs + stable_id**~~ ✅ — `4_extract_metadata.py` con campos de provenance e identificador estable
-9. **README.md global + docstrings** — documentación final de todos los scripts
-9. **Mejoras UX menores** (según rozaduras de uso real):
-   - ~~Editor `keywords.yml` — textarea por categoría (una keyword por línea)~~ ✅ (completado 2026-05-25)
-   - Aviso visible cuando toggle síntesis RAG está OFF
-   - Botones por fila en portada para procesar pendientes por categoría
-   - Página de logs en vivo
-   - Editor `doi_manual.xlsx` con `st.data_editor`
+El backlog vivo y el orden de prioridad están en `Mejoras_pendientes.md`. El histórico de lo realizado, en `Mejoras_realizadas.md`. Este documento (ESTADO.md) describe el estado y la arquitectura actuales del proyecto.
 
 ## Notas importantes
 
