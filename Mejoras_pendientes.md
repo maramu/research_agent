@@ -2,12 +2,12 @@
 > Backlog vivo. Histórico de lo hecho: Mejoras_realizadas.md · Estado/arquitectura: ESTADO.md
 
 ## Orden de prioridad (revisión 2026-06-12)
-1. Item 40 — backup: baseline HECHO; falta la página/botón.
-2. Item 42 — cerrar resto: copy2 de 9_cleanup (microalgae diferido).
-3. Item 39 — tests pytest (_clean_doi, DOI_REGEX SICI, sanitize_filename/shorten_title, _norm).
-4. `detect_affected_categories` con `_norm` (tras tener tests).
-5. Item 37 — golden Q&A.   6. Item 36 — idempotencia.   7. Item 41 — índice viejo all__bge-m3.
-8. Item 35 — OCR (si hay escaneados).   Item 31 — MVP libros, tras el 37.
+1. Item 39 — tests pytest (_clean_doi, DOI_REGEX SICI, sanitize_filename/shorten_title, _norm).
+2. `detect_affected_categories` con `_norm` (tras tener tests).
+3. Item 37 — golden Q&A.
+4. Item 36 — idempotencia.
+5. Item 41 — índice viejo all__bge-m3.
+6. Item 35 — OCR (si hay escaneados). Item 31 — MVP libros, tras el 37.
 
 ## Hallazgos pendientes (revisión 2026-06-12)
 - `detect_affected_categories` compara stems por igualdad exacta sin `_norm` → riesgo de reproceso
@@ -134,7 +134,7 @@ Parcialmente completado por items 10+11+22+23, salvo que quiera un excel con los
 
 Propuestas derivadas de la revisión del pipeline. Ordenadas por impacto: 32–34
 suben la calidad de recuperación (lo que más determina si el RAG es útil); 35–36
-refuerzan la robustez del procesado; 37–40 son evaluación, coste y mantenimiento.
+refuerzan la robustez del procesado; 37–39 son evaluación, coste y mantenimiento.
 
 ### 33. Recuperación híbrida (denso + BM25) + reranking — ALTA prioridad
 
@@ -196,25 +196,6 @@ Formalizar como tests la verificación AST que ya se incluye en los prompts de C
 - Tests de regresión para los bugs ya documentados (guiones vs guiones bajos,
   ligaduras Unicode, sufijos de DOI).
 - Opcional: hook pre-commit que corra `pytest` + parseo AST de los scripts tocados.
-
-### 40. Backup automático de FAISS + categorias a research_bk — MEDIA prioridad
-
-Distinto del item 27 (backup de config): aquí se respalda el **corpus y los índices**.
-
-- Snapshot programado (LaunchAgent) de los índices FAISS y de `categorias/` al NAS
-  Synology `research_bk`.
-- Ahora que todo vive en el SSD Crucial X9 de `pciq22`, el NAS queda como única copia.
-- Recordar restricciones NAS ya documentadas: usar `shutil.copy` (no `copy2`),
-  evitar `mv` (usar `cp`), `Path.mkdir()` puede fallar en el mount bajo Python 3.13.
-
-✅ Baseline rsync manual verificado (2026-06-12); replanteado a manual (comando definitivo, `--size-only`, `#recycle`) — detalle completo en Mejoras_realizadas.md.
-
-**Pendiente (replanteado 2026-06-12):**
-- Disparador = botón en la web; aviso = banner en portada (umbral 15 días).
-- NO será LaunchAgent programado: research_bk (Synology de casa) solo es accesible por VPN +
-  montaje SMB manual, así que un job automático fallaría en silencio.
-- PENDIENTE: página `12_Backup.py` (detección de montaje, last_backup.json, botones simulacro/
-  copiar) + banner en portada + helper `read_last_backup()` en app_utils.py.
 
 ### 41. Limpiar el índice viejo all__bge-m3 de anoxic — BAJA prioridad
 

@@ -453,23 +453,18 @@ categoría). Menor: `or os.getenv("SMPT_TO")` en run_weekly_scopus.py es ya cód
 
 ---
 
-### ✅ 40. Backup — baseline manual (2026-06-12)
+### ✅ 40. Backup de FAISS + categorias/ a research_bk — COMPLETADO (2026-06-12)
 
-Baseline rsync completo /Volumes/research → /Volumes/research_bk verificado en 2026-06-12.
-Decisiones técnicas fijadas:
-- Binario: `/opt/homebrew/bin/rsync` (rsync clásico 3.4.4 Homebrew; NO openrsync nativo macOS)
-- `--size-only` a propósito: el SMB del Synology NO conserva el mtime → comparar por tiempo re-copia en bucle
-- Destino = RAÍZ del share `/Volumes/research_bk/` (no un subdirectorio)
-- `#recycle` del Synology activado con auto-vaciado 15–30 días
-- NO usar `--inplace` (cortes de luz → ficheros truncados; temp+rename es atómico)
-- Comando definitivo:
-  `/opt/homebrew/bin/rsync -rv --size-only --no-perms --no-owner --no-group --exclude='.DS_Store'
-  --exclude='.Trashes' --exclude='.fseventsd' --exclude='.Spotlight-V100'
-  --exclude='.DocumentRevisions-V100' --exclude='.TemporaryItems' /Volumes/research/ /Volumes/research_bk/`
-
-Replanteado a manual (NO LaunchAgent): research_bk solo accesible por VPN + montaje SMB manual.
-Disparador = botón en la web (página `12_Backup.py`); aviso = banner en portada (umbral 15 días).
-PENDIENTE: página web y banner — ver Mejoras_pendientes.md item 40.
+Manual (NAS de casa por VPN + montaje SMB; NO automático, un job programado fallaría en silencio).
+Comando: `/opt/homebrew/bin/rsync -rv --size-only --no-perms --no-owner --no-group` + excludes de
+dirs de sistema macOS, de /Volumes/research/ a la RAÍZ de /Volumes/research_bk/. `--size-only`
+porque el SMB del Synology no conserva el mtime (comparar por tiempo re-copia en bucle). rsync
+clásico de Homebrew, no el openrsync nativo. `#recycle` con auto-vaciado 15–30 días. No `--inplace`.
+UI: página `12_Backup.py` (privada) con detección de montaje (`os.path.ismount`), fecha/antigüedad
+desde `last_backup.json`, botones "Ver qué cambiaría" (dry-run con conteo) y "Copiar ahora", conteo
+legible ("✅ Todo al día" / "📋 N ficheros"); banner de antigüedad en portada (umbral 15 días);
+helper `read_last_backup()` en app_utils. Verificado 2026-06-12: dry-run convergente (0 ficheros);
+primera copia por botón OK (last_backup.json 2026-06-12 23:17, "hace 0 días").
 
 ---
 
