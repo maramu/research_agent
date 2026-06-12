@@ -2,6 +2,48 @@
 
 ---
 
+## Revisión integral 2026-06-12 — hallazgos, prioridad y sesión de hoy
+
+Revisión de lectura (sin ejecución) de pipeline.py, keywords.yml, utils/{constants,retrieval,
+pdf_utils}.py, run_weekly_scopus.py, .env y plist semanal.
+
+### Hecho hoy (2026-06-12)
+- **Item 42 (higiene) — núcleo aplicado y verificado:** pipeline.py (copy2→copy en
+  `_copy_files_skip_existing`; eliminado el fallback inalcanzable de `_CANONICAL_CATEGORIES` +
+  `sys.path.insert` duplicado; regex de `promote_adhoc_to_category` alineado a `[a-z0-9_-]+`);
+  keywords.yml (quitado typo `photocataysis` y espacio final de `monolithic`); `config/.env` de
+  pciq22 (`SMPT_TO→SMTP_TO`, verificado una sola línea). Streamlit reiniciado, ambas instancias
+  status 0. Pendiente del 42: copy2→copy en `9_cleanup_duplicates.py`. Diferido: ampliar
+  keywords de `microalgae` (al reactivar la categoría). Menor: `or os.getenv("SMPT_TO")` en
+  run_weekly_scopus.py es ahora código muerto inofensivo.
+- **Item 40 (backup) — baseline manual hecho y verificado:** copia completa /Volumes/research →
+  research_bk; decisiones y comando definitivo fijados en el item 40. Página de UI pendiente.
+
+### Hallazgos de la revisión (estado)
+- copy2 vs guía NAS → RESUELTO en pipeline.py; pendiente en 9_cleanup_duplicates.py.
+- Fallback muerto `_CANONICAL_CATEGORIES`, regex adhoc/promote, typo/espacio keywords → RESUELTOS.
+- `detect_affected_categories` compara stems por igualdad exacta sin `_norm` → riesgo de reproceso
+  por puntuación/guiones. PENDIENTE.
+- `run_scopus` aplica el filtro de activas también a categorías pedidas explícitamente (descarte
+  silencioso). PENDIENTE/menor.
+- `promote_adhoc_to_category` usa `sort_keys=True` → reordena todo keywords.yml en cada promoción.
+  PENDIENTE/menor.
+- Filtro de año descarta papers con year=None en silencio (retrieval.py). Documentar.
+- `section_canonical`: `CANONICAL_SECTIONS` (constants) y `canonical_section()` (3_process) se
+  sincronizan a mano → riesgo de drift. Verificar.
+
+### Verificaciones pendientes (ficheros no vistos) → item 43.
+
+### Orden de prioridad
+1. Item 40 — backup: baseline HECHO; falta la página/botón.
+2. Item 42 — cerrar resto: copy2 de 9_cleanup (microalgae diferido).
+3. Item 39 — tests pytest (_clean_doi, DOI_REGEX SICI, sanitize_filename/shorten_title, _norm).
+4. `detect_affected_categories` con `_norm` (tras tener tests).
+5. Item 37 — golden Q&A.   6. Item 36 — idempotencia.   7. Item 41 — índice viejo all__bge-m3.
+8. Item 35 — OCR (si hay escaneados).   Item 31 — MVP libros, tras el 37.
+
+---
+
 ## Verificaciones completadas
 
 ### ✅ Sesión 2026-06-10/11 — items 32/33/34, chunking robusto, páginas Duplicados/Artículos, gestión DOIs y revista
@@ -489,7 +531,7 @@ Implementado en `pipeline.integrate_adhoc()` + `pipeline.promote_adhoc_to_catego
 - Devuelve `{"status", "new_category", "copied_pdfs", "totals", "keywords_added", "deleted_source"}`
 
 **UI** — radio button "Categoría existente" / "Nueva categoría" en la sección 🔗 del tab Ad-hoc:
-- `_CANONICAL_CATEGORIES` duplicado en `pipeline.py` para evitar import circular con `app_utils`
+- `_CANONICAL_CATEGORIES` duplicado en `pipeline.py` para evitar import circular con `app_utils` (2026-06-12: fallback inline eliminado; import directo de utils.constants — item 42)
 
 ---
 
@@ -956,7 +998,41 @@ Distinto del item 27 (backup de config): aquí se respalda el **corpus y los ín
 - Recordar restricciones NAS ya documentadas: usar `shutil.copy` (no `copy2`),
   evitar `mv` (usar `cp`), `Path.mkdir()` puede fallar en el mount bajo Python 3.13.
 
+**Actualización 2026-06-12 — baseline manual HECHO; replanteado a manual:**
+- NO será LaunchAgent programado: research_bk (Synology de casa) solo es accesible por VPN +
+  montaje SMB manual, así que un job automático fallaría en silencio. Disparador = botón en la
+  web; aviso = banner en portada (umbral 15 días).
+- Destino = RAÍZ del share `/Volumes/research_bk/` (ahí vive el backup pre-migración), no un
+  subdirectorio.
+- Binario = `/opt/homebrew/bin/rsync` (rsync clásico 3.4.4 Homebrew); el openrsync nativo de
+  macOS no maneja bien SMB.
+- `--size-only` a propósito: el SMB del Synology NO conserva el mtime (pone hora de escritura),
+  así que comparar por tiempo (`-t`/`--modify-window`) re-copia en bucle. Los artefactos de texto
+  y FAISS cambian de tamaño al cambiar de contenido → riesgo same-size despreciable.
+- Comando definitivo:
+  `/opt/homebrew/bin/rsync -rv --size-only --no-perms --no-owner --no-group --exclude='.DS_Store'
+  --exclude='.Trashes' --exclude='.fseventsd' --exclude='.Spotlight-V100'
+  --exclude='.DocumentRevisions-V100' --exclude='.TemporaryItems' /Volumes/research/ /Volumes/research_bk/`
+- `#recycle` del Synology: activado con auto-vaciado 15–30 días. No usar `--inplace` (cortes de
+  luz → ficheros truncados; temp+rename es atómico).
+- PENDIENTE: página `12_Backup.py` (detección de montaje, last_backup.json, botones simulacro/
+  copiar) + banner en portada + helper `read_last_backup()` en app_utils.py.
+
 ### 41. Limpiar el índice viejo all__bge-m3 de anoxic — BAJA prioridad
 
 Fase divergente sin `section_canonical`/`year` en sus chunks. Borrar o re-indexar para
 que no compita con el índice canónico al vuelo (items 32/34).
+
+### 42. Lote de higiene revisión 2026-06-12 — NÚCLEO HECHO (2026-06-12)
+Aplicado y verificado: pipeline.py (copy2→copy en _copy_files_skip_existing; fallback muerto de
+_CANONICAL_CATEGORIES + sys.path.insert duplicado eliminados; regex adhoc/promote alineado);
+keywords.yml (photocataysis, espacio monolithic); config/.env de pciq22 (SMPT_TO→SMTP_TO).
+Pendiente: copy2→copy en 9_cleanup_duplicates.py (rewrite_metadata, ~581). Diferido: keywords de
+microalgae (al reactivar la categoría).
+
+### 43. Verificaciones pendientes de la revisión 2026-06-12 — seguimiento
+3_process_corpus.py (canonical_section vs CANONICAL_SECTIONS), 1_rename_papers_by_doi.py (nombre
+largo Scopus en descarga), 4_extract_metadata.py (_norm vs 6_Mantenimiento), 5_build_embeddings.py
+(ausencia de papers_metadata.jsonl, clave MVP libros), 8_query_rag.py/2_RAG/7_Revision (cableado
+passes_filters). Más: detect_affected_categories con _norm; filtro de activas en run_scopus para
+categorías explícitas; sort_keys=True en promote_adhoc_to_category.
