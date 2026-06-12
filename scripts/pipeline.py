@@ -62,20 +62,7 @@ _PROJECT_SUBDIRS = [
     "embeddings", "metadata", "notebooklm_packages", "logs",
 ]
 
-try:
-    sys.path.insert(0, str(SCRIPTS_DIR))
-    from utils.constants import CANONICAL_CATEGORIES as _CANONICAL_CATEGORIES
-except ImportError:
-    _CANONICAL_CATEGORIES = [
-        "biological_gas_odor_treatment",
-        "anoxic_biogas_biodesulfurization",
-        "bioplastics_microplastics",
-        "biogas_upgrading_biomethanation",
-        "microalgae",
-        "single_cell_protein",
-        "advanced_oxidation_processes",
-        "bioleaching_critical_materials",
-    ]
+from utils.constants import CANONICAL_CATEGORIES as _CANONICAL_CATEGORIES
 
 
 # ---------------------------------------------------------------------------
@@ -240,7 +227,7 @@ def _copy_files_skip_existing(src_dir: Path, dst_dir: Path) -> tuple[int, int]:
         if dst_file.exists():
             skipped += 1
         else:
-            shutil.copy2(src_file, dst_file)
+            shutil.copy(src_file, dst_file)
             copied += 1
     return copied, skipped
 
@@ -918,8 +905,8 @@ def promote_adhoc_to_category(
     handler = _make_output_handler(on_output)
 
     # ── Validaciones ──────────────────────────────────────────────────────
-    if not re.fullmatch(r"[a-z0-9_]+", new_name):
-        msg = f"Nombre inválido '{new_name}': solo letras minúsculas, dígitos y '_'"
+    if not re.fullmatch(r"[a-z0-9_-]+", new_name):
+        msg = f"Nombre inválido '{new_name}': solo letras minúsculas, dígitos, '_' y '-'"
         handler(f"❌ {msg}")
         return {"status": "error", "message": msg}
 
