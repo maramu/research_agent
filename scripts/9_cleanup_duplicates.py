@@ -578,7 +578,7 @@ def rewrite_metadata(decisions: list[DuplicateDecision]) -> None:
             continue
 
         backup = meta_path.with_name(meta_path.name + ".bak")
-        shutil.copy2(meta_path, backup)
+        shutil.copy(meta_path, backup)
         log.info("Backup metadata: %s", backup)
 
         kept_lines: list[str] = []
