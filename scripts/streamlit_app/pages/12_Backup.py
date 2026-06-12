@@ -69,8 +69,20 @@ else:
 st.divider()
 
 # ---------------------------------------------------------------------------
-# Helper de streaming
+# Helpers
 # ---------------------------------------------------------------------------
+
+def _count_files(lines: list[str]) -> int:
+    n = 0
+    for l in lines:
+        s = l.strip()
+        if not s or s.endswith("/"):
+            continue
+        if s.startswith(("sending", "sent ", "total ")):
+            continue
+        n += 1
+    return n
+
 
 def run_rsync(dry: bool) -> tuple[int, list[str]]:
     cmd = [RSYNC] + (["-n"] if dry else []) + BASE_FLAGS + [
@@ -97,7 +109,13 @@ with col_dry:
         with st.spinner("Simulando rsync…"):
             rc, lines = run_rsync(dry=True)
         if rc == 0:
-            st.success(f"Simulacro completado — {len(lines)} líneas de salida")
+            n = _count_files(lines)
+            if n == 0:
+                st.success("✅ Todo al día — nada que copiar")
+            else:
+                st.info(f"📋 {n} ficheros se copiarían")
+            with st.expander("Detalle rsync", expanded=False):
+                st.code("\n".join(lines), language="text")
         else:
             st.error(f"rsync terminó con código {rc}")
             st.code("\n".join(lines[-15:]), language="text")
@@ -113,14 +131,21 @@ if st.session_state.get("_backup_running"):
     with st.spinner("Copiando…"):
         rc, lines = run_rsync(dry=False)
     if rc == 0:
-        rec = {"last_backup": datetime.now().isoformat(timespec="seconds"), "exit_code": 0}
+        n = _count_files(lines)
+        rec = {
+            "last_backup": datetime.now().isoformat(timespec="seconds"),
+            "exit_code": 0,
+            "files": n,
+        }
         try:
             LAST_BACKUP.parent.mkdir(parents=True, exist_ok=True)
             with LAST_BACKUP.open("w", encoding="utf-8") as f:
                 json.dump(rec, f)
         except Exception as e:
             st.warning(f"No se pudo escribir el registro: {e}")
-        st.success("✅ Backup completado")
+        st.success(f"✅ Copia completada — {n} ficheros transferidos")
+        with st.expander("Detalle rsync", expanded=False):
+            st.code("\n".join(lines), language="text")
         st.rerun()
     else:
         st.error(f"rsync terminó con código {rc} — últimas líneas:")

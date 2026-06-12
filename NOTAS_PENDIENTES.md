@@ -1023,12 +1023,13 @@ Distinto del item 27 (backup de config): aquí se respalda el **corpus y los ín
 Fase divergente sin `section_canonical`/`year` en sus chunks. Borrar o re-indexar para
 que no compita con el índice canónico al vuelo (items 32/34).
 
-### 42. Lote de higiene revisión 2026-06-12 — NÚCLEO HECHO (2026-06-12)
+### 42. Lote de higiene revisión 2026-06-12 — COMPLETADO (2026-06-12)
 Aplicado y verificado: pipeline.py (copy2→copy en _copy_files_skip_existing; fallback muerto de
-_CANONICAL_CATEGORIES + sys.path.insert duplicado eliminados; regex adhoc/promote alineado);
-keywords.yml (photocataysis, espacio monolithic); config/.env de pciq22 (SMPT_TO→SMTP_TO).
-Pendiente: copy2→copy en 9_cleanup_duplicates.py (rewrite_metadata, ~581). Diferido: keywords de
-microalgae (al reactivar la categoría).
+_CANONICAL_CATEGORIES + sys.path.insert duplicado eliminados; regex adhoc/promote alineado a
+[a-z0-9_-]+); keywords.yml (typo photocataysis y espacio final de monolithic);
+9_cleanup_duplicates.py (copy2→copy en rewrite_metadata, línea 581); config/.env de pciq22
+(SMPT_TO→SMTP_TO, una sola línea). Diferido: ampliar keywords de microalgae (al reactivar la
+categoría). Menor: `or os.getenv("SMPT_TO")` en run_weekly_scopus.py es ya código muerto inofensivo.
 
 ### 43. Verificaciones pendientes de la revisión 2026-06-12 — seguimiento
 3_process_corpus.py (canonical_section vs CANONICAL_SECTIONS), 1_rename_papers_by_doi.py (nombre
