@@ -724,6 +724,16 @@ def is_category_active(category: str) -> bool:
     """True si la categoría está en la lista de activas."""
     return category in load_active_categories()
 
+def read_last_backup() -> "dict | None":
+    """Lee /Volumes/research/metadatos/last_backup.json; None si no existe o falla."""
+    path = NAS_ROOT / "metadatos" / "last_backup.json"
+    try:
+        with path.open(encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
 def is_public_app() -> bool:
     """True cuando la instancia corre como app pública (puerto 8502).
 

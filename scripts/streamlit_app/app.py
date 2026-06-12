@@ -13,6 +13,8 @@ Lanzar desde scripts/streamlit_app/:
 
 from __future__ import annotations
 
+from datetime import datetime
+
 import pandas as pd
 import streamlit as st
 
@@ -26,7 +28,7 @@ from app_utils import (
     load_active_categories,
 )
 
-from app_utils import check_password, is_public_app  # añadir a los imports existentes
+from app_utils import check_password, is_public_app, read_last_backup
 
 st.set_page_config(
     page_title="research_agent",
@@ -49,6 +51,20 @@ st.caption(
     "Panel de control del pipeline de ingesta y análisis de papers científicos. "
     "Usa la barra lateral para navegar entre flujos."
 )
+
+# ── Banner de backup ─────────────────────────────────────────────────────────
+if not is_public_app():
+    _lb = read_last_backup()
+    if _lb is None:
+        st.warning("No hay backup registrado — copia en la página Backup")
+    else:
+        try:
+            _dias = (datetime.now() - datetime.fromisoformat(_lb["last_backup"])).days
+            if _dias > 15:
+                st.warning(f"⚠️ Último backup hace {_dias} días — copia a research_bk en la página Backup")
+        except Exception:
+            pass
+# ─────────────────────────────────────────────────────────────────────────────
 
 # Aviso si pipeline.py no se pudo importar
 if not PIPELINE_AVAILABLE:
