@@ -5,6 +5,11 @@
 
 ## Hecho hoy (2026-06-13)
 
+- **Título editable en el editor de Artículos (`11_Articulos.py`).**
+  - En `st.data_editor` de la sección "✏️ Editar / 🗑 eliminar", la columna `title` pasa a editable (`disabled=False`) manteniendo `width="large"`.
+  - El handler de "💾 Guardar cambios" detecta cambios de título junto a DOI/año/autores/revista y los incluye en `updates[pid]["title"]`.
+  - `update_metadata_fields` aplica el campo `title` al reescribir `papers_metadata.jsonl` (backup `.bak` previo).
+
 - **Filtros en el editor de artículos (`11_Articulos.py`).**
   - Buscador de texto (título/DOI/autor) + radio "Mostrar": Todos / Sin DOI / Sin año / Sin autores / Incompletos.
   - `_incompleto(r)`: True si falta DOI, año o autores.

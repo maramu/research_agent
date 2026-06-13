@@ -120,9 +120,9 @@ def crossref_suggest(title: str, mailto: str = "",
 
 
 def update_metadata_fields(category: str, updates: dict) -> int:
-    """Actualiza doi/year/authors/journal en papers_metadata.jsonl y doi_manual.xlsx.
+    """Actualiza title/doi/year/authors/journal en papers_metadata.jsonl y doi_manual.xlsx.
 
-    updates: {paper_id: {field: value, ...}} donde field ∈ {doi, year, authors, journal}.
+    updates: {paper_id: {field: value, ...}} donde field ∈ {title, doi, year, authors, journal}.
     Escribe solo los campos presentes y no vacíos. Backup .bak previo.
     Devuelve el número de registros modificados en el jsonl.
     """
@@ -145,7 +145,7 @@ def update_metadata_fields(category: str, updates: dict) -> int:
                 if pid in updates:
                     patch = updates[pid]
                     modified = False
-                    for field in ("doi", "year", "authors", "journal"):
+                    for field in ("title", "doi", "year", "authors", "journal"):
                         v = patch.get(field)
                         if v is not None and v != "" and v != []:
                             d[field] = v
@@ -606,7 +606,7 @@ if not PUBLIC:
                 col_cfg = {
                     "_sel": st.column_config.CheckboxColumn("🗑", width="small", default=False),
                     "paper_id": st.column_config.TextColumn("paper_id", disabled=True),
-                    "title": st.column_config.TextColumn("Título", disabled=True, width="large"),
+                    "title": st.column_config.TextColumn("Título", width="large"),
                     "year": st.column_config.TextColumn("Año", width="small"),
                     "authors": st.column_config.TextColumn("Autores (sep. ';')", width="large"),
                     "journal": st.column_config.TextColumn("Revista", width="medium"),
@@ -627,6 +627,9 @@ if not PUBLIC:
                         for _, row in edited.iterrows():
                             pid = row["paper_id"]; o = orig.get(pid, {})
                             u = {}
+                            ti_v = str(row.get("title", "")).strip()
+                            if ti_v != str(o.get("title") or "").strip():
+                                u["title"] = ti_v
                             doi_v = str(row.get("doi", "")).strip()
                             if doi_v and doi_v != str(o.get("doi") or "").strip():
                                 u["doi"] = doi_v
