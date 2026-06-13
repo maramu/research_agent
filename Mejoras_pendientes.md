@@ -5,14 +5,15 @@
 1. ~~`detect_affected_categories` con `normalize_stem`~~ — ✅ **COMPLETADO 2026-06-13** (incluido en puerta de dedup por DOI).
 2. Item 37 — golden Q&A.
 3. Item 36 — idempotencia.
-4. Item 44 — fix `_clean_doi` (recorta sufijos DOI de 3+ letras) [verificar extracción en pciq22].
-5. Item 45 — consolidar utilidades de texto duplicadas pdf_utils↔1_rename.
+4. ~~Item 44 — fix `_clean_doi` (recorta sufijos DOI de 3+ letras)~~ — ✅ **CERRADO 2026-06-13**. Verificado en pciq22: DOIs con `:` y barra final se normalizan; `10.1023/B:HYDR.0000008620.87704.3b` se preserva; 53 tests pasan.
+5. Item 45 — consolidar utilidades de texto duplicadas pdf_utils↔1_rename. **Nota 2026-06-13:** el trabajo de hoy sobre DOIs tocó ambos ficheros (`normalize_doi`, `normalize_stem`, lookups por stem/título en `doi_manual`). Revisar si introdujo nueva divergencia antes de consolidar.
 6. Item 41 — índice viejo all__bge-m3.
 7. Item 35 — OCR (si hay escaneados). Item 31 — MVP libros, tras el 37.
 
 ## Hallazgos pendientes (revisión 2026-06-12)
 - ~~`detect_affected_categories` compara stems por igualdad exacta sin `_norm` → riesgo de reproceso
   por puntuación/guiones.~~ ✅ RESUELTO 2026-06-13.
+- **Caso Kisand 2003 (`anoxic`):** DOI `10.1023/B:HYDR.0000008620.87704.3b` quedó reprocesado tras renombrado manual. Verificar que el DOI esté presente en su registro de `papers_metadata.jsonl`; si no, añadirlo vía `doi_manual.xlsx` desde el editor de Artículos.
 - `run_scopus` aplica el filtro de activas también a categorías pedidas explícitamente (descarte
   silencioso). PENDIENTE/menor.
 - `promote_adhoc_to_category` usa `sort_keys=True` → reordena todo keywords.yml en cada promoción.
@@ -220,8 +221,8 @@ consumidores de `pdf_utils.shorten_title`/`sanitize_filename`. Tras consolidar, 
 `test_rename.py` a la ubicación única.
 
 ### 43. Verificaciones pendientes de la revisión 2026-06-12 — seguimiento
-3_process_corpus.py (canonical_section vs CANONICAL_SECTIONS), 1_rename_papers_by_doi.py (nombre
-largo Scopus en descarga), 4_extract_metadata.py (_norm vs 6_Mantenimiento), 5_build_embeddings.py
+3_process_corpus.py (canonical_section vs CANONICAL_SECTIONS), ~~1_rename_papers_by_doi.py (nombre
+largo Scopus en descarga)~~ ✅ CUBIERTO 2026-06-13 (renombrado por DOI antes de reprocesar en Coherencia PDF/MD + tab Pendientes), 4_extract_metadata.py (_norm vs 6_Mantenimiento), 5_build_embeddings.py
 (ausencia de papers_metadata.jsonl, clave MVP libros), 8_query_rag.py/2_RAG/7_Revision (cableado
-passes_filters). Más: detect_affected_categories con _norm; filtro de activas en run_scopus para
+passes_filters). Más: detect_affected_categories con _norm ✅; filtro de activas en run_scopus para
 categorías explícitas; sort_keys=True en promote_adhoc_to_category.

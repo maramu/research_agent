@@ -5,6 +5,15 @@
 
 ## Hecho hoy (2026-06-13)
 
+- **Cierre de sesión — consolidación de hoy.**
+  - Puerta de dedup por DOI en `process_category` (`screen_new_pdfs_against_corpus`) + registro autoritativo desde `papers_metadata.jsonl`.
+  - `detect_affected_categories` con `normalize_stem`; dedup por título ignora grupos con ≥2 DOIs distintos.
+  - Cuatro capas de coherencia PDF/MD/Metadata/TEI: `prune_orphan_metadata`, `prune_orphan_tei`, y "Corregir" renombra por DOI antes de reprocesar.
+  - Fix DOIs (item 44): barra final, `:` válido, fallback Crossref/doi_manual; `4_extract_metadata.py` preserva `title`/`doi`/`journal`/`year`/`authors` y usa Crossref por DOI para journal (181/183 en `biogas_upgrading`).
+  - Editor de **Artículos** (privado): edita título/año/autores/revista/DOI, filtros, borrado reversible (cuarentena + re-index FAISS).
+  - **Verificado en pciq22:** `4_extract_metadata.py` reporta 0 TEI huérfanos en las 10 categorías (39 ficheros movidos a `quarantine/orphan_tei/`).
+  - Detalles técnicos en las entradas anteriores de hoy y en `ESTADO.md`.
+
 - **Limpieza de TEI huérfanos (`pipeline.py` + `6_Mantenimiento.py`).**
   - Nueva función `prune_orphan_tei(category, apply, on_output)`: detecta/mueve a cuarentena ficheros `tei/*.tei.xml` sin `md_clean` correspondiente (restos de procesados con nombres antiguos, ya saltados por `4_extract_metadata.py`). Reversible en `/Volumes/research/quarantine/orphan_tei/<ts>/<cat>/`.
   - Nuevo bloque "🗄 TEI huérfanos (tei ↔ md_clean)" en **6_Mantenimiento → Coherencia PDF/MD**: multiselect de categorías, botón "🔍 Detectar TEI huérfanos" (tabla Categoría/Fichero TEI) y "🗄 Mover a cuarentena" (condicional). No afecta a metadata ni FAISS.
