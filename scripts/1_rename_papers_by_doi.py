@@ -69,7 +69,7 @@ import fitz  # PyMuPDF
 import requests
 
 sys.path.insert(0, str(Path(__file__).parent))
-from utils.pdf_utils import extract_doi_from_pdf, extract_doi_from_text
+from utils.pdf_utils import extract_doi_from_pdf, extract_doi_from_text, normalize_doi, normalize_stem
 
 # ============================================================
 # CONFIGURACIÓN POR DEFECTO
@@ -345,7 +345,14 @@ def load_doi_manual(xlsx_path: Path) -> dict[str, str]:
             filename = str(row[0]).strip() if row[0] is not None else ""
             doi = str(row[1]).strip() if row[1] is not None else ""
             if filename and doi.lower().startswith("10."):
+                doi = normalize_doi(doi)
                 mapping[filename] = doi
+                _ns = normalize_stem(Path(filename).stem)
+                if _ns:
+                    mapping.setdefault(_ns, doi)
+                _tk = normalize_title(_extract_title_from_filename(Path(filename).stem))
+                if _tk:
+                    mapping.setdefault(_tk, doi)
         wb.close()
         return mapping
     except Exception as e:
@@ -587,7 +594,12 @@ def process_pdf(
     #   1. doi_manual.xlsx (override manual)
     #   2. --doi-csv (CSV de Scopus: lookup por título del nombre de fichero)
     #   3. Fallback: extracción desde metadatos/texto del PDF
-    manual_doi = doi_manual.get(original)
+    _pdf_tk = normalize_title(_extract_title_from_filename(pdf_path.stem))
+    manual_doi = (
+        doi_manual.get(original)
+        or doi_manual.get(normalize_stem(pdf_path.stem))
+        or (doi_manual.get(_pdf_tk) if _pdf_tk else None)
+    )
     doi: Optional[str] = None
     if manual_doi:
         doi = manual_doi
@@ -622,6 +634,7 @@ def process_pdf(
                 result["estado"] = "MOVIDO_A_FALLIDOS_DOI_NO_ENCONTRADO"
             return result
 
+    doi = normalize_doi(doi)
     result["doi"] = doi
 
     try:
@@ -647,12 +660,11 @@ def process_pdf(
 
     except requests.HTTPError as e:
         status_code = e.response.status_code if e.response is not None else "NA"
-        result["estado"] = f"HTTP_ERROR_{status_code}"
         result["error"] = str(e)
-        if apply_changes and failed_folder is not None:
-            moved = move_to_failed(pdf_path, failed_folder)
-            result["archivo_resultado"] = moved.name
-            result["estado"] = f"MOVIDO_A_FALLIDOS_HTTP_ERROR_{status_code}"
+        # DOI válido pero Crossref no responde (404, timeout, etc.): conservar fichero.
+        log.warning("Crossref HTTP %s para '%s' (DOI: %s) — conservando fichero",
+                    status_code, original, doi)
+        result["estado"] = f"HTTP_ERROR_{status_code}_DOI_KNOWN"
 
     except Exception as e:
         result["estado"] = f"ERROR_{type(e).__name__}"

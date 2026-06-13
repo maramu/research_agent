@@ -7,6 +7,7 @@ from utils.pdf_utils import (
     DOI_REGEX,
     _clean_doi,
     extract_doi_from_text,
+    normalize_doi,
     normalize_stem,
     slugify,
     strip_accents,
@@ -24,6 +25,8 @@ class TestDOIRegex:
             ("(10.1021/es011412n)", "10.1021/es011412n"),
             ("https://doi.org/10.1000/abc", "10.1000/abc"),
             ("10.1002/aic.690470228", "10.1002/aic.690470228"),
+            # DOI con dos puntos internos (SICI/Springer)
+            ("10.1023/B:HYDR.0000008620.87704.3b", "10.1023/B:HYDR.0000008620.87704.3b"),
         ],
     )
     def test_regex_matches(self, text, expected):
@@ -57,15 +60,8 @@ class TestCleanDoi:
             ("10.1000/example-AB", "10.1000/example-AB"),
             ("10.1000/example-ABC", "10.1000/example-A"),
             ("10.1021/es011412-Gwithin", "10.1021/es011412-G"),
-            # BUG conocido: _clean_doi recorta sufijos legítimos de 3+ letras (item 44)
-            pytest.param(
-                "10.1000/xyz",
-                "10.1000/xyz",
-                marks=pytest.mark.xfail(
-                    strict=True,
-                    reason="_clean_doi recorta sufijos legítimos de 3+ letras (item 44)",
-                ),
-            ),
+            # item 44 cerrado: sufijo legítimo de 3+ letras tras '/' se conserva
+            ("10.1000/xyz", "10.1000/xyz"),
         ],
     )
     def test_clean(self, raw, expected):
@@ -93,6 +89,27 @@ class TestExtractDoiFromText:
 
     def test_extract_none(self):
         assert extract_doi_from_text("no hay doi aquí") is None
+
+    def test_colon_doi_preserved(self):
+        assert extract_doi_from_text(
+            "doi:10.1023/B:HYDR.0000008620.87704.3b"
+        ) == "10.1023/B:HYDR.0000008620.87704.3b"
+
+
+class TestNormalizeDoi:
+    @pytest.mark.parametrize(
+        "raw,expected",
+        [
+            ("10.1002/bit.26092/", "10.1002/bit.26092"),
+            (" 10.1002/bit.26092 ", "10.1002/bit.26092"),
+            ("https://doi.org/10.1002/bit.26092/", "10.1002/bit.26092"),
+            ("https://dx.doi.org/10.1000/xyz", "10.1000/xyz"),
+            ("http://doi.org/10.1000/xyz/", "10.1000/xyz"),
+            ("10.1023/B:HYDR.0000008620.87704.3b", "10.1023/B:HYDR.0000008620.87704.3b"),
+        ],
+    )
+    def test_normalize(self, raw, expected):
+        assert normalize_doi(raw) == expected
 
 
 class TestSlugify:

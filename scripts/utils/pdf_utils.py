@@ -75,10 +75,18 @@ def _clean_doi(doi: str) -> str:
     # Wiley/ACS SICI: keep the single-letter suffix (e.g. "2-G"), strip any run
     # of 2+ alpha chars that follows it (e.g. "within" in "2-Gwithin").
     doi = re.sub(r'(-[a-zA-Z])[a-zA-Z]{2,}$', r'\1', doi)
-    # General case: strip a word of 3+ alpha chars glued after a non-alpha
-    # (e.g. "2within" → "2").
-    doi = re.sub(r'[a-zA-Z]{3,}$', '', doi)
+    # General case: strip a word of 3+ alpha chars glued directly after a digit
+    # (e.g. "2within" → "2", "129348Abstract" → "129348").
+    # NOT applied when alpha follows "/" or "-" — those are legitimate DOI suffixes.
+    doi = re.sub(r'(?<=\d)[a-zA-Z]{3,}$', '', doi)
     return doi
+
+
+def normalize_doi(doi: str) -> str:
+    """Strip spaces, URL prefix and trailing slash from a DOI value."""
+    doi = doi.strip()
+    doi = re.sub(r"^https?://(dx\.)?doi\.org/", "", doi, flags=re.IGNORECASE)
+    return doi.rstrip("/")
 
 
 def extract_doi_from_text(text: str) -> Optional[str]:

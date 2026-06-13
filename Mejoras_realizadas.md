@@ -5,6 +5,21 @@
 
 ## Hecho hoy (2026-06-13)
 
+- **Item 44 cerrado + fix barra final + `:` en DOI + fallback Crossref + emparejado doi_manual.**
+  - `utils/pdf_utils.py`: `_clean_doi` conservador — paso general
+    `re.sub(r'[a-zA-Z]{3,}$','')` → `re.sub(r'(?<=\d)[a-zA-Z]{3,}$','')`:
+    solo recorta alfa-texto pegado a un dígito (`129348Abstract`, `example2within`);
+    sufijos válidos tras `/` o `-` (`10.1000/xyz`, `10.1023/B:HYDR…3b`) se conservan.
+    Nueva función pública `normalize_doi(doi)`: strip + quita prefijo URL + `rstrip("/")`.
+    Test `xfail(strict)` de item 44 eliminado; ahora pasa como test normal.
+  - `1_rename_papers_by_doi.py`: importa `normalize_doi`, `normalize_stem`;
+    `load_doi_manual` indexa también por stem normalizado y título normalizado (lookup robusto);
+    `process_pdf` intenta los tres ejes; `normalize_doi(doi)` antes de Crossref (elimina
+    barra final → no más 404 para `10.1002/bit.26092/`); handler HTTPError conserva el
+    fichero si el DOI es válido (`HTTP_ERROR_<N>_DOI_KNOWN`).
+  - Tests: `TestNormalizeDoi` (6 casos), `test_colon_doi_preserved`, caso HYDR en
+    `TestDOIRegex`. **53 passed** (era 56 passed 1 xfailed).
+
 - **`detect_title_duplicates` ignora grupos con ≥2 DOIs distintos.**
   Un mismo título con DOIs distintos son artículos diferentes, no duplicados.
   La dedup por título solo aplica ahora a papers sin DOI (o todos con el mismo DOI).

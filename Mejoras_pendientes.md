@@ -203,14 +203,11 @@ Formalizar como tests la verificación AST que ya se incluye en los prompts de C
 Fase divergente sin `section_canonical`/`year` en sus chunks. Borrar o re-indexar para
 que no compita con el índice canónico al vuelo (items 32/34).
 
-### 44. `_clean_doi` recorta sufijos DOI legítimos — MEDIA
+### ~~44. `_clean_doi` recorta sufijos DOI legítimos~~ — COMPLETADO 2026-06-13
 
-El paso general `re.sub(r'[a-zA-Z]{3,}$','')` en `utils/pdf_utils._clean_doi` elimina cualquier cola
-de 3+ letras, incluido un sufijo válido (`10.1000/xyz` → `10.1000/`). Afecta a `extract_doi_from_text`.
-Impacto real bajo (los DOIs del corpus acaban casi siempre en dígito) pero existe. Decidir fix
-deliberado (lista negra Abstract/Introduction/Received/Downloaded… / heurística de mayúscula pegada /
-subir umbral) + verificación de extracción con datos reales en pciq22. Test `xfail(strict)` en
-`test_pdf_utils.py` marca el caso.
+~~El paso general `re.sub(r'[a-zA-Z]{3,}$','')` en `utils/pdf_utils._clean_doi` elimina cualquier cola
+de 3+ letras, incluido un sufijo válido (`10.1000/xyz` → `10.1000/`).~~
+Corregido con `(?<=\d)[a-zA-Z]{3,}$` — solo recorta alfa-texto pegado a un dígito. Test xfail eliminado.
 
 ### 45. Utilidades de texto duplicadas y divergentes (pdf_utils ↔ 1_rename) — MEDIA
 
