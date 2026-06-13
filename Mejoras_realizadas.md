@@ -5,6 +5,12 @@
 
 ## Hecho hoy (2026-06-13)
 
+- **Filtros en el editor de artículos (`11_Articulos.py`).**
+  - Buscador de texto (título/DOI/autor) + radio "Mostrar": Todos / Sin DOI / Sin año / Sin autores / Incompletos.
+  - `_incompleto(r)`: True si falta DOI, año o autores.
+  - El `key` del `st.data_editor` incluye `hash((q_ed, mostrar))` → reset automático del editor al cambiar filtro.
+  - Botón Crossref, editor y botones Guardar/Eliminar envueltos en `if not edit_rows: … else: …`.
+
 - **Editor de artículos + borrado reversible (`11_Articulos.py`).**
   - `get_category_stats` en `app_utils.py`: columna "Metadata" ya cuenta líneas del `papers_metadata.jsonl` (no per_paper/*.metadata.json obsoletos).
   - `_parse_authors_text`: heurística "Forename Surname; …" — último token = apellido (antes asumía formato "Apellido, Nombre").

@@ -529,97 +529,137 @@ if not PUBLIC:
             st.info("Sin artículos en esta categoría.")
         else:
             nonce = st.session_state.get("art_editor_nonce", 0)
+
+            # ── Filtros del editor ──
+            fcol1, fcol2 = st.columns([2, 1])
+            with fcol1:
+                q_ed = st.text_input(
+                    "Buscar (título, DOI o autor)", value="",
+                    key=f"art_edit_search_{sel}",
+                    placeholder="Ej: siloxane, 10.1016/…, López",
+                )
+            with fcol2:
+                mostrar = st.radio(
+                    "Mostrar", ["Todos", "Sin DOI", "Sin año", "Sin autores", "Incompletos"],
+                    index=0, key=f"art_edit_show_{sel}",
+                )
+
+            def _incompleto(r):
+                return (not str(r.get("doi") or "").strip()
+                        or r.get("year") in (None, "")
+                        or not str(r.get("authors") or "").strip())
+
+            if q_ed.strip():
+                qq = q_ed.strip().lower()
+                edit_rows = [r for r in edit_rows
+                             if qq in str(r.get("title", "")).lower()
+                             or qq in str(r.get("doi", "")).lower()
+                             or qq in str(r.get("authors", "")).lower()]
+            if mostrar == "Sin DOI":
+                edit_rows = [r for r in edit_rows if not str(r.get("doi") or "").strip()]
+            elif mostrar == "Sin año":
+                edit_rows = [r for r in edit_rows if r.get("year") in (None, "")]
+            elif mostrar == "Sin autores":
+                edit_rows = [r for r in edit_rows if not str(r.get("authors") or "").strip()]
+            elif mostrar == "Incompletos":
+                edit_rows = [r for r in edit_rows if _incompleto(r)]
+
+            st.caption(f"{len(edit_rows)} artículo(s) en el editor.")
+
             sug_key = f"doi_suggestions_{sel}"
-            if st.button("🔎 Sugerir DOIs faltantes (Crossref)", use_container_width=True):
-                sin = [r for r in edit_rows if not str(r["doi"]).strip()]
-                with st.spinner(f"Consultando Crossref para {len(sin)} artículo(s)…"):
-                    suggestions = {}
-                    for i, r in enumerate(sin):
-                        if r.get("title"):
-                            cands = crossref_suggest(r["title"], author=r.get("first_author", ""),
-                                                     year=str(r.get("year") or ""))
-                            if cands:
-                                suggestions[r["paper_id"]] = cands[0].get("doi", "")
-                        if i < len(sin) - 1:
-                            time.sleep(0.3)
-                st.session_state[sug_key] = suggestions
-                st.session_state["art_editor_nonce"] = nonce + 1
-                st.success(f"Crossref sugirió {len(suggestions)} DOI(s).")
-                st.rerun()
-            suggestions = st.session_state.get(sug_key, {})
+            if not edit_rows:
+                st.info("Sin artículos con esos filtros.")
+            else:
+                if st.button("🔎 Sugerir DOIs faltantes (Crossref)", use_container_width=True):
+                    sin = [r for r in edit_rows if not str(r["doi"]).strip()]
+                    with st.spinner(f"Consultando Crossref para {len(sin)} artículo(s)…"):
+                        suggestions = {}
+                        for i, r in enumerate(sin):
+                            if r.get("title"):
+                                cands = crossref_suggest(r["title"], author=r.get("first_author", ""),
+                                                         year=str(r.get("year") or ""))
+                                if cands:
+                                    suggestions[r["paper_id"]] = cands[0].get("doi", "")
+                            if i < len(sin) - 1:
+                                time.sleep(0.3)
+                    st.session_state[sug_key] = suggestions
+                    st.session_state["art_editor_nonce"] = nonce + 1
+                    st.success(f"Crossref sugirió {len(suggestions)} DOI(s).")
+                    st.rerun()
+                suggestions = st.session_state.get(sug_key, {})
 
-            editor_rows = []
-            for r in edit_rows:
-                pid = r["paper_id"]
-                editor_rows.append({
-                    "_sel": False,
-                    "paper_id": pid,
-                    "title": r.get("title", ""),
-                    "year": "" if r.get("year") in (None, "") else str(r.get("year")),
-                    "authors": r.get("authors", ""),
-                    "journal": r.get("journal", ""),
-                    "doi": str(r.get("doi") or "") or suggestions.get(pid, ""),
-                })
-            df_ed = pd.DataFrame(editor_rows).astype(
-                {"title": "string", "year": "string", "authors": "string",
-                 "journal": "string", "doi": "string"})
-            col_cfg = {
-                "_sel": st.column_config.CheckboxColumn("🗑", width="small", default=False),
-                "paper_id": st.column_config.TextColumn("paper_id", disabled=True),
-                "title": st.column_config.TextColumn("Título", disabled=True, width="large"),
-                "year": st.column_config.TextColumn("Año", width="small"),
-                "authors": st.column_config.TextColumn("Autores (sep. ';')", width="large"),
-                "journal": st.column_config.TextColumn("Revista", width="medium"),
-                "doi": st.column_config.TextColumn("DOI", width="medium"),
-            }
-            edited = st.data_editor(
-                df_ed, column_config=col_cfg,
-                column_order=["_sel", "paper_id", "title", "year", "authors", "journal", "doi"],
-                hide_index=True, use_container_width=True, num_rows="fixed",
-                key=f"art_editor_{sel}_{nonce}",
-            )
-            orig = {r["paper_id"]: r for r in edit_rows}
+                editor_rows = []
+                for r in edit_rows:
+                    pid = r["paper_id"]
+                    editor_rows.append({
+                        "_sel": False,
+                        "paper_id": pid,
+                        "title": r.get("title", ""),
+                        "year": "" if r.get("year") in (None, "") else str(r.get("year")),
+                        "authors": r.get("authors", ""),
+                        "journal": r.get("journal", ""),
+                        "doi": str(r.get("doi") or "") or suggestions.get(pid, ""),
+                    })
+                df_ed = pd.DataFrame(editor_rows).astype(
+                    {"title": "string", "year": "string", "authors": "string",
+                     "journal": "string", "doi": "string"})
+                col_cfg = {
+                    "_sel": st.column_config.CheckboxColumn("🗑", width="small", default=False),
+                    "paper_id": st.column_config.TextColumn("paper_id", disabled=True),
+                    "title": st.column_config.TextColumn("Título", disabled=True, width="large"),
+                    "year": st.column_config.TextColumn("Año", width="small"),
+                    "authors": st.column_config.TextColumn("Autores (sep. ';')", width="large"),
+                    "journal": st.column_config.TextColumn("Revista", width="medium"),
+                    "doi": st.column_config.TextColumn("DOI", width="medium"),
+                }
+                edited = st.data_editor(
+                    df_ed, column_config=col_cfg,
+                    column_order=["_sel", "paper_id", "title", "year", "authors", "journal", "doi"],
+                    hide_index=True, use_container_width=True, num_rows="fixed",
+                    key=f"art_editor_{sel}_{nonce}_{abs(hash((q_ed, mostrar)))}",
+                )
+                orig = {r["paper_id"]: r for r in edit_rows}
 
-            cga, cgb = st.columns(2)
-            with cga:
-                if st.button("💾 Guardar cambios", type="primary", use_container_width=True):
-                    updates = {}
-                    for _, row in edited.iterrows():
-                        pid = row["paper_id"]; o = orig.get(pid, {})
-                        u = {}
-                        doi_v = str(row.get("doi", "")).strip()
-                        if doi_v and doi_v != str(o.get("doi") or "").strip():
-                            u["doi"] = doi_v
-                        yr_v = str(row.get("year", "")).strip()
-                        if yr_v != ("" if o.get("year") in (None, "") else str(o.get("year"))):
-                            u["year"] = int(yr_v) if yr_v.isdigit() else (yr_v or None)
-                        au_v = str(row.get("authors", "")).strip()
-                        if au_v != str(o.get("authors") or "").strip():
-                            u["authors"] = _parse_authors_text(au_v)
-                        jr_v = str(row.get("journal", "")).strip()
-                        if jr_v != str(o.get("journal") or "").strip():
-                            u["journal"] = jr_v
-                        if u:
-                            updates[pid] = u
-                    if not updates:
-                        st.info("No hay cambios que guardar.")
-                    else:
-                        n = update_metadata_fields(sel, updates)
-                        st.success(f"✓ {n} registro(s) actualizado(s) (backup .bak).")
-                        st.session_state.pop(sug_key, None)
+                cga, cgb = st.columns(2)
+                with cga:
+                    if st.button("💾 Guardar cambios", type="primary", use_container_width=True):
+                        updates = {}
+                        for _, row in edited.iterrows():
+                            pid = row["paper_id"]; o = orig.get(pid, {})
+                            u = {}
+                            doi_v = str(row.get("doi", "")).strip()
+                            if doi_v and doi_v != str(o.get("doi") or "").strip():
+                                u["doi"] = doi_v
+                            yr_v = str(row.get("year", "")).strip()
+                            if yr_v != ("" if o.get("year") in (None, "") else str(o.get("year"))):
+                                u["year"] = int(yr_v) if yr_v.isdigit() else (yr_v or None)
+                            au_v = str(row.get("authors", "")).strip()
+                            if au_v != str(o.get("authors") or "").strip():
+                                u["authors"] = _parse_authors_text(au_v)
+                            jr_v = str(row.get("journal", "")).strip()
+                            if jr_v != str(o.get("journal") or "").strip():
+                                u["journal"] = jr_v
+                            if u:
+                                updates[pid] = u
+                        if not updates:
+                            st.info("No hay cambios que guardar.")
+                        else:
+                            n = update_metadata_fields(sel, updates)
+                            st.success(f"✓ {n} registro(s) actualizado(s) (backup .bak).")
+                            st.session_state.pop(sug_key, None)
+                            st.session_state["art_editor_nonce"] = nonce + 1
+                            load_articles.clear(); _summary_rows.clear()
+                            st.rerun()
+                with cgb:
+                    to_delete = [row["paper_id"] for _, row in edited.iterrows() if row.get("_sel")]
+                    st.caption(f"{len(to_delete)} marcado(s) para eliminar.")
+                    confirm = st.checkbox("Confirmo eliminar (reversible → quarantine/)",
+                                          key=f"confirm_del_{sel}")
+                    if st.button("🗑 Eliminar seleccionados", use_container_width=True,
+                                 disabled=not (to_delete and confirm)):
+                        with st.spinner(f"Eliminando {len(to_delete)} y re-indexando…"):
+                            res = delete_papers(sel, to_delete)
+                        st.success(f"✓ {res['deleted']} eliminado(s) → {res['dest']}. FAISS re-indexado.")
                         st.session_state["art_editor_nonce"] = nonce + 1
                         load_articles.clear(); _summary_rows.clear()
                         st.rerun()
-            with cgb:
-                to_delete = [row["paper_id"] for _, row in edited.iterrows() if row.get("_sel")]
-                st.caption(f"{len(to_delete)} marcado(s) para eliminar.")
-                confirm = st.checkbox("Confirmo eliminar (reversible → quarantine/)",
-                                      key=f"confirm_del_{sel}")
-                if st.button("🗑 Eliminar seleccionados", use_container_width=True,
-                             disabled=not (to_delete and confirm)):
-                    with st.spinner(f"Eliminando {len(to_delete)} y re-indexando…"):
-                        res = delete_papers(sel, to_delete)
-                    st.success(f"✓ {res['deleted']} eliminado(s) → {res['dest']}. FAISS re-indexado.")
-                    st.session_state["art_editor_nonce"] = nonce + 1
-                    load_articles.clear(); _summary_rows.clear()
-                    st.rerun()
