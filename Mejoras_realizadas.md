@@ -3,6 +3,25 @@
 
 ---
 
+## Hecho hoy (2026-06-13)
+
+- **Item 39 (tests pytest + refactor `_norm`) — COMPLETADO y verificado.** Las tres `_norm`
+  (4_extract_metadata.py, 6_Mantenimiento.py, 1_Ingestar.py) eran idénticas → extraídas a
+  `normalize_stem(s)` en `utils/pdf_utils.py` (cuerpo exacto); los tres importan
+  `normalize_stem as _norm` (diff mínimo, llamadas intactas). Eliminado el `import unicodedata`
+  ya inútil en 4_extract_metadata.py (verificado: grep vacío). Suite nueva en `tests/`
+  (`conftest.py` añade scripts/ a sys.path; `pytest.ini` en raíz): `test_pdf_utils.py`
+  (DOI_REGEX incl. SICI `<>`, `_clean_doi`, `extract_doi_from_text`, `slugify`, `strip_accents`,
+  `normalize_stem`) y `test_rename.py` (`shorten_title`/`sanitize_filename` de 1_rename vía
+  importlib). **56 passed, 1 xfailed**. `pytest>=8.0` en requirements. Verificado en pciq22:
+  Coherencia PDF/MD sin cambios.
+- **Dos hallazgos de los tests → backlog:** item 44 (`_clean_doi` recorta sufijos DOI legítimos de
+  3+ letras: `10.1000/xyz`→`10.1000/`) e item 45 (utilidades de texto duplicadas y DIVERGENTES
+  entre `pdf_utils` —stale— y `1_rename` —con el fix de 2026-05-28—; el renombrado usa las
+  correctas de 1_rename).
+
+---
+
 ## Hecho hoy (2026-06-12)
 
 - **Item 42 (higiene) — núcleo aplicado y verificado:** pipeline.py (copy2→copy en
@@ -442,6 +461,11 @@ bge-m3 adoptado como modelo de producción. `utils/constants.py` es la fuente de
 ---
 
 ## Items completados (numerados)
+
+### ✅ 39. Tests pytest + refactor `_norm`→`normalize_stem` (completado 2026-06-13)
+Ver detalle en "Hecho hoy (2026-06-13)" arriba. Hallazgos derivados: items 44 y 45 (Mejoras_pendientes.md).
+
+---
 
 ### ✅ 42. Lote de higiene revisión 2026-06-12 (completado 2026-06-12)
 Aplicado y verificado: pipeline.py (copy2→copy en _copy_files_skip_existing; fallback muerto de

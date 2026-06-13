@@ -112,6 +112,11 @@ research_agent/
 │   ├── com.research_agent.streamlit_public.plist ← LaunchAgent Streamlit público (8502)
 │   └── com.research_agent.scopus_weekly.plist    ← LaunchAgent ingesta semanal (lunes 06:00)
 ├── logs/                             ← logs antiguos de scripts numerados
+├── tests/                            ← suite pytest (item 39)
+│   ├── conftest.py                   ← añade scripts/ a sys.path
+│   ├── test_pdf_utils.py             ← DOI_REGEX, _clean_doi, slugify, strip_accents, normalize_stem
+│   └── test_rename.py                ← shorten_title, sanitize_filename (importlib desde 1_rename)
+├── pytest.ini
 ├── .gitignore
 └── requirements.txt
 ```
@@ -139,7 +144,7 @@ research_agent/
 | `pipeline.py` | Orquestador: cinco flujos (`run_scopus`, `run_inbox`, `run_adhoc`, `integrate_adhoc`, `promote_adhoc_to_category`). Helpers: `_copy_files_skip_existing()`. `_CANONICAL_CATEGORIES` importado de `utils/constants.py` (fallback inline si `ImportError`). Importable por Streamlit. **Fixes 2026-06-09**: (1) `run_scopus()` llama a `build_doi_registry_from_nas()` antes del bucle de categorías; (2) `run_scopus()` pasa `--doi-csv` al paso de renombrado; (3) `run_inbox_process()` añade paso de renombrado antes de `detect_affected_categories()`. **2026-06-12 (item 42):** copy2→copy en `_copy_files_skip_existing`; eliminado el fallback inline de `_CANONICAL_CATEGORIES` (import directo de utils.constants); regex de `promote_adhoc_to_category` alineado a `[a-z0-9_-]+`. | ✅ |
 | `run_pipeline.py` | CLI del orquestador con subcomandos | ✅ |
 | `streamlit_app/` | Interfaz web sobre el pipeline (ver sección dedicada) | ✅ |
-| `utils/pdf_utils.py` | Funciones comunes (DOI, slugify, texto) | ✅ |
+| `utils/pdf_utils.py` | Funciones comunes (DOI, slugify, texto). **2026-06-13 (item 39):** `normalize_stem()` — fuente única de normalización de stems (NFKC + colapso de espacios/`.`/`-`/`,` a `_`), consumida por `4_extract_metadata`, `6_Mantenimiento` y `1_Ingestar` vía `import … as _norm`. | ✅ |
 - `DOI_REGEX` ampliado para capturar `<`, `>` en DOIs Wiley/ACS SICI antiguos (commit 95c119f)
 - `_clean_doi` ampliado con dos pasos: paso Wiley/ACS `(-[a-zA-Z])[a-zA-Z]{2,}$` para anclar sufijo legítimo + paso general `[a-zA-Z]{3,}$` para eliminar texto alfabético pegado al final del DOI (commit 2483494)
 | `utils/download_registry.py` | Registro persistente de DOIs pendientes de descarga (pendientes_descarga.csv) | ✅ |
@@ -374,7 +379,8 @@ El backlog vivo y el orden de prioridad están en `Mejoras_pendientes.md`. El hi
 - `metadata.jsonl` por chunk incluye ahora `section_canonical` (item 32) y `year` (item 34, denormalizado desde `papers_metadata.jsonl` + fallback regex sobre paper_id).
 - `utils/retrieval.py` centraliza la recuperación: BM25 al vuelo (sin artefacto, alineado con FAISS por orden), fusión RRF (k=60) y filtros (`passes_filters`). Toggle híbrido OFF por defecto en CLI (`--hybrid`) y web.
 - `MAX_EMBED_CHARS=8000` (`utils/constants.py`): tope de chunk + truncado reactivo en el embed para no exceder el contexto de bge-m3 con texto denso en fórmulas/subíndices.
-- `requirements.txt`: nueva dependencia `rank-bm25`.
+- `requirements.txt`: dependencias `rank-bm25` y `pytest>=8.0`.
+- **Tests (item 39):** `tests/` con `pytest` (`conftest.py` añade `scripts/` a sys.path; `pytest.ini` en raíz). `normalize_stem` en `utils/pdf_utils.py` unifica el antiguo `_norm` de los 3 ficheros. Regresión de DOI/título/stem: 56 passed, 1 xfailed (xfail strict = bug `_clean_doi`, item 44). Hallazgos abiertos: items 44 (`_clean_doi` recorta sufijos DOI de 3+ letras) y 45 (utilidades de texto duplicadas y divergentes `pdf_utils`↔`1_rename`).
 - **Rollout item 32 completado (2026-06-11):** las 8 categorías re-troceadas + re-indexadas (`3_process_corpus.py --force-md` + `5_build_embeddings.py --force`); `section_canonical` y `year` poblados en `metadata.jsonl` de todas. Ya no queda el "pendiente: re-trocear el resto".
 - **Revista desde TEI:** `4_extract_metadata.py` extrae `journal` del `monogr/title[@level='j']` del TEI (con fallback). Filtro y columna de revista disponibles en la página Artículos. Se descartó en su día y ahora sí se incorpora.
 - **`4_extract_metadata.py` salta TEI huérfanos:** solo emite metadata para TEI con `md_clean` correspondiente (comparación por stem normalizado `_norm`), evitando papers fantasma en `papers_metadata.jsonl` por restos de dedup/renombrados; imprime la lista de saltados. Además: fallback de DOI a `doi_manual.xlsx` y preservación de `doi`/`journal` no vacíos al reextraer.

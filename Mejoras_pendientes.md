@@ -1,13 +1,14 @@
 # Mejoras pendientes — research_agent
 > Backlog vivo. Histórico de lo hecho: Mejoras_realizadas.md · Estado/arquitectura: ESTADO.md
 
-## Orden de prioridad (revisión 2026-06-12)
-1. Item 39 — tests pytest (_clean_doi, DOI_REGEX SICI, sanitize_filename/shorten_title, _norm).
-2. `detect_affected_categories` con `_norm` (tras tener tests).
-3. Item 37 — golden Q&A.
-4. Item 36 — idempotencia.
-5. Item 41 — índice viejo all__bge-m3.
-6. Item 35 — OCR (si hay escaneados). Item 31 — MVP libros, tras el 37.
+## Orden de prioridad (revisión 2026-06-13)
+1. `detect_affected_categories` con `normalize_stem` — DESBLOQUEADO (tests ya existen): trivial, importar `normalize_stem` en `pipeline.py` y sustituir la comparación exacta de stems.
+2. Item 37 — golden Q&A.
+3. Item 36 — idempotencia.
+4. Item 44 — fix `_clean_doi` (recorta sufijos DOI de 3+ letras) [verificar extracción en pciq22].
+5. Item 45 — consolidar utilidades de texto duplicadas pdf_utils↔1_rename.
+6. Item 41 — índice viejo all__bge-m3.
+7. Item 35 — OCR (si hay escaneados). Item 31 — MVP libros, tras el 37.
 
 ## Hallazgos pendientes (revisión 2026-06-12)
 - `detect_affected_categories` compara stems por igualdad exacta sin `_norm` → riesgo de reproceso
