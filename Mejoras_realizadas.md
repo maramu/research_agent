@@ -5,6 +5,10 @@
 
 ## Hecho hoy (2026-06-13)
 
+- **`4_extract_metadata.py` fallback de revista vía Crossref por DOI.**
+  - Nuevo helper `_crossref_journal(doi)` consulta `https://api.crossref.org/works/<doi>` y extrae `container-title`; cacheado en memoria + `time.sleep(0.1)` de cortesía.
+  - Orden de resolución de `journal`: previo no vacío > TEI > Crossref por DOI. La preservación de campos manuales sigue intacta.
+
 - **`4_extract_metadata.py` preserva correcciones manuales al reextraer.**
   - Nuevo conjunto `PRESERVE_FIELDS = ("title", "doi", "journal", "year", "authors")` y helper `_is_filled(v)`.
   - Al reextraer, si el registro previo de `papers_metadata.jsonl` tiene alguno de esos campos relleno, se conserva (gana sobre el TEI); solo se rellena desde el TEI cuando el previo está vacío/ausente.
