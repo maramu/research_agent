@@ -5,6 +5,10 @@
 
 ## Hecho hoy (2026-06-13)
 
+- **Limpieza de TEI huérfanos (`pipeline.py` + `6_Mantenimiento.py`).**
+  - Nueva función `prune_orphan_tei(category, apply, on_output)`: detecta/mueve a cuarentena ficheros `tei/*.tei.xml` sin `md_clean` correspondiente (restos de procesados con nombres antiguos, ya saltados por `4_extract_metadata.py`). Reversible en `/Volumes/research/quarantine/orphan_tei/<ts>/<cat>/`.
+  - Nuevo bloque "🗄 TEI huérfanos (tei ↔ md_clean)" en **6_Mantenimiento → Coherencia PDF/MD**: multiselect de categorías, botón "🔍 Detectar TEI huérfanos" (tabla Categoría/Fichero TEI) y "🗄 Mover a cuarentena" (condicional). No afecta a metadata ni FAISS.
+
 - **`4_extract_metadata.py` fallback de revista vía Crossref por DOI.**
   - Nuevo helper `_crossref_journal(doi)` consulta `https://api.crossref.org/works/<doi>` y extrae `container-title`; cacheado en memoria + `time.sleep(0.1)` de cortesía.
   - Orden de resolución de `journal`: previo no vacío > TEI > Crossref por DOI. La preservación de campos manuales sigue intacta.

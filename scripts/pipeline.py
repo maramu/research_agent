@@ -590,6 +590,59 @@ def prune_orphan_metadata(
     return out
 
 
+def prune_orphan_tei(
+    category: str,
+    apply: bool = False,
+    on_output: Optional[Callable[[str], None]] = None,
+) -> Dict[str, Any]:
+    """Detecta (apply=False) o mueve a cuarentena (apply=True) ficheros
+    tei/*.tei.xml SIN md_clean correspondiente — restos de procesados con
+    nombres antiguos, ya saltados por 4_extract_metadata.py ('TEI huérfanos').
+    Reversible: mueve a quarantine/orphan_tei/<ts>/<cat>/.
+    NO toca metadata ni FAISS. Returns {"orphans": [...], "applied": bool}."""
+    from utils.pdf_utils import normalize_stem  # noqa: PLC0415
+
+    tei_dir = CATEGORIAS_DIR / category / "tei"
+    md_dir = CATEGORIAS_DIR / category / "md_clean"
+    out: Dict[str, Any] = {"orphans": [], "applied": False}
+    if not tei_dir.exists():
+        return out
+
+    def emit(m: str) -> None:
+        log.info(m)
+        if on_output:
+            on_output(m)
+
+    md_stems = {
+        normalize_stem(m.name[:-len(".clean.md")])
+        for m in (md_dir.glob("*.clean.md") if md_dir.exists() else [])
+    }
+
+    SUF = ".tei.xml"
+    orphan_files = [
+        p for p in sorted(tei_dir.glob("*" + SUF))
+        if normalize_stem(p.name[: -len(SUF)]) not in md_stems
+    ]
+    out["orphans"] = [p.name for p in orphan_files]
+    if not orphan_files:
+        emit(f"{category}: sin TEI huérfanos.")
+        return out
+
+    emit(f"{category}: {len(orphan_files)} TEI huérfano(s) (sin md_clean):")
+    for p in orphan_files:
+        emit(f"  · {p.name}")
+
+    if apply:
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        qdir = QUARANTINE_DIR.parent / "orphan_tei" / ts / category
+        qdir.mkdir(parents=True, exist_ok=True)
+        for p in orphan_files:
+            shutil.move(str(p), str(qdir / p.name))
+        out["applied"] = True
+        emit(f"  ✓ Movidos {len(orphan_files)} a {qdir}")
+    return out
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # FLUJO A — Scopus
 # ═══════════════════════════════════════════════════════════════════════════

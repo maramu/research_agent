@@ -45,7 +45,7 @@ if not PIPELINE_AVAILABLE:
     st.error(f"No se puede importar `pipeline.py`: {PIPELINE_IMPORT_ERROR}")
     st.stop()
 
-from pipeline import build_doi_registry_from_nas, prune_orphan_metadata, run_step  # noqa: E402
+from pipeline import build_doi_registry_from_nas, prune_orphan_metadata, prune_orphan_tei, run_step  # noqa: E402
 
 nas_ok, nas_msg = check_nas()
 st.markdown(f"**NAS**: {'🟢' if nas_ok else '🔴'} {nas_msg}")
@@ -457,4 +457,51 @@ with st.expander("🔗 Coherencia PDF / MD", expanded=False):
     st.caption(
         "Elimina solo registros de papers_metadata.jsonl sin md_clean "
         "(ruido del catálogo). No afecta al índice FAISS ni requiere re-indexar."
+    )
+
+    st.divider()
+    st.markdown("#### 🗄 TEI huérfanos (tei ↔ md_clean)")
+
+    existing_cats_tei = list_existing_categories()
+    selected_tei_cats = st.multiselect(
+        "Categorías a analizar",
+        options=existing_cats_tei,
+        default=existing_cats_tei,
+        key="orphan_tei_cats",
+    )
+
+    if st.button("🔍 Detectar TEI huérfanos", key="btn_orphan_tei_scan"):
+        all_tei_orphans: list[dict] = []
+        for cat in selected_tei_cats:
+            result = prune_orphan_tei(cat)
+            for fname in result["orphans"]:
+                all_tei_orphans.append({"Categoría": cat, "Fichero TEI": fname})
+        st.session_state["_orphan_tei_rows"] = all_tei_orphans
+
+    if "_orphan_tei_rows" in st.session_state:
+        tei_rows = st.session_state["_orphan_tei_rows"]
+        if not tei_rows:
+            st.success("Sin TEI huérfanos.")
+        else:
+            st.dataframe(pd.DataFrame(tei_rows), hide_index=True, use_container_width=True)
+            st.warning(
+                f"⚠️ {len(tei_rows)} fichero(s) TEI huérfano(s) detectados. "
+                "Usa **Mover a cuarentena** para limpiarlos."
+            )
+            if st.button("🗄 Mover a cuarentena", type="primary", key="btn_orphan_tei_apply"):
+                moved_total = 0
+                for cat in selected_tei_cats:
+                    res = prune_orphan_tei(cat, apply=True)
+                    moved_total += len(res["orphans"])
+                st.success(f"✓ Movidos {moved_total} fichero(s) TEI a cuarentena.")
+                st.caption(
+                    "Recuperables en `/Volumes/research/quarantine/orphan_tei/<ts>/<cat>/`. "
+                    "No afecta a metadata ni FAISS."
+                )
+                st.session_state.pop("_orphan_tei_rows", None)
+                st.rerun()
+
+    st.caption(
+        "Restos de TEI de procesados con nombres antiguos, ya ignorados por "
+        "4_extract_metadata.py. Mover no afecta a metadata ni FAISS; reversible."
     )
