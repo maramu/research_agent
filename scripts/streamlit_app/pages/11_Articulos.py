@@ -234,12 +234,22 @@ PUBLIC = is_public_app()
 st.subheader("Resumen por categoría")
 
 
+def _all_meta_mtime() -> float:
+    cats = list_existing_categories()
+    mtimes = []
+    for cat in cats:
+        p = CATEGORIAS_DIR / cat / "metadata" / "papers_metadata.jsonl"
+        if p.exists():
+            mtimes.append(p.stat().st_mtime)
+    return max(mtimes) if mtimes else 0.0
+
+
 @st.cache_data(show_spinner="Calculando resumen por categoría…")
-def _summary_rows(nonce: int) -> list[dict]:
+def _summary_rows(mtime: float) -> list[dict]:
     return get_categories_summary()
 
 
-summary = _summary_rows(0)
+summary = _summary_rows(_all_meta_mtime())
 if summary:
     st.dataframe(
         pd.DataFrame(summary),
@@ -595,10 +605,6 @@ if not PUBLIC:
                             f"✓ {n_changed} registro(s) actualizado(s) en "
                             f"papers_metadata.jsonl y doi_manual.xlsx. "
                             f"Backups guardados con extensión .bak."
-                        )
-                        # Invalidar caché del listado (bump nonce)
-                        st.session_state["art_nonce"] = (
-                            st.session_state.get("art_nonce", 0) + 1
                         )
                         st.session_state.pop(sug_key, None)
                         st.session_state["doi_editor_nonce"] = nonce + 1
