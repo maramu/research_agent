@@ -98,6 +98,22 @@ _METHOD_TO_SOURCE: Dict[str, tuple] = {
     "doi_accept_pdf":    ("doi_direct",         "open_access"),
 }
 
+# Campos que, si ya estaban rellenos en papers_metadata.jsonl previo, no deben
+# sobrescribirse con un valor vacío/ausente del TEI. Esto protege correcciones
+# manuales hechas desde el editor de Artículos; si se quiere forzar el refresco
+# desde el TEI, basta con vaciar el campo antes de re-extraer.
+PRESERVE_FIELDS = ("title", "doi", "journal", "year", "authors")
+
+
+def _is_filled(v) -> bool:
+    if v is None:
+        return False
+    if isinstance(v, str):
+        return bool(v.strip())
+    if isinstance(v, (list, dict)):
+        return len(v) > 0
+    return True  # números u otros
+
 
 def sha1_short(s: str, n: int = 10) -> str:
     return hashlib.sha1(s.encode("utf-8", errors="ignore")).hexdigest()[:n]
@@ -609,30 +625,37 @@ def main():
                 orphans.append(tei_stem)
                 continue
 
-            title      = extract_title(root, ns)
-            doi        = extract_doi(root, ns)
-            journal    = extract_journal(root, ns)
-            year       = extract_year(root, ns)
-            authors    = extract_authors(root, ns)
+            new_rec = {
+                "title":   extract_title(root, ns),
+                "doi":     extract_doi(root, ns),
+                "journal": extract_journal(root, ns),
+                "year":    extract_year(root, ns),
+                "authors": extract_authors(root, ns),
+            }
             abstract   = extract_abstract(root, ns)
             highlights = extract_highlights(root, ns)
             refs       = extract_references(root, ns)
 
-            # ── Durabilidad de DOI/revista ──
+            # ── Durabilidad de campos editables ──
             # 1) Si el TEI no trae DOI, intenta doi_manual.xlsx (por nombre de
             #    archivo y, en segundo intento, por título normalizado).
-            if not doi:
+            if not new_rec.get("doi"):
                 cand = doi_manual_by_name.get(_strip_pdf(paper_id))
-                if not cand and title:
-                    cand = doi_manual_by_title.get(normalize_title(title))
+                if not cand and new_rec.get("title"):
+                    cand = doi_manual_by_title.get(normalize_title(new_rec["title"]))
                 if cand:
-                    doi = cand
-            # 2) No machacar doi/journal previos no vacíos con un vacío del TEI.
+                    new_rec["doi"] = cand
+            # 2) No machacar campos previos no vacíos con un vacío del TEI.
             prev = prev_meta.get(paper_id, {})
-            if not doi and prev.get("doi"):
-                doi = prev["doi"]
-            if not journal and prev.get("journal"):
-                journal = prev["journal"]
+            for _f in PRESERVE_FIELDS:
+                if _is_filled(prev.get(_f)):
+                    new_rec[_f] = prev[_f]
+
+            title   = new_rec["title"]
+            doi     = new_rec["doi"]
+            journal = new_rec["journal"]
+            year    = new_rec["year"]
+            authors = new_rec["authors"]
 
             md_clean_path = base / project / "md_clean" / f"{paper_id}.clean.md"
             quality = compute_quality(title, doi, year, authors, abstract, refs,

@@ -5,6 +5,12 @@
 
 ## Hecho hoy (2026-06-13)
 
+- **`4_extract_metadata.py` preserva correcciones manuales al reextraer.**
+  - Nuevo conjunto `PRESERVE_FIELDS = ("title", "doi", "journal", "year", "authors")` y helper `_is_filled(v)`.
+  - Al reextraer, si el registro previo de `papers_metadata.jsonl` tiene alguno de esos campos relleno, se conserva (gana sobre el TEI); solo se rellena desde el TEI cuando el previo está vacío/ausente.
+  - Sustituye la preservación específica anterior de `doi`/`journal`; mantiene el fallback de DOI a `doi_manual.xlsx` cuando no hay ni TEI ni previo.
+  - `quality_score`/`warnings` se calculan después de aplicar la preservación, sobre el registro final.
+
 - **Título editable en el editor de Artículos (`11_Articulos.py`).**
   - En `st.data_editor` de la sección "✏️ Editar / 🗑 eliminar", la columna `title` pasa a editable (`disabled=False`) manteniendo `width="large"`.
   - El handler de "💾 Guardar cambios" detecta cambios de título junto a DOI/año/autores/revista y los incluye en `updates[pid]["title"]`.
