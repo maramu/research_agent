@@ -5,6 +5,13 @@
 
 ## Hecho hoy (2026-06-13)
 
+- **`detect_title_duplicates` ignora grupos con ≥2 DOIs distintos.**
+  Un mismo título con DOIs distintos son artículos diferentes, no duplicados.
+  La dedup por título solo aplica ahora a papers sin DOI (o todos con el mismo DOI).
+  Cambio mínimo: reemplazado el list-comprehension final por un bucle que filtra
+  `distinct_dois = {p["doi"] for p in papers if p.get("doi")}` y salta el grupo
+  si `len(distinct_dois) >= 2`. Emite `log.debug` para trazabilidad.
+
 - **Poda de metadata huérfana — COMPLETADO.**
   - `pipeline.py`: constantes `_META_STEM_FIELDS` / `_META_STEM_SUFFIXES`, helper privado
     `_record_stem(rec)` (extrae stem normalizable de cualquier campo identificador del registro),

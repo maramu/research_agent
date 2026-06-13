@@ -741,11 +741,18 @@ def detect_title_duplicates(cats: list[str], base: Path) -> list[dict]:
                     })
         except Exception:
             continue
-    return [
-        {"match_type": "title", "norm_title": norm, "papers": papers}
-        for norm, papers in sorted(groups.items())
-        if len(papers) >= 2
-    ]
+    result: list[dict] = []
+    for norm, papers in sorted(groups.items()):
+        if len(papers) < 2:
+            continue
+        distinct_dois = {p["doi"] for p in papers if p.get("doi")}
+        if len(distinct_dois) >= 2:
+            # Mismo título pero DOIs distintos → artículos diferentes, NO duplicado.
+            log.debug("Título compartido con %d DOIs distintos, ignorado: %.60s",
+                      len(distinct_dois), norm)
+            continue
+        result.append({"match_type": "title", "norm_title": norm, "papers": papers})
+    return result
 
 
 def detect_hash_duplicates(cats: list[str], base: Path) -> list[dict]:
