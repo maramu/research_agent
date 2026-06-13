@@ -48,6 +48,7 @@ CATEGORIAS_DIR = NAS_ROOT / "categorias"
 INBOX_DIR = NAS_ROOT / "inbox"
 INBOX_CSV_DIR = NAS_ROOT / "inbox_csv"
 KNOWN_DOIS_FILE  = NAS_ROOT / "metadatos" / "doi_registry.txt"
+QUARANTINE_DIR = NAS_ROOT / "quarantine" / "duplicates"
 _KEYWORDS_PATH   = SCRIPTS_DIR.parent / "config" / "keywords.yml"
 
 if str(SCRIPTS_DIR) not in sys.path:
@@ -155,17 +156,25 @@ def process_category(
     category: str,
     on_output: Optional[Callable[[str], None]] = None,
     extra_args: Optional[Dict[str, List[str]]] = None,
+    screen_duplicates: bool = True,
 ) -> Dict[str, Any]:
     """Ejecuta la cadena de procesado completa para una categoría.
 
     Args:
-        category:   nombre de la categoría / proyecto
-        on_output:  callback para líneas de salida
-        extra_args: args extra por script, e.g. {"3_process_corpus.py": ["--force"]}
+        category:         nombre de la categoría / proyecto
+        on_output:        callback para líneas de salida
+        extra_args:       args extra por script, e.g. {"3_process_corpus.py": ["--force"]}
+        screen_duplicates: si True, aparta PDFs duplicados antes de procesar
 
     Returns:
         {"status": "ok"|"error", "steps": {script: result_dict}}
     """
+    if screen_duplicates:
+        try:
+            screen_new_pdfs_against_corpus(category, on_output=on_output)
+        except Exception as e:
+            log.warning("screen_new_pdfs_against_corpus(%s) falló: %s", category, e)
+
     # Defaults: todos los flujos usan el modelo de embedding canónico
     _default_extra: Dict[str, List[str]] = {
         "5_build_embeddings.py": ["--model", OLLAMA_MODEL_EMBED],
@@ -233,14 +242,11 @@ def _copy_files_skip_existing(src_dir: Path, dst_dir: Path) -> tuple[int, int]:
 
 
 def detect_affected_categories() -> List[str]:
-    """Devuelve las categorías que tienen PDFs sin procesar en pdfs/.
-
-    Un PDF está "sin procesar" si no tiene su correspondiente fichero en md_clean/.
-    """
+    """Categorías con PDFs sin procesar (comparación de stems normalizada)."""
+    from utils.pdf_utils import normalize_stem  # noqa: PLC0415
     affected = []
     if not CATEGORIAS_DIR.exists():
         return affected
-
     for cat_dir in sorted(CATEGORIAS_DIR.iterdir()):
         if not cat_dir.is_dir():
             continue
@@ -248,17 +254,13 @@ def detect_affected_categories() -> List[str]:
         md_dir = cat_dir / "md_clean"
         if not pdfs_dir.exists():
             continue
-
-        pdf_stems = {p.stem for p in pdfs_dir.glob("*.pdf")}
-        # md_clean files end with .clean.md — el stem real es sin ".clean"
-        md_stems = set()
-        for m in md_dir.glob("*.clean.md") if md_dir.exists() else []:
-            md_stems.add(m.name.replace(".clean.md", ""))
-
-        new_pdfs = pdf_stems - md_stems
-        if new_pdfs:
+        pdf_stems = {normalize_stem(p.stem) for p in pdfs_dir.glob("*.pdf")}
+        md_stems = {
+            normalize_stem(m.name[:-len(".clean.md")])
+            for m in (md_dir.glob("*.clean.md") if md_dir.exists() else [])
+        }
+        if pdf_stems - md_stems:
             affected.append(cat_dir.name)
-
     return affected
 
 
@@ -305,53 +307,182 @@ def update_doi_registry(category: str) -> int:
         return 0
 
 
+def _norm_doi_key(d) -> str:
+    """DOI a clave comparable: minúsculas, sin prefijo doi.org, sin '/' final."""
+    s = str(d or "").strip().lower()
+    s = re.sub(r"^https?://(dx\.)?doi\.org/", "", s)
+    return s.rstrip("/")
+
+
+def _iter_papers_metadata(base: Path = CATEGORIAS_DIR):
+    """Itera (categoria, registro_dict) de los papers_metadata.jsonl del corpus."""
+    import json  # noqa: PLC0415
+    if not base.exists():
+        return
+    for pat in ("*/metadata/papers_metadata.jsonl", "*/papers_metadata.jsonl"):
+        for jf in sorted(base.glob(pat)):
+            cat = jf.parent.parent.name if jf.parent.name == "metadata" else jf.parent.name
+            try:
+                with jf.open(encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            yield cat, json.loads(line)
+                        except json.JSONDecodeError:
+                            continue
+            except Exception as e:
+                log.debug("No se pudo leer %s: %s", jf, e)
+
+
+def _load_corpus_doi_index() -> Dict[str, str]:
+    """doi(normalizado) -> 'cat/paper_id' de papers YA procesados. Primaria:
+    papers_metadata.jsonl (DOI autoritativo del TEI). Respaldo: doi_registry.txt."""
+    idx: Dict[str, str] = {}
+    for cat, rec in _iter_papers_metadata():
+        doi = _norm_doi_key(rec.get("doi"))
+        if doi:
+            pid = rec.get("paper_id") or rec.get("stable_id") or rec.get("source_pdf") or ""
+            idx.setdefault(doi, f"{cat}/{pid}")
+    if KNOWN_DOIS_FILE.exists():
+        try:
+            for line in KNOWN_DOIS_FILE.read_text(encoding="utf-8").splitlines():
+                parts = line.strip().split("\t", 1)
+                key = _norm_doi_key(parts[0]) if parts else ""
+                if key:
+                    idx.setdefault(key, parts[1] if len(parts) > 1 else "?")
+        except Exception:
+            pass
+    return idx
+
+
+def _pdf_sha256(path: Path) -> str:
+    import hashlib  # noqa: PLC0415
+    h = hashlib.sha256()
+    try:
+        with path.open("rb") as f:
+            for block in iter(lambda: f.read(1 << 20), b""):
+                h.update(block)
+        return h.hexdigest()
+    except Exception:
+        return ""
+
+
+def screen_new_pdfs_against_corpus(
+    category: str,
+    on_output: Optional[Callable[[str], None]] = None,
+) -> Dict[str, Any]:
+    """Aparta a cuarentena los PDFs NUEVOS de categorias/<cat>/pdfs/ cuyo DOI (o
+    hash idéntico) ya está en el corpus. No toca PDFs ya procesados ni borra nada:
+    mueve a quarantine/duplicates/<ts>/<cat>/. Reversible.
+    Returns: {"quarantined": [...], "kept": [...], "no_doi": [...]}"""
+    from utils.pdf_utils import extract_doi_from_pdf, normalize_stem  # noqa: PLC0415
+
+    pdfs_dir = CATEGORIAS_DIR / category / "pdfs"
+    md_dir = CATEGORIAS_DIR / category / "md_clean"
+    out: Dict[str, Any] = {"quarantined": [], "kept": [], "no_doi": []}
+    if not pdfs_dir.exists():
+        return out
+
+    def emit(msg: str) -> None:
+        log.info(msg)
+        if on_output:
+            on_output(msg)
+
+    md_stems = {
+        normalize_stem(m.name[:-len(".clean.md")])
+        for m in (md_dir.glob("*.clean.md") if md_dir.exists() else [])
+    }
+    all_pdfs = sorted(pdfs_dir.glob("*.pdf"))
+    new_pdfs = [p for p in all_pdfs if normalize_stem(p.stem) not in md_stems]
+    if not new_pdfs:
+        return out
+
+    corpus_dois = _load_corpus_doi_index()
+    existing_hashes = {
+        _pdf_sha256(p) for p in all_pdfs if normalize_stem(p.stem) in md_stems
+    }
+    existing_hashes.discard("")
+
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    qdir = QUARANTINE_DIR / ts / category
+    manifest = QUARANTINE_DIR / ts / "_manifest.csv"
+    seen_new: Dict[str, str] = {}
+    moved: List[tuple] = []
+
+    for pdf in new_pdfs:
+        doi = _norm_doi_key(extract_doi_from_pdf(pdf))
+        h = _pdf_sha256(pdf)
+        reason = None
+        if doi and doi in corpus_dois:
+            reason = f"DOI ya en corpus ({corpus_dois[doi]})"
+        elif h and h in existing_hashes:
+            reason = "PDF idéntico ya en la categoría (hash)"
+        elif doi and doi in seen_new:
+            reason = f"DOI duplicado en este lote ({seen_new[doi]})"
+
+        if reason:
+            qdir.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(pdf), str(qdir / pdf.name))
+            moved.append((category, pdf.name, reason, str(pdf)))
+            out["quarantined"].append({"file": pdf.name, "reason": reason})
+            emit(f"  🟡 cuarentena: {pdf.name} — {reason}")
+        else:
+            if doi:
+                seen_new[doi] = pdf.name
+            else:
+                out["no_doi"].append(pdf.name)
+            out["kept"].append(pdf.name)
+
+    if moved:
+        manifest.parent.mkdir(parents=True, exist_ok=True)
+        with manifest.open("w", encoding="utf-8", newline="") as f:
+            w = csv.writer(f)
+            w.writerow(["category", "filename", "reason", "original_path"])
+            w.writerows(moved)
+        emit(f"  → {len(moved)} PDF(s) apartados a {qdir}")
+    if out["no_doi"]:
+        emit(f"  ⚠️ {len(out['no_doi'])} PDF(s) sin DOI legible (no deduplicables "
+             f"por DOI): {', '.join(out['no_doi'])}")
+    return out
+
+
 def build_doi_registry_from_nas() -> int:
-    """Escanea todas las categorías y reconstruye doi_registry.txt desde cero.
-
-    Lee los PDFs de categorias/*/pdfs/ y extrae DOIs. Es útil antes del cribado
-    para detectar duplicados contra artículos ya procesados.
-
-    Returns:
-        Número total de DOIs registrados.
-    """
+    """Reconstruye doi_registry.txt con los DOIs del corpus ya procesado.
+    Primaria: papers_metadata.jsonl (DOI autoritativo, limpio del TEI).
+    Respaldo: extracción del PDF (solo DOIs no vistos). Línea: 'doi\\tcat/filename'."""
+    registry: Dict[str, str] = {}
+    for cat, rec in _iter_papers_metadata():
+        doi = _norm_doi_key(rec.get("doi"))
+        if not doi:
+            continue
+        pid = rec.get("paper_id") or rec.get("stable_id") or rec.get("source_pdf") or ""
+        registry.setdefault(doi, f"{cat}/{pid}")
     try:
         sys.path.insert(0, str(SCRIPTS_DIR))
         from utils.pdf_utils import extract_doi_from_pdf  # noqa: PLC0415
+        if CATEGORIAS_DIR.exists():
+            for cat_dir in sorted(CATEGORIAS_DIR.iterdir()):
+                pdfs_dir = cat_dir / "pdfs"
+                if not cat_dir.is_dir() or not pdfs_dir.exists():
+                    continue
+                for pdf in sorted(p for p in pdfs_dir.iterdir()
+                                  if p.is_file() and p.suffix.lower() == ".pdf"):
+                    try:
+                        doi = _norm_doi_key(extract_doi_from_pdf(pdf))
+                    except Exception:
+                        continue
+                    if doi:
+                        registry.setdefault(doi, f"{cat_dir.name}/{pdf.name}")
     except Exception as e:
-        log.warning("No se pudo importar extract_doi_from_pdf: %s", e)
-        return 0
-
-    registry: Dict[str, str] = {}
-
-    if not CATEGORIAS_DIR.exists():
-        return 0
-
-    for cat_dir in sorted(CATEGORIAS_DIR.iterdir()):
-        if not cat_dir.is_dir():
-            continue
-        pdfs_dir = cat_dir / "pdfs"
-        if not pdfs_dir.exists():
-            continue
-
-        pdfs = sorted(
-            p for p in pdfs_dir.iterdir()
-            if p.is_file() and p.suffix.lower() == ".pdf"
-        )
-        for pdf in pdfs:
-            try:
-                doi = extract_doi_from_pdf(pdf)
-                if doi and doi not in registry:
-                    registry[doi] = f"{cat_dir.name}/{pdf.name}"
-            except Exception as e:
-                log.debug("Error extrayendo DOI de %s: %s", pdf.name, e)
-                continue
+        log.warning("build_doi_registry_from_nas: respaldo PDF falló: %s", e)
 
     KNOWN_DOIS_FILE.parent.mkdir(parents=True, exist_ok=True)
     with KNOWN_DOIS_FILE.open("w", encoding="utf-8") as f:
         for doi, origen in sorted(registry.items()):
             f.write(f"{doi}\t{origen}\n")
-
-    log.info("doi_registry.txt reconstruido: %d DOIs desde el NAS", len(registry))
+    log.info("doi_registry.txt reconstruido: %d DOIs (metadata + PDFs)", len(registry))
     return len(registry)
 
 
@@ -744,7 +875,7 @@ def run_adhoc(
         log.warning("run_adhoc: renombrado falló — continuando con nombres originales")
 
     # Cadena de procesado
-    proc_result = process_category(name, on_output=on_output)
+    proc_result = process_category(name, on_output=on_output, screen_duplicates=False)
 
     summary = {
         "status": proc_result["status"],

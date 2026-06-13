@@ -2,7 +2,7 @@
 > Backlog vivo. Histórico de lo hecho: Mejoras_realizadas.md · Estado/arquitectura: ESTADO.md
 
 ## Orden de prioridad (revisión 2026-06-13)
-1. `detect_affected_categories` con `normalize_stem` — DESBLOQUEADO (tests ya existen): trivial, importar `normalize_stem` en `pipeline.py` y sustituir la comparación exacta de stems.
+1. ~~`detect_affected_categories` con `normalize_stem`~~ — ✅ **COMPLETADO 2026-06-13** (incluido en puerta de dedup por DOI).
 2. Item 37 — golden Q&A.
 3. Item 36 — idempotencia.
 4. Item 44 — fix `_clean_doi` (recorta sufijos DOI de 3+ letras) [verificar extracción en pciq22].
@@ -11,8 +11,8 @@
 7. Item 35 — OCR (si hay escaneados). Item 31 — MVP libros, tras el 37.
 
 ## Hallazgos pendientes (revisión 2026-06-12)
-- `detect_affected_categories` compara stems por igualdad exacta sin `_norm` → riesgo de reproceso
-  por puntuación/guiones. PENDIENTE.
+- ~~`detect_affected_categories` compara stems por igualdad exacta sin `_norm` → riesgo de reproceso
+  por puntuación/guiones.~~ ✅ RESUELTO 2026-06-13.
 - `run_scopus` aplica el filtro de activas también a categorías pedidas explícitamente (descarte
   silencioso). PENDIENTE/menor.
 - `promote_adhoc_to_category` usa `sort_keys=True` → reordena todo keywords.yml en cada promoción.

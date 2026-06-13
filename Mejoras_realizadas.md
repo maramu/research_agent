@@ -5,6 +5,28 @@
 
 ## Hecho hoy (2026-06-13)
 
+- **Puerta de deduplicación por DOI en `pipeline.py` — COMPLETADO.**
+  - Nueva constante `QUARANTINE_DIR = NAS_ROOT / "quarantine" / "duplicates"`.
+  - Nuevos helpers privados: `_norm_doi_key` (normaliza DOI a clave comparable),
+    `_iter_papers_metadata` (itera `papers_metadata.jsonl` del corpus),
+    `_load_corpus_doi_index` (construye índice DOI→ubicación desde metadata + registro),
+    `_pdf_sha256` (hash SHA-256 de un PDF).
+  - Nueva función `screen_new_pdfs_against_corpus(category, on_output)`: detecta PDFs
+    NUEVOS (sin `md_clean` correspondiente) cuyo DOI o hash binario ya están en el corpus
+    y los mueve a `quarantine/duplicates/<ts>/<cat>/` con `_manifest.csv`. Reversible.
+    Emite `🟡 cuarentena: <fichero> — <razón>` por PDF apartado.
+  - `process_category()`: nuevo parámetro `screen_duplicates: bool = True`; si True,
+    llama a `screen_new_pdfs_against_corpus` antes de la cadena de procesado (tolerante
+    a fallos: aviso y continúa). Flujos Scopus e Inbox lo heredan con True.
+  - `run_adhoc()`: pasa `screen_duplicates=False` (los PDFs ad-hoc son intencionales,
+    no pasan por la puerta).
+  - `build_doi_registry_from_nas()` **reescrito como autoritativo**: fuente primaria
+    `papers_metadata.jsonl` (DOI limpio del TEI); respaldo extracción PDF para DOIs
+    no vistos en metadata. Claves normalizadas por `_norm_doi_key` (minúsculas, sin
+    prefijo `doi.org`, sin `/` final). Antes solo leía PDFs.
+  - `detect_affected_categories()`: ahora compara stems con `normalize_stem` (de
+    `utils/pdf_utils`) en lugar de igualdad exacta — cierra hallazgo nº 1 del backlog.
+
 - **Item 39 (tests pytest + refactor `_norm`) — COMPLETADO y verificado.** Las tres `_norm`
   (4_extract_metadata.py, 6_Mantenimiento.py, 1_Ingestar.py) eran idénticas → extraídas a
   `normalize_stem(s)` en `utils/pdf_utils.py` (cuerpo exacto); los tres importan
