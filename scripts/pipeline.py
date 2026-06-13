@@ -486,6 +486,110 @@ def build_doi_registry_from_nas() -> int:
     return len(registry)
 
 
+_META_STEM_FIELDS = ("paper_id", "source_file", "pdf_file", "filename", "file", "source_pdf", "tei_file")
+_META_STEM_SUFFIXES = (".tei.xml", ".clean.md", ".summary.md", ".chunks.jsonl", ".jsonl", ".xml", ".pdf")
+
+
+def _record_stem(rec) -> str:
+    """Stem de fichero de un registro de metadata (alineado con SOURCE_FIELDS de 9_cleanup)."""
+    for field in _META_STEM_FIELDS:
+        v = rec.get(field)
+        if not v:
+            continue
+        name = Path(str(v).strip()).name
+        for suf in _META_STEM_SUFFIXES:
+            if name.lower().endswith(suf):
+                name = name[: -len(suf)]
+                break
+        if name:
+            return name
+    return ""
+
+
+def prune_orphan_metadata(
+    category: str,
+    apply: bool = False,
+    on_output: Optional[Callable[[str], None]] = None,
+) -> Dict[str, Any]:
+    """Detecta (apply=False) o elimina (apply=True) registros de papers_metadata.jsonl
+    SIN md_clean correspondiente — papers fantasma / ruido del catálogo.
+    Reversible: backup .bak + volcado de lo eliminado a metadata/_orphans_<ts>.jsonl
+    + per_paper/<stem>* huérfanos movidos a metadata/_orphans_per_paper_<ts>/.
+    NO toca FAISS (otro fichero). Returns {orphans, kept, removed, applied}."""
+    import json  # noqa: PLC0415
+    from utils.pdf_utils import normalize_stem  # noqa: PLC0415
+
+    meta = CATEGORIAS_DIR / category / "metadata" / "papers_metadata.jsonl"
+    md_dir = CATEGORIAS_DIR / category / "md_clean"
+    out: Dict[str, Any] = {"orphans": [], "kept": 0, "removed": 0, "applied": False}
+    if not meta.exists():
+        return out
+
+    def emit(m: str) -> None:
+        log.info(m)
+        if on_output:
+            on_output(m)
+
+    md_stems = {
+        normalize_stem(m.name[:-len(".clean.md")])
+        for m in (md_dir.glob("*.clean.md") if md_dir.exists() else [])
+    }
+
+    kept_lines: List[str] = []
+    orphan_lines: List[str] = []
+    orphan_stems: List[str] = []
+    with meta.open(encoding="utf-8") as f:
+        for line in f:
+            s = line.rstrip("\n")
+            if not s.strip():
+                continue
+            try:
+                rec = json.loads(s)
+            except json.JSONDecodeError:
+                kept_lines.append(s)          # líneas ilegibles: no tocar
+                continue
+            stem = _record_stem(rec)
+            if stem and normalize_stem(stem) in md_stems:
+                kept_lines.append(s)
+            else:
+                orphan_lines.append(s)
+                orphan_stems.append(stem)
+                out["orphans"].append({
+                    "stem": stem or "(sin id)",
+                    "doi": rec.get("doi") or "",
+                    "title": (rec.get("title") or "")[:80],
+                })
+
+    out["kept"] = len(kept_lines)
+    out["removed"] = len(orphan_lines)
+
+    if not orphan_lines:
+        emit(f"{category}: sin metadata huérfana ({out['kept']} registros).")
+        return out
+
+    emit(f"{category}: {out['removed']} huérfano(s) de {out['removed'] + out['kept']} registros")
+    for o in out["orphans"]:
+        emit(f"  · {o['stem']}  {o['doi']}  {o['title']}")
+
+    if apply:
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        shutil.copy(meta, meta.with_name(meta.name + ".bak"))
+        meta.write_text("\n".join(kept_lines) + ("\n" if kept_lines else ""), encoding="utf-8")
+        (meta.parent / f"_orphans_{ts}.jsonl").write_text(
+            "\n".join(orphan_lines) + "\n", encoding="utf-8")
+        per_paper = meta.parent / "per_paper"
+        if per_paper.exists():
+            moved_dir = meta.parent / f"_orphans_per_paper_{ts}"
+            for stem in filter(None, orphan_stems):
+                for pp in per_paper.glob(f"{stem}*"):
+                    moved_dir.mkdir(parents=True, exist_ok=True)
+                    shutil.move(str(pp), str(moved_dir / pp.name))
+        out["applied"] = True
+        emit(f"  ✓ Eliminados {out['removed']} (backup .bak + _orphans_{ts}.jsonl recuperables)")
+
+    return out
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # FLUJO A — Scopus
 # ═══════════════════════════════════════════════════════════════════════════

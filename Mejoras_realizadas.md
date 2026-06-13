@@ -5,6 +5,24 @@
 
 ## Hecho hoy (2026-06-13)
 
+- **Poda de metadata huérfana — COMPLETADO.**
+  - `pipeline.py`: constantes `_META_STEM_FIELDS` / `_META_STEM_SUFFIXES`, helper privado
+    `_record_stem(rec)` (extrae stem normalizable de cualquier campo identificador del registro),
+    y función pública `prune_orphan_metadata(category, apply, on_output)`.
+    Detecta registros de `papers_metadata.jsonl` sin `md_clean` correspondiente (papers
+    fantasma / ruido del catálogo). Reversible: backup `.bak` + volcado de eliminados a
+    `metadata/_orphans_<ts>.jsonl` + per_paper huérfanos movidos a
+    `metadata/_orphans_per_paper_<ts>/`. No toca el índice FAISS.
+  - `6_Mantenimiento.py`: tercer bloque en el expander **Coherencia PDF/MD** —
+    "🧹 Metadata huérfana (metadata ↔ md_clean)". Multiselect de categorías (todas por
+    defecto), botón "🔍 Detectar" → tabla de orphans con columnas Categoría/stem/doi/title,
+    botón "🗑 Eliminar huérfanos" condicional (patrón flag + `st.rerun()`), caption
+    aclaratorio sobre no-impacto en FAISS.
+
+---
+
+## Hecho hoy (2026-06-13)
+
 - **Puerta de deduplicación por DOI en `pipeline.py` — COMPLETADO.**
   - Nueva constante `QUARANTINE_DIR = NAS_ROOT / "quarantine" / "duplicates"`.
   - Nuevos helpers privados: `_norm_doi_key` (normaliza DOI a clave comparable),

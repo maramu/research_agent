@@ -45,7 +45,7 @@ if not PIPELINE_AVAILABLE:
     st.error(f"No se puede importar `pipeline.py`: {PIPELINE_IMPORT_ERROR}")
     st.stop()
 
-from pipeline import build_doi_registry_from_nas, run_step  # noqa: E402
+from pipeline import build_doi_registry_from_nas, prune_orphan_metadata, run_step  # noqa: E402
 
 nas_ok, nas_msg = check_nas()
 st.markdown(f"**NAS**: {'🟢' if nas_ok else '🔴'} {nas_msg}")
@@ -411,3 +411,50 @@ with st.expander("🔗 Coherencia PDF / MD", expanded=False):
                     "✓ Corrección completada. Recuerda **re-indexar FAISS** "
                     "de las categorías afectadas."
                 )
+
+    st.divider()
+    st.markdown("#### 🧹 Metadata huérfana (metadata ↔ md_clean)")
+
+    existing_cats_orphan = list_existing_categories()
+    selected_orphan_cats = st.multiselect(
+        "Categorías a analizar",
+        options=existing_cats_orphan,
+        default=existing_cats_orphan,
+        key="orphan_meta_cats",
+    )
+
+    if st.button("🔍 Detectar metadata huérfana", key="btn_orphan_meta_scan"):
+        all_orphans: list[dict] = []
+        for cat in selected_orphan_cats:
+            result = prune_orphan_metadata(cat)
+            for o in result["orphans"]:
+                all_orphans.append({"Categoría": cat, **o})
+        st.session_state["_orphan_meta_rows"] = all_orphans
+
+    if "_orphan_meta_rows" in st.session_state:
+        orphan_rows = st.session_state["_orphan_meta_rows"]
+        if not orphan_rows:
+            st.success("Sin metadata huérfana.")
+        else:
+            st.dataframe(pd.DataFrame(orphan_rows), hide_index=True, use_container_width=True)
+            st.warning(
+                f"⚠️ {len(orphan_rows)} registro(s) huérfano(s) detectados. "
+                "Usa **Eliminar huérfanos** para limpiarlos."
+            )
+            if st.button("🗑 Eliminar huérfanos", type="primary", key="btn_orphan_meta_apply"):
+                removed_total = 0
+                for cat in selected_orphan_cats:
+                    res = prune_orphan_metadata(cat, apply=True)
+                    removed_total += res["removed"]
+                st.success(f"✓ Eliminados {removed_total} registro(s) huérfano(s).")
+                st.caption(
+                    "Backup en `.bak` y `_orphans_<ts>.jsonl` recuperables "
+                    "en la carpeta `metadata/` de cada categoría."
+                )
+                st.session_state.pop("_orphan_meta_rows", None)
+                st.rerun()
+
+    st.caption(
+        "Elimina solo registros de papers_metadata.jsonl sin md_clean "
+        "(ruido del catálogo). No afecta al índice FAISS ni requiere re-indexar."
+    )
