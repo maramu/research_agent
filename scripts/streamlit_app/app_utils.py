@@ -448,13 +448,6 @@ def get_category_stats(category: str) -> Dict[str, Any]:
     n_md   = count("md_clean", "*.clean.md")
     pending = max(0, n_pdfs - n_md)
 
-    metadata_per_paper_dir = cat_dir / "metadata" / "per_paper"
-    n_metadata = (
-        sum(1 for _ in metadata_per_paper_dir.glob("*.metadata.json"))
-        if metadata_per_paper_dir.exists()
-        else 0
-    )
-
     embeddings_dir = cat_dir / "embeddings"
     has_embeddings = embeddings_dir.exists() and any(
         (sub / "index.faiss").exists()
@@ -491,7 +484,7 @@ def get_category_stats(category: str) -> Dict[str, Any]:
         "md_clean":   n_md,
         "summaries":  count("summaries", "*.summary.md"),
         "chunks":     count("chunks",   "*.jsonl"),
-        "metadata":   n_metadata,
+        "metadata":   n_total_meta,
         "embeddings": has_embeddings,
         "packages":   count("notebooklm_packages", "*"),
         "pending":    pending,

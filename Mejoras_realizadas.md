@@ -5,6 +5,12 @@
 
 ## Hecho hoy (2026-06-13)
 
+- **Editor de artículos + borrado reversible (`11_Articulos.py`).**
+  - `get_category_stats` en `app_utils.py`: columna "Metadata" ya cuenta líneas del `papers_metadata.jsonl` (no per_paper/*.metadata.json obsoletos).
+  - `_parse_authors_text`: heurística "Forename Surname; …" — último token = apellido (antes asumía formato "Apellido, Nombre").
+  - `delete_papers`: simplificado — cuarentena a `quarantine/deleted/<ts>/`, re-index vía `pipeline.run_step` (ya no usa subprocess directo), devuelve `{"deleted", "dest"}`.
+  - Bloque `if not PUBLIC:` reescrito: `st.data_editor` con TODAS las filas de la categoría (no solo sin-DOI); columnas editables DOI + Año + Autores + Revista; checkbox `_sel` para marcar borrado; botón "Guardar cambios" → `update_metadata_fields()` (backup `.bak`); botón "Eliminar seleccionados" → `delete_papers()` + re-index FAISS (cuarentena reversible).
+
 - **Item 44 cerrado + fix barra final + `:` en DOI + fallback Crossref + emparejado doi_manual.**
   - `utils/pdf_utils.py`: `_clean_doi` conservador — paso general
     `re.sub(r'[a-zA-Z]{3,}$','')` → `re.sub(r'(?<=\d)[a-zA-Z]{3,}$','')`:
