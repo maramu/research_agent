@@ -95,3 +95,4 @@ streamlit>=1.32
 anthropic>=0.39
 openai>=1.50
 rank-bm25
+pytest>=8.0

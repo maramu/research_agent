@@ -40,6 +40,14 @@ def slugify(text: str) -> str:
     return text.strip("_")
 
 
+def normalize_stem(s: str) -> str:
+    """NFKC + colapsa espacios/puntos/guiones/comas a '_'; minúsculas; quita '_' extremos."""
+    s = unicodedata.normalize("NFKC", s)
+    s = re.sub(r"[\s\.\-,]+", "_", s).lower()
+    s = re.sub(r"_+", "_", s)
+    return s.strip("_")
+
+
 def shorten_title(title: str, max_words: int = 8) -> str:
     """Acorta un título a las primeras max_words palabras significativas (sin stopwords)."""
     clean = strip_accents(title).lower()

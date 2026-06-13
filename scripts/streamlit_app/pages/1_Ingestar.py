@@ -27,6 +27,7 @@ STREAMLIT_APP_DIR = Path(__file__).resolve().parent.parent
 if str(STREAMLIT_APP_DIR) not in sys.path:
     sys.path.insert(0, str(STREAMLIT_APP_DIR))
 
+from utils.pdf_utils import normalize_stem as _norm
 from app_utils import (
     CANONICAL_CATEGORIES, CATEGORIAS_DIR, CONFIG_DIR, INBOX_DIR,
     PIPELINE_AVAILABLE, PIPELINE_IMPORT_ERROR,
@@ -510,13 +511,6 @@ with tab_pending:
             st.warning("Selecciona al menos una categoría.")
         else:
             from pipeline import run_step
-
-            def _norm(s: str) -> str:
-                import unicodedata
-                s = unicodedata.normalize("NFKC", s)
-                s = re.sub(r"[\s\.\-,]+", "_", s).lower()
-                s = re.sub(r"_+", "_", s)
-                return s.strip("_")
 
             rename_errors: list[str] = []
             cats_processed: list[str] = []

@@ -69,7 +69,7 @@ import json
 import os
 import re
 import shutil
-import unicodedata
+from utils.pdf_utils import normalize_stem as _norm
 from datetime import date
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -344,14 +344,6 @@ def infer_paper_id(p: Path) -> str:
     name = re.sub(r"\.tei\.xml$", "", name)
     name = re.sub(r"\.xml$", "", name)
     return name
-
-
-def _norm(s: str) -> str:
-    """Normalización de coherencia PDF/MD (igual que 6_Mantenimiento.py)."""
-    s = unicodedata.normalize("NFKC", s)
-    s = re.sub(r"[\s\.\-,]+", "_", s).lower()
-    s = re.sub(r"_+", "_", s)
-    return s.strip("_")
 
 
 def _tei_stem(name: str) -> str:

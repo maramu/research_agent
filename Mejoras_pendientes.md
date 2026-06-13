@@ -202,6 +202,25 @@ Formalizar como tests la verificación AST que ya se incluye en los prompts de C
 Fase divergente sin `section_canonical`/`year` en sus chunks. Borrar o re-indexar para
 que no compita con el índice canónico al vuelo (items 32/34).
 
+### 44. `_clean_doi` recorta sufijos DOI legítimos — MEDIA
+
+El paso general `re.sub(r'[a-zA-Z]{3,}$','')` en `utils/pdf_utils._clean_doi` elimina cualquier cola
+de 3+ letras, incluido un sufijo válido (`10.1000/xyz` → `10.1000/`). Afecta a `extract_doi_from_text`.
+Impacto real bajo (los DOIs del corpus acaban casi siempre en dígito) pero existe. Decidir fix
+deliberado (lista negra Abstract/Introduction/Received/Downloaded… / heurística de mayúscula pegada /
+subir umbral) + verificación de extracción con datos reales en pciq22. Test `xfail(strict)` en
+`test_pdf_utils.py` marca el caso.
+
+### 45. Utilidades de texto duplicadas y divergentes (pdf_utils ↔ 1_rename) — MEDIA
+
+`strip_accents`, `slugify`, `shorten_title`, `sanitize_filename` y `STOPWORDS` están duplicadas en
+`utils/pdf_utils.py` y en `1_rename_papers_by_doi.py`, y han DIVERGIDO: `1_rename` lleva el fix de
+2026-05-28 (guion→_ en `shorten_title`; `\s+`→`_` en `sanitize_filename`), `pdf_utils` tiene la
+versión stale. El renombrado usa las correctas (locales de `1_rename`). Consolidar a fuente única en
+`pdf_utils` portando las versiones CORRECTAS y que `1_rename` importe de ahí. Antes: grep de
+consumidores de `pdf_utils.shorten_title`/`sanitize_filename`. Tras consolidar, apuntar
+`test_rename.py` a la ubicación única.
+
 ### 43. Verificaciones pendientes de la revisión 2026-06-12 — seguimiento
 3_process_corpus.py (canonical_section vs CANONICAL_SECTIONS), 1_rename_papers_by_doi.py (nombre
 largo Scopus en descarga), 4_extract_metadata.py (_norm vs 6_Mantenimiento), 5_build_embeddings.py

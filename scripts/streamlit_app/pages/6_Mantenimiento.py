@@ -24,6 +24,7 @@ STREAMLIT_APP_DIR = Path(__file__).resolve().parent.parent
 if str(STREAMLIT_APP_DIR) not in sys.path:
     sys.path.insert(0, str(STREAMLIT_APP_DIR))
 
+from utils.pdf_utils import normalize_stem as _norm
 from app_utils import (
     CANONICAL_CATEGORIES,
     CATEGORIAS_DIR,
@@ -267,13 +268,6 @@ def _get_pdf_md_mismatches(cat: str) -> dict:
       orphan_mds:  stems de md_clean sin PDF con el mismo nombre
       missing_mds: stems de PDF sin md_clean con el mismo nombre
     """
-    def _norm(s: str) -> str:
-        import unicodedata
-        s = unicodedata.normalize("NFKC", s)
-        s = re.sub(r"[\s\.\-,]+", "_", s).lower()
-        s = re.sub(r"_+", "_", s)
-        return s.strip("_")
-
     cat_dir  = CATEGORIAS_DIR / cat
     pdfs_dir = cat_dir / "pdfs"
     md_dir   = cat_dir / "md_clean"
