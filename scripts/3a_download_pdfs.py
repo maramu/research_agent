@@ -269,6 +269,7 @@ class DownloadStatus(str, Enum):
     NOT_DOWNLOADED = "no descargado"
     NO_DOI        = "sin DOI"
     ERROR         = "error"
+    SKIPPED_CORPUS = "ya en corpus"
     DRY_RUN       = "dry-run"
 
 
@@ -1541,6 +1542,15 @@ class DownloadManager:
                     "[%d/%d] DOI ya en corpus (doi_registry) — saltando: %s",
                     idx, total, doi,
                 )
+                # Mantener alineación results↔subset: añadir SIEMPRE un resultado
+                # con status fuera de pending_mask, antes del continue (fix descuadre informe).
+                results.append({
+                    "doi": doi, "title": title, "year": year, "authors": authors,
+                    "status": DownloadStatus.SKIPPED_CORPUS,
+                    "method": "already_in_corpus",
+                    "pdf_url": "", "saved_file": "",
+                    "error": "", "source_pdf": "",
+                })
                 if _HAS_REGISTRY and not self.cfg.dry_run:
                     try:
                         _registry_upsert(
