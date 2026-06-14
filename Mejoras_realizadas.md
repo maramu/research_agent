@@ -3,6 +3,36 @@
 
 ---
 
+## Hecho hoy (2026-06-14)
+
+- ### Fix: filas "ya en corpus" descuadraban el informe de descarga
+  `3a_download_pdfs.py` — el branch de skip por `doi_registry` hacía `continue` sin añadir a
+  `results`, rompiendo la alineación posicional de `save_results()`
+  (`aligned = source_df.iloc[:len(results)]` + `pd.concat(axis=1)`): las filas saltadas se
+  quedaban en el informe emparejadas con el `download_status` de otra fila → acababan en
+  `pendientes_manual` y descuadraban todas las columnas a partir del primer skip.
+
+  Fix: nuevo estado `DownloadStatus.SKIPPED_CORPUS = "ya en corpus"`; el branch ahora añade
+  siempre un resultado con ese status antes del `continue`. Queda fuera de `pending_mask`
+  (`{NOT_DOWNLOADED, ERROR}`) → excluido de pendientes; `record()` no se llama en ese branch
+  → `skipped_registry` sin doble conteo.
+
+  Verificado en producción (`anoxic_biogas_biodesulfurization`): 86 filas → 61 `ya en corpus`,
+  23 `no descargado`, 2 sin DOI; columnas alineadas. Los 23 restantes confirmados fuera de
+  corpus (registry=0/metadata=0): ruido de query + paywalls, pendientes legítimos.
+
+- ### Fix: `update_doi_registry` normaliza claves con `_norm_doi_key`
+  `pipeline.py::update_doi_registry()` guardaba el DOI crudo de `extract_doi_from_pdf` y leía
+  las claves del registro sin normalizar, divergiendo de `build_doi_registry_from_nas()` (que
+  usa `_norm_doi_key`: minúsculas, sin prefijo `doi.org/`, sin `/` final). Alineados ambos
+  escritores con `_norm_doi_key`.
+
+  Verificación posterior en `doi_registry.txt`: 3 entradas con mayúsculas (sin prefijo/barra)
+  detectadas — benignas, ambos lectores (`3a_download_pdfs.py` y `_load_corpus_doi_index`)
+  normalizan a minúsculas al cargar; se autocorregirán en próxima reescritura.
+
+---
+
 ## Hecho hoy (2026-06-13)
 
 - **Cierre de sesión — consolidación de hoy.**
