@@ -282,7 +282,9 @@ def update_doi_registry(category: str) -> int:
                         continue
                     parts = line.split("\t", 1)
                     if len(parts) == 2:
-                        existing[parts[0]] = parts[1]
+                        key = _norm_doi_key(parts[0])
+                        if key:
+                            existing[key] = parts[1]
 
         pdfs_dir = CATEGORIAS_DIR / category / "pdfs"
         if not pdfs_dir.exists():
@@ -290,7 +292,7 @@ def update_doi_registry(category: str) -> int:
 
         added = 0
         for pdf in sorted(pdfs_dir.glob("*.pdf")):
-            doi = extract_doi_from_pdf(pdf)
+            doi = _norm_doi_key(extract_doi_from_pdf(pdf))
             if doi and doi not in existing:
                 existing[doi] = f"{category}/{pdf.name}"
                 added += 1
