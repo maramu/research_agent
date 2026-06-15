@@ -26,3 +26,6 @@ EOFscripts/streamlit_app/streamlit.log
 scripts/streamlit_app/streamlit.log
 scripts/streamlit_app/*.log
 *.bak
+
+# Claude Code local settings (per-machine, no compartir)
+.claude/settings.local.json
