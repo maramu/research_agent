@@ -3,6 +3,15 @@
 
 ---
 
+### ✅ Ingesta semanal: añadir anoxic_biogas_biodesulfurization + timeout 5400s (2026-06-15)
+
+- `scripts/run_weekly_scopus.py`: `WEEKLY_CATEGORIES` ahora incluye `"anoxic_biogas_biodesulfurization"` además de `"biogas_upgrading_biomethanation"`.
+- `SCOPUS_TIMEOUT = 5400` (antes 2700) — cierra el ítem pendiente del timeout del job semanal (referenciado como "item 4" en notas previas).
+- `active_categories.yml`: `anoxic_biogas_biodesulfurization` ya estaba activa, sin cambios necesarios.
+- Decisión: la query Scopus de anoxic se deja sin afinar (1 query, ~12 resultados/semana); los falsos positivos de limnología/sedimentos se descartan a mano en la tab Pendientes.
+
+---
+
 ## Hecho hoy (2026-06-14)
 
 - ### Fix: filas "ya en corpus" descuadraban el informe de descarga

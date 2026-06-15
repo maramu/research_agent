@@ -9,6 +9,7 @@
 5. Item 45 — consolidar utilidades de texto duplicadas pdf_utils↔1_rename. **Nota 2026-06-13:** el trabajo de hoy sobre DOIs tocó ambos ficheros (`normalize_doi`, `normalize_stem`, lookups por stem/título en `doi_manual`). Revisar si introdujo nueva divergencia antes de consolidar.
 6. Item 41 — índice viejo all__bge-m3.
 7. Item 35 — OCR (si hay escaneados). Item 31 — MVP libros, tras el 37.
+- ~~Timeout job semanal: subir `SCOPUS_TIMEOUT` de 2700 a 5400 (45→90 min)~~ — ✅ **COMPLETADO 2026-06-15** — `run_weekly_scopus.py`: `SCOPUS_TIMEOUT = 5400`; `WEEKLY_CATEGORIES` ampliada con `anoxic_biogas_biodesulfurization`.
 
 ## Hallazgos pendientes (revisión 2026-06-12)
 - ~~`detect_affected_categories` compara stems por igualdad exacta sin `_norm` → riesgo de reproceso
@@ -31,7 +32,7 @@ Revisar y afinar:
 - `config/scopus_queries.yml` — para búsquedas Scopus directas (flujo scopus)
 
 Categorías con pocas queries actuales (ampliar si hace falta):
-- `anoxic_biogas_biodesulfurization` — solo 1 query (12 resultados)
+- `anoxic_biogas_biodesulfurization` — solo 1 query (12 resultados). **2026-06-15:** anoxic ya está en el cron semanal con esta query. Decisión: no afinar — volumen bajo, falsos positivos de limnología/sedimentos se descartan manualmente.
 - `bioleaching_critical_materials` — solo 1 query (39 resultados)
 
 ---
