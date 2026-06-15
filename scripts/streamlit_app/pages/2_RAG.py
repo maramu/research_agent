@@ -235,7 +235,7 @@ with st.sidebar:
         provider = st.selectbox("Provider", options=_provider_options, index=0)
 
         if provider == "Ollama (local)":
-            synth_model = st.selectbox("Modelo", options=OLLAMA_MODELS_LLM, index=1)
+            synth_model = st.selectbox("Modelo", options=OLLAMA_MODELS_LLM, index=0)
         elif provider == "Anthropic (Claude)":
             ant_ok, ant_msg = check_anthropic_api()
             if not ant_ok:
