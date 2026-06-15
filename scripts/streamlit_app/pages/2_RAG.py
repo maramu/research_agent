@@ -46,6 +46,9 @@ from app_utils import (
 )
 from utils.export_refs import build_papers_zip
 from utils.constants import CANONICAL_SECTIONS, year_from_paper_id
+from utils.citations import (
+    load_papers_metadata, citation_key, CITATION_INSTRUCTIONS,
+)
 from utils.retrieval import (dense_rank, bm25_rank, rrf_fuse,
                              passes_filters, pool_size)
 
@@ -124,6 +127,12 @@ def load_bm25(project: str, phase: str, index_mtime: float):
             if line:
                 texts.append(json.loads(line).get("text", ""))
     return build_bm25(texts)
+
+
+@st.cache_data(show_spinner=False)
+def load_papers_meta(project: str, meta_mtime: float):
+    """Índice {paper_id: record} de papers_metadata.jsonl (clave: project+mtime)."""
+    return load_papers_metadata(project, CATEGORIAS_DIR)
 
 
 @st.cache_resource(show_spinner=False)
@@ -407,21 +416,28 @@ usage_capture = {
 if do_synth and synth_model:
     st.subheader("Respuesta")
 
+    _meta_jsonl = CATEGORIAS_DIR / project / "metadata" / "papers_metadata.jsonl"
+    _meta_mtime = _meta_jsonl.stat().st_mtime if _meta_jsonl.exists() else 0.0
+    papers_meta = load_papers_meta(project, _meta_mtime)
+
     context_parts = []
     for i, (_, _, m) in enumerate(results, start=1):
         snippet  = m.get("text", "").strip()
         paper_id = m.get("paper_id", "?")
         section  = m.get("section", "?")
-        context_parts.append(f"[{i}] ({paper_id}, sección: {section})\n{snippet}")
+        cite     = citation_key(paper_id, papers_meta)
+        context_parts.append(
+            f"[{i}] {cite} — {paper_id}, sección: {section}\n{snippet}"
+        )
     context = "\n\n---\n\n".join(context_parts)
 
     prompt = f"""Eres un asistente científico. Responde a la pregunta basándote ÚNICAMENTE en los fragmentos numerados que se proporcionan a continuación.
 
 Reglas:
-- Cita las fuentes usando [N] (el número del fragmento) donde apoyes una afirmación.
 - Si los fragmentos no contienen información suficiente para responder, dilo claramente.
 - No inventes datos. No uses conocimiento externo a los fragmentos.
 - Responde en el mismo idioma que la pregunta.
+{CITATION_INSTRUCTIONS}
 
 Fragmentos:
 {context}

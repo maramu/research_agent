@@ -60,6 +60,7 @@ from dotenv import load_dotenv
 
 sys.path.insert(0, str(Path(__file__).parent))
 from utils.constants import OLLAMA_MODEL_EMBED, year_from_paper_id
+from utils.citations import load_papers_metadata, citation_key
 from utils.retrieval import (build_bm25, dense_rank, bm25_rank,
                              rrf_fuse, passes_filters, pool_size)
 
@@ -116,6 +117,7 @@ def main():
 
     base    = Path(args.base)
     emb_dir = base / args.project / "embeddings" / args.phase
+    papers_meta = load_papers_metadata(args.project, base)
 
     if not emb_dir.exists():
         raise SystemExit(
@@ -176,9 +178,10 @@ def main():
     for rank, (score, idx, m) in enumerate(results, start=1):
         phase_tag = f"[{m.get('phase', '?')}] " if args.phase == "all" else ""
         year = m.get("year") or year_from_paper_id(m.get("paper_id", ""))
+        cite = citation_key(m.get("paper_id", ""), papers_meta)
         print(
             f"[{rank}] {score_label}={score:.4f} | {phase_tag}"
-            f"paper_id={m.get('paper_id')} | year={year} | "
+            f"paper_id={m.get('paper_id')} | year={year} | cite={cite} | "
             f"section={m.get('section')} ({m.get('section_canonical','?')}) | type={m.get('type')}"
         )
         snippet = m.get("text", "")[:700].replace("\n", " ")

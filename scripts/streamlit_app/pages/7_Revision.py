@@ -20,6 +20,9 @@ for d in (str(STREAMLIT_APP_DIR), str(SCRIPTS_DIR)):
 
 from utils.export_refs import build_papers_zip, load_papers, to_bibtex
 from utils.constants import CANONICAL_SECTIONS, year_from_paper_id
+from utils.citations import (
+    load_papers_metadata, citation_key, CITATION_INSTRUCTIONS,
+)
 from utils.retrieval import (dense_rank, bm25_rank, rrf_fuse,
                              passes_filters, pool_size)
 from app_utils import (
@@ -63,14 +66,16 @@ _PROMPTS = {
         "numerados, escribe una síntesis del estado del arte sobre: {focus}.\n"
         "Estructura: (1) Contexto y relevancia, (2) Principales enfoques y "
         "tecnologías, (3) Resultados destacados, (4) Tendencias recientes.\n"
-        "Cita las fuentes con [N].\n\n"
+        "{cite_rules}\n\n"
         "Fragmentos:\n{context}\n\nSíntesis:"
     ),
     "Artículos clave (tabla Markdown)": (
         "Basándote en los fragmentos numerados, genera una tabla Markdown "
         "con los artículos más relevantes sobre: {focus}.\n"
         "Columnas: | Cita | Año | Metodología | Resultados principales |\n"
-        "Incluye al menos los fragmentos más informativos.\n\n"
+        "Incluye al menos los fragmentos más informativos.\n"
+        "En la columna Cita usa EXACTAMENTE la clave de cita (Apellido, Año; DOI) "
+        "que precede a cada fragmento; no inventes autores, años ni DOIs.\n\n"
         "Fragmentos:\n{context}\n\nTabla:"
     ),
     "Lagunas de conocimiento": (
@@ -78,21 +83,21 @@ _PROMPTS = {
         "conocimiento y líneas de investigación futura sobre: {focus}.\n"
         "Estructura: (1) Aspectos no estudiados, (2) Contradicciones entre "
         "estudios, (3) Limitaciones metodológicas, (4) Preguntas abiertas.\n"
-        "Cita con [N].\n\n"
+        "{cite_rules}\n\n"
         "Fragmentos:\n{context}\n\nAnálisis:"
     ),
     "Comparativa de mecanismos": (
         "Basándote en los fragmentos numerados, compara mecanismos, procesos "
         "o estrategias sobre: {focus}.\n"
         "Usa tabla Markdown cuando sea útil. Destaca similitudes, diferencias "
-        "y condiciones óptimas. Cita con [N].\n\n"
+        "y condiciones óptimas.\n{cite_rules}\n\n"
         "Fragmentos:\n{context}\n\nComparativa:"
     ),
     "Introducción preliminar": (
         "Eres un científico redactando la introducción de un artículo sobre "
         "{focus}. Basándote ÚNICAMENTE en los fragmentos numerados, escribe "
         "3-4 párrafos: contexto del problema, estado del arte, brecha de "
-        "conocimiento, objetivo implícito. Estilo académico, citas con [N].\n\n"
+        "conocimiento, objetivo implícito. Estilo académico.\n{cite_rules}\n\n"
         "Fragmentos:\n{context}\n\nIntroducción:"
     ),
 }
@@ -131,6 +136,12 @@ def _load_bm25(project: str, phase: str, mtime: float):
             if line:
                 texts.append(json.loads(line).get("text", ""))
     return build_bm25(texts)
+
+
+@st.cache_data(show_spinner=False)
+def _load_papers_meta(project: str, mtime: float):
+    """Índice {paper_id: record} de papers_metadata.jsonl (clave: project+mtime)."""
+    return load_papers_metadata(project, CATEGORIAS_DIR)
 
 
 @st.cache_resource(show_spinner=False)
@@ -322,16 +333,23 @@ if not results:
     st.stop()
 
 # ── Construcción del contexto ─────────────────────────────────────────────────
+_meta_jsonl = CATEGORIAS_DIR / project / "metadata" / "papers_metadata.jsonl"
+_meta_mtime = _meta_jsonl.stat().st_mtime if _meta_jsonl.exists() else 0.0
+papers_meta = _load_papers_meta(project, _meta_mtime)
+
 context_parts = []
 for i, (_, _, m) in enumerate(results, 1):
     snippet  = m.get("text", "").strip()
     paper_id = m.get("paper_id", "?")
     section  = m.get("section", "?")
-    context_parts.append(f"[{i}] ({paper_id}, {section})\n{snippet}")
+    cite     = citation_key(paper_id, papers_meta)
+    context_parts.append(f"[{i}] {cite} — {paper_id}, {section}\n{snippet}")
 context = "\n\n---\n\n".join(context_parts)
 
 prompt_template = _PROMPTS[prompt_type]
-prompt = prompt_template.format(focus=focus, context=context)
+prompt = prompt_template.format(
+    focus=focus, context=context, cite_rules=CITATION_INSTRUCTIONS,
+)
 
 # ── Streaming ─────────────────────────────────────────────────────────────────
 st.subheader(f"📝 {prompt_type}")
