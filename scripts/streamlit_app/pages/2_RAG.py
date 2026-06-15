@@ -47,7 +47,7 @@ from app_utils import (
 from utils.export_refs import build_papers_zip
 from utils.constants import CANONICAL_SECTIONS, year_from_paper_id
 from utils.citations import (
-    load_papers_metadata, citation_key, CITATION_INSTRUCTIONS,
+    load_papers_metadata, build_cite_map, apply_citations, CITE_PROMPT_RULES,
 )
 from utils.retrieval import (dense_rank, bm25_rank, rrf_fuse,
                              passes_filters, pool_size)
@@ -423,13 +423,12 @@ if do_synth and synth_model:
     context_parts = []
     for i, (_, _, m) in enumerate(results, start=1):
         snippet  = m.get("text", "").strip()
-        paper_id = m.get("paper_id", "?")
         section  = m.get("section", "?")
-        cite     = citation_key(paper_id, papers_meta)
-        context_parts.append(
-            f"[{i}] {cite} — {paper_id}, sección: {section}\n{snippet}"
-        )
+        context_parts.append(f"[{i}] sección: {section}\n{snippet}")
     context = "\n\n---\n\n".join(context_parts)
+
+    # Mapa [N] -> (Apellido, Año; DOI) para el post-proceso de la respuesta.
+    cite_map = build_cite_map(results, papers_meta)
 
     prompt = f"""Eres un asistente científico. Responde a la pregunta basándote ÚNICAMENTE en los fragmentos numerados que se proporcionan a continuación.
 
@@ -437,12 +436,14 @@ Reglas:
 - Si los fragmentos no contienen información suficiente para responder, dilo claramente.
 - No inventes datos. No uses conocimiento externo a los fragmentos.
 - Responde en el mismo idioma que la pregunta.
-{CITATION_INSTRUCTIONS}
+{CITE_PROMPT_RULES}
 
 Fragmentos:
 {context}
 
 Pregunta: {query}
+
+Recuerda: cita con [N] junto a cada dato; sin sección de Referencias.
 
 Respuesta:"""
 
@@ -490,28 +491,36 @@ Respuesta:"""
                 usage_capture["input_tokens"]  = chunk.usage.prompt_tokens
                 usage_capture["output_tokens"] = chunk.usage.completion_tokens
 
+    # Pintamos manualmente (no st.write_stream) para sustituir [N] por las
+    # claves de cita una vez completada la generación.
+    out_box = st.empty()
+    _raw_chunks = []
+
+    def _render(gen):
+        for piece in gen:
+            _raw_chunks.append(piece)
+            out_box.markdown("".join(_raw_chunks))
+
     answer_md = ""
     try:
         if provider == "Ollama (local)":
-            answer_md = st.write_stream(stream_ollama())
-            st.session_state["_last_answer_md"] = answer_md
-            st.session_state["_last_query"]     = query
-            st.session_state["_last_model"]     = synth_model
+            _render(stream_ollama())
         elif provider == "Anthropic (Claude)":
-            answer_md = st.write_stream(stream_anthropic())
-            st.session_state["_last_answer_md"] = answer_md
-            st.session_state["_last_query"]     = query
-            st.session_state["_last_model"]     = synth_model
+            _render(stream_anthropic())
         elif provider == "OpenAI (GPT)":
-            answer_md = st.write_stream(stream_openai())
-            st.session_state["_last_answer_md"] = answer_md
-            st.session_state["_last_query"]     = query
-            st.session_state["_last_model"]     = synth_model
+            _render(stream_openai())
     except Exception as e:
         st.error(f"Error al generar respuesta con {provider}: {e}")
         with st.expander("Prompt enviado (debug)"):
             st.code(prompt, language="text")
         st.stop()
+
+    raw_md    = "".join(_raw_chunks)
+    answer_md = apply_citations(raw_md, cite_map)
+    out_box.markdown(answer_md)
+    st.session_state["_last_answer_md"] = answer_md
+    st.session_state["_last_query"]     = query
+    st.session_state["_last_model"]     = synth_model
 
     # Coste real y registro
     in_tk  = usage_capture["input_tokens"]

@@ -21,7 +21,7 @@ for d in (str(STREAMLIT_APP_DIR), str(SCRIPTS_DIR)):
 from utils.export_refs import build_papers_zip, load_papers, to_bibtex
 from utils.constants import CANONICAL_SECTIONS, year_from_paper_id
 from utils.citations import (
-    load_papers_metadata, citation_key, CITATION_INSTRUCTIONS,
+    load_papers_metadata, build_cite_map, apply_citations, CITE_PROMPT_RULES,
 )
 from utils.retrieval import (dense_rank, bm25_rank, rrf_fuse,
                              passes_filters, pool_size)
@@ -60,6 +60,12 @@ if not nas_ok or not ollama_ok:
 st.divider()
 
 # ── Prompts especializados ────────────────────────────────────────────────────
+# Recordatorio corto, cerca del punto de generación, para reforzar el
+# cumplimiento de [N] en modelos pequeños.
+_CITE_REMINDER = (
+    "Recuerda: cita con [N] junto a cada dato; sin sección de Referencias."
+)
+
 _PROMPTS = {
     "Estado del arte": (
         "Eres un experto científico. Basándote ÚNICAMENTE en los fragmentos "
@@ -67,16 +73,16 @@ _PROMPTS = {
         "Estructura: (1) Contexto y relevancia, (2) Principales enfoques y "
         "tecnologías, (3) Resultados destacados, (4) Tendencias recientes.\n"
         "{cite_rules}\n\n"
-        "Fragmentos:\n{context}\n\nSíntesis:"
+        "Fragmentos:\n{context}\n\n{cite_reminder}\n\nSíntesis:"
     ),
     "Artículos clave (tabla Markdown)": (
         "Basándote en los fragmentos numerados, genera una tabla Markdown "
         "con los artículos más relevantes sobre: {focus}.\n"
         "Columnas: | Cita | Año | Metodología | Resultados principales |\n"
         "Incluye al menos los fragmentos más informativos.\n"
-        "En la columna Cita usa EXACTAMENTE la clave de cita (Apellido, Año; DOI) "
-        "que precede a cada fragmento; no inventes autores, años ni DOIs.\n\n"
-        "Fragmentos:\n{context}\n\nTabla:"
+        "En la columna Cita pon la etiqueta [N] del fragmento correspondiente.\n"
+        "{cite_rules}\n\n"
+        "Fragmentos:\n{context}\n\n{cite_reminder}\n\nTabla:"
     ),
     "Lagunas de conocimiento": (
         "Basándote en los fragmentos numerados, identifica lagunas de "
@@ -84,21 +90,21 @@ _PROMPTS = {
         "Estructura: (1) Aspectos no estudiados, (2) Contradicciones entre "
         "estudios, (3) Limitaciones metodológicas, (4) Preguntas abiertas.\n"
         "{cite_rules}\n\n"
-        "Fragmentos:\n{context}\n\nAnálisis:"
+        "Fragmentos:\n{context}\n\n{cite_reminder}\n\nAnálisis:"
     ),
     "Comparativa de mecanismos": (
         "Basándote en los fragmentos numerados, compara mecanismos, procesos "
         "o estrategias sobre: {focus}.\n"
         "Usa tabla Markdown cuando sea útil. Destaca similitudes, diferencias "
         "y condiciones óptimas.\n{cite_rules}\n\n"
-        "Fragmentos:\n{context}\n\nComparativa:"
+        "Fragmentos:\n{context}\n\n{cite_reminder}\n\nComparativa:"
     ),
     "Introducción preliminar": (
         "Eres un científico redactando la introducción de un artículo sobre "
         "{focus}. Basándote ÚNICAMENTE en los fragmentos numerados, escribe "
         "3-4 párrafos: contexto del problema, estado del arte, brecha de "
         "conocimiento, objetivo implícito. Estilo académico.\n{cite_rules}\n\n"
-        "Fragmentos:\n{context}\n\nIntroducción:"
+        "Fragmentos:\n{context}\n\n{cite_reminder}\n\nIntroducción:"
     ),
 }
 
@@ -340,15 +346,17 @@ papers_meta = _load_papers_meta(project, _meta_mtime)
 context_parts = []
 for i, (_, _, m) in enumerate(results, 1):
     snippet  = m.get("text", "").strip()
-    paper_id = m.get("paper_id", "?")
     section  = m.get("section", "?")
-    cite     = citation_key(paper_id, papers_meta)
-    context_parts.append(f"[{i}] {cite} — {paper_id}, {section}\n{snippet}")
+    context_parts.append(f"[{i}] {section}\n{snippet}")
 context = "\n\n---\n\n".join(context_parts)
+
+# Mapa [N] -> (Apellido, Año; DOI) para el post-proceso de la respuesta.
+cite_map = build_cite_map(results, papers_meta)
 
 prompt_template = _PROMPTS[prompt_type]
 prompt = prompt_template.format(
-    focus=focus, context=context, cite_rules=CITATION_INSTRUCTIONS,
+    focus=focus, context=context,
+    cite_rules=CITE_PROMPT_RULES, cite_reminder=_CITE_REMINDER,
 )
 
 # ── Streaming ─────────────────────────────────────────────────────────────────
@@ -394,16 +402,32 @@ def _stream_openai():
             usage_capture["output_tokens"] = chunk.usage.completion_tokens
 
 
+# Pintamos manualmente (no st.write_stream) para poder sustituir [N] por las
+# claves de cita una vez completada la generación.
+out_box = st.empty()
+_raw_chunks = []
+
+
+def _render(gen):
+    for piece in gen:
+        _raw_chunks.append(piece)
+        out_box.markdown("".join(_raw_chunks))
+
+
 try:
     if provider == "Ollama (local)":
-        answer_md = st.write_stream(_stream_ollama())
+        _render(_stream_ollama())
     elif provider == "Anthropic (Claude)":
-        answer_md = st.write_stream(_stream_anthropic())
+        _render(_stream_anthropic())
     else:
-        answer_md = st.write_stream(_stream_openai())
+        _render(_stream_openai())
 except Exception as e:
     st.error(f"Error al generar respuesta: {e}")
     st.stop()
+
+raw_md    = "".join(_raw_chunks)
+answer_md = apply_citations(raw_md, cite_map)
+out_box.markdown(answer_md)
 
 # Persistir para el botón de guardar
 st.session_state["_rev_answer_md"]   = answer_md

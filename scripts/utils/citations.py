@@ -110,16 +110,65 @@ def citation_key(paper_id: str, papers_meta: Dict[str, dict]) -> str:
     return f"({surname}, {year_str})"
 
 
-# Reglas de citado para insertar en los prompts de síntesis. SIN llaves { } para
-# no interferir con str.format().
-CITATION_INSTRUCTIONS = (
-    "Reglas de citado:\n"
-    "- Cita usando EXACTAMENTE la clave de cita que precede a cada fragmento, "
-    "con el formato (Apellido, Año; DOI). No uses [N] ni el paper_id como cita.\n"
-    "- Coloca cada cita junto al dato o afirmación concreta que respalda; no "
-    "agrupes todas las citas al final del párrafo.\n"
-    "- Si una frase combina varias fuentes, incluye todas sus claves dentro del "
-    "mismo paréntesis separadas por ';'.\n"
-    "- No inventes autores, años ni DOIs: usa solo los que aparecen en las "
-    "claves de cita del contexto."
+# Reglas de citado para insertar en los prompts de síntesis. El LLM cita con la
+# etiqueta [N] (fácil de cumplir); nosotros sustituimos [N] por la clave real en
+# post-proceso (apply_citations). SIN llaves { } para no interferir con .format().
+CITE_PROMPT_RULES = (
+    "Cita SIEMPRE con la etiqueta [N] del fragmento, colocada justo después "
+    "del dato o afirmación que respalda (no agrupes las citas al final del "
+    "párrafo). Si una frase combina varias fuentes, ponlas juntas: [1][3]. "
+    "Usa ÚNICAMENTE las etiquetas [N] que aparecen en los fragmentos. "
+    "NO inventes autores, años, DOIs, revistas, volúmenes ni páginas. "
+    "NO añadas una sección de 'Referencias', 'Bibliografía' o 'References' "
+    "al final: las referencias se generan automáticamente."
 )
+
+
+def build_cite_map(results, papers_meta: Dict[str, dict]) -> Dict[int, str]:
+    """results: lista de tuplas (..., m) en el MISMO orden que el contexto [N].
+
+    Devuelve {N: '(Apellido, Año; DOI)'} con N empezando en 1.
+    """
+    cmap: Dict[int, str] = {}
+    for i, item in enumerate(results, 1):
+        m = item[-1]  # el dict de metadata es el último elemento de la tupla
+        cmap[i] = citation_key(m.get("paper_id", ""), papers_meta)
+    return cmap
+
+
+_REFS_HEADING = re.compile(
+    r"\n+\s*(#+\s*)?(referencias|bibliograf[íi]a|references)\s*:?\s*\n.*$",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def strip_reference_section(text: str) -> str:
+    """Elimina un bloque final de Referencias/Bibliografía/References que el
+    modelo haya añadido pese a la instrucción."""
+    return _REFS_HEADING.sub("", text).rstrip()
+
+
+# Una etiqueta [N] y, opcionalmente, las contiguas separadas por espacios:
+# '[1]', '[1][3]', '[1] [3]'. No consume el espacio que sigue al último
+# corchete (para no pegar la cita a la palabra siguiente).
+_CITE_GROUP = re.compile(r"\[\d+\](?:\s*\[\d+\])*")
+
+
+def apply_citations(text: str, cite_map: Dict[int, str]) -> str:
+    """Sustituye cada [N] por su clave (Apellido, Año; DOI). [N] desconocido
+    se deja intacto. Colapsa secuencias pegadas: '[1][3]' -> '(...; ...)'."""
+    text = strip_reference_section(text)
+
+    def _repl_group(mobj):
+        nums = re.findall(r"\[(\d+)\]", mobj.group(0))
+        keys = []
+        for n in nums:
+            k = cite_map.get(int(n))
+            if k:
+                # quita los paréntesis externos para fusionar varios en uno
+                keys.append(k.strip().lstrip("(").rstrip(")"))
+        if not keys:
+            return mobj.group(0)
+        return "(" + "; ".join(keys) + ")"
+
+    return _CITE_GROUP.sub(_repl_group, text)
