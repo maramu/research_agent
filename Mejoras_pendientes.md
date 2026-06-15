@@ -227,3 +227,17 @@ largo Scopus en descarga)~~ ✅ CUBIERTO 2026-06-13 (renombrado por DOI antes de
 (ausencia de papers_metadata.jsonl, clave MVP libros), 8_query_rag.py/2_RAG/7_Revision (cableado
 passes_filters). Más: detect_affected_categories con _norm ✅; filtro de activas en run_scopus para
 categorías explícitas; sort_keys=True en promote_adhoc_to_category.
+
+### 46. Borrar modelos Ollama obsoletos en pciq22 — BAJA prioridad
+
+Tras validar `qwen2.5:14b-instruct` como único modelo de síntesis local
+(formato de citas correcto + síntesis en español sin alucinar), retirados del
+selector `gemma3:4b`, `qwen3:8b` y `qwen3:14b`. Siguen ocupando ~18 GB en disco.
+
+Cuando se confirme en uso real que `qwen2.5:14b-instruct` cubre todos los casos
+(unos días de uso), liberar espacio en pciq22:
+
+    ollama rm gemma3:4b qwen3:8b qwen3:14b
+
+Ejecución pura de datos (no toca código). Reversible con `ollama pull` si hiciera
+falta. Actualizar entonces la lista de "Required Ollama models" en ESTADO.md.
