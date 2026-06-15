@@ -53,9 +53,10 @@ from pipeline import run_scopus  # noqa: E402
 
 WEEKLY_CATEGORIES: list[str] = [
     "biogas_upgrading_biomethanation",
+    "anoxic_biogas_biodesulfurization",
 ]
 
-SCOPUS_TIMEOUT = 2700  # 45 minutos — evita colgarse si 3a_download_pdfs.py no responde
+SCOPUS_TIMEOUT = 5400  # 90 minutos — evita colgarse si 3a_download_pdfs.py no responde
 
 # ---------------------------------------------------------------------------
 # Configuración SMTP (leída de .env)
