@@ -82,7 +82,7 @@ from utils.constants import OLLAMA_MODEL_EMBED, CANONICAL_CATEGORIES  # noqa: E4
 # Modelos disponibles por provider
 # ---------------------------------------------------------------------------
 
-OLLAMA_MODELS_LLM     = ["qwen3:14b", "qwen3:8b", "gemma3:4b"]
+OLLAMA_MODELS_LLM     = ["qwen3:14b", "qwen3:8b", "gemma3:4b", "qwen2.5:14b-instruct"]
 OLLAMA_EMBED_MODELS   = ["nomic-embed-text", "bge-m3", "snowflake-arctic-embed:l"]
 # OLLAMA_MODEL_EMBED imported from utils.constants
 
@@ -121,6 +121,7 @@ LLM_PRICING: Dict[str, Dict[str, float]] = {
     "qwen3:14b":         {"input": 0.0,   "output": 0.0},
     "qwen3:8b":          {"input": 0.0,   "output": 0.0},
     "gemma3:4b":         {"input": 0.0,   "output": 0.0},
+    "qwen2.5:14b-instruct": {"input": 0.0,   "output": 0.0},
 }
 
 
