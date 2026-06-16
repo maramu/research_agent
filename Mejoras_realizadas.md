@@ -3,6 +3,25 @@
 
 ---
 
+### 47. Adjuntar documentos efímeros a la consulta RAG ✓ (16/06/2026)
+
+Permite adjuntar PDF/txt/md o pegar texto junto a la consulta en `2_RAG.py`.
+El documento es efímero (no se indexa ni ingiere al corpus) pero citable con
+clave propia `(Etiqueta; adjunto)`.
+
+Implementación:
+- `utils/attachments.py`: extracción (`pymupdf`), troceado simple, embedding
+  al vuelo con bge-m3, búsqueda en memoria, fusión "híbrido sensato".
+- `utils/citations.py`: `attachment_citation_key()`, `build_cite_map` con
+  soporte de campo `_cite` en metadata de chunks de adjunto.
+- `2_RAG.py`: uploader + text_area + etiqueta de cita + cupo mínimo
+  configurable (default 3) + caché por hash en `st.session_state`.
+- Fusión: cupo mínimo garantizado del adjunto + resto por distancia (no
+  híbrido) o solo corpus (híbrido, escalas RRF vs L2 no comparables).
+- Nueva dependencia: `pymupdf` (instalada en venv `rag_papers` en pciq22).
+
+---
+
 ### ✅ Ingesta semanal: añadir anoxic_biogas_biodesulfurization + timeout 5400s (2026-06-15)
 
 - `scripts/run_weekly_scopus.py`: `WEEKLY_CATEGORIES` ahora incluye `"anoxic_biogas_biodesulfurization"` además de `"biogas_upgrading_biomethanation"`.

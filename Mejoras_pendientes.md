@@ -241,29 +241,3 @@ Cuando se confirme en uso real que `qwen2.5:14b-instruct` cubre todos los casos
 
 Ejecución pura de datos (no toca código). Reversible con `ollama pull` si hiciera
 falta. Actualizar entonces la lista de "Required Ollama models" en ESTADO.md.
-
-### 47. Adjuntar documentos efímeros a la consulta RAG — MEDIA prioridad
-
-Permite al usuario subir un PDF/txt/md (o pegar texto) junto a la consulta en
-`2_RAG.py`. El documento se usa SOLO en esa consulta (efímero, no se indexa ni
-ingiere al corpus) pero puede citarse con clave propia `(Etiqueta; adjunto)`.
-
-Diseño acordado:
-- Extracción con `pymupdf` (no GROBID; es efímero).
-- Troceado simple en memoria (no section-aware; sin TEI).
-- Embedding al vuelo con el MISMO cliente+modelo del índice (`bge-m3`), sin
-  normalizar, para que las distancias L2 sean comparables al fusionar.
-- Caché por hash del contenido en `st.session_state`: re-preguntar sobre el
-  mismo adjunto no re-embebe.
-- Fusión **"híbrido sensato"**: cupo mínimo garantizado de chunks del adjunto
-  (default 3, configurable) + resto por distancia con el corpus. En modo
-  híbrido (RRF) el resto sale solo del corpus (escalas RRF vs L2 no comparables).
-- Cita sintética: `attachment_citation_key()` en `utils/citations.py` devuelve
-  `(Etiqueta, Año; adjunto)`. `build_cite_map` ya maneja `_cite` en metadata
-  del chunk → `apply_citations` no cambia.
-- Nueva dependencia: `pymupdf` (instalar en venv `rag_papers` en pciq22).
-- Ficheros nuevos: `utils/attachments.py`, `tests/test_attachments.py`.
-- Ficheros modificados: `utils/citations.py`, `2_RAG.py`.
-
-El prompt de Claude Code completo está redactado y disponible en el historial
-de conversación del 16/06/2026.
