@@ -110,6 +110,32 @@ def citation_key(paper_id: str, papers_meta: Dict[str, dict]) -> str:
     return f"({surname}, {year_str})"
 
 
+def attachment_citation_key(filename: str | None, label: str | None) -> str:
+    """Clave de cita sintética para un documento adjunto efímero.
+
+    - Si ``label`` no está vacía -> ``(label; adjunto)``.
+    - Si ``filename`` casa con el patrón ``AAAA_apellido_...`` ->
+      ``(Apellido, Año; adjunto)``.
+    - Si ``filename`` tiene stem -> ``(stem; adjunto)``.
+    - En cualquier otro caso -> ``(adjunto)``.
+    """
+    label = (label or "").strip()
+    if label:
+        return f"({label}; adjunto)"
+
+    filename = filename or ""
+    surname = _surname_from_paper_id(filename)
+    if surname:
+        year = year_from_paper_id(filename)
+        year_str = str(year) if year else "s.f."
+        return f"({surname}, {year_str}; adjunto)"
+
+    stem = Path(filename).stem if filename else ""
+    if stem:
+        return f"({stem}; adjunto)"
+    return "(adjunto)"
+
+
 # Reglas de citado para insertar en los prompts de síntesis. El LLM cita con la
 # etiqueta [N] (fácil de cumplir); nosotros sustituimos [N] por la clave real en
 # post-proceso (apply_citations). SIN llaves { } para no interferir con .format().
@@ -127,12 +153,14 @@ CITE_PROMPT_RULES = (
 def build_cite_map(results, papers_meta: Dict[str, dict]) -> Dict[int, str]:
     """results: lista de tuplas (..., m) en el MISMO orden que el contexto [N].
 
-    Devuelve {N: '(Apellido, Año; DOI)'} con N empezando en 1.
+    Devuelve {N: '(Apellido, Año; DOI)'} con N empezando en 1. Si un chunk
+    trae su propia clave en ``m['_cite']`` (adjuntos efímeros), se usa esa.
     """
     cmap: Dict[int, str] = {}
     for i, item in enumerate(results, 1):
         m = item[-1]  # el dict de metadata es el último elemento de la tupla
-        cmap[i] = citation_key(m.get("paper_id", ""), papers_meta)
+        key = m.get("_cite") or citation_key(m.get("paper_id", ""), papers_meta)
+        cmap[i] = key
     return cmap
 
 

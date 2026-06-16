@@ -48,9 +48,14 @@ from utils.export_refs import build_papers_zip
 from utils.constants import CANONICAL_SECTIONS, year_from_paper_id
 from utils.citations import (
     load_papers_metadata, build_cite_map, apply_citations, CITE_PROMPT_RULES,
+    attachment_citation_key,
 )
 from utils.retrieval import (dense_rank, bm25_rank, rrf_fuse,
                              passes_filters, pool_size)
+from utils.attachments import (
+    extract_text, chunk_text, embed_texts, rank_attachment,
+    fuse_results, content_hash, make_attachment_metas,
+)
 
 st.set_page_config(page_title="RAG", page_icon="🔍", layout="wide")
 
@@ -59,6 +64,9 @@ if not check_password(_pwd_env):
     st.stop()
 
 st.title("🔍 Consultas RAG")
+
+if "attach_cache" not in st.session_state:
+    st.session_state["attach_cache"] = {}
 
 # ---------------------------------------------------------------------------
 # Pre-flight checks
@@ -222,6 +230,31 @@ with st.sidebar:
     )
 
     st.divider()
+    st.header("Adjunto efímero")
+    attach_file = st.file_uploader(
+        "Adjuntar documento (opcional)",
+        type=["pdf", "txt", "md"],
+        help="PDF/TXT/MD que se usará SOLO en esta consulta. No se guarda ni se indexa.",
+    )
+    attach_text = st.text_area(
+        "…o pega texto",
+        value="",
+        height=80,
+        help="Texto libre que también se usará solo en esta consulta.",
+    )
+    attach_label = st.text_input(
+        "Etiqueta de cita del adjunto (opcional)",
+        value="",
+        help="Aparecerá en la cita, p. ej. '(mi nota; adjunto)'.",
+    )
+    n_min_attach = st.number_input(
+        "Fragmentos del adjunto (cupo mínimo)",
+        min_value=0, max_value=8, value=3, step=1,
+    )
+    if attach_file or attach_text.strip():
+        st.caption("📎 El adjunto se usa solo en esta consulta y no se añade al corpus.")
+
+    st.divider()
     st.header("Síntesis LLM")
 
     do_synth = st.toggle("Sintetizar respuesta con LLM", value=True)
@@ -298,6 +331,9 @@ st.markdown(
     f"**Chunks**: {len(meta)} · **Modelo embed**: `{embed_model}` ({index.d} dims)"
 )
 
+if attach_file or attach_text.strip():
+    st.caption("📎 Documento/texto adjunto activo: se usará solo en esta consulta.")
+
 query = st.text_area(
     "Pregunta o consulta",
     value="",
@@ -363,6 +399,37 @@ if not go:
 
 _type_f = None if type_filter == "(todos)" else type_filter
 has_filter = bool(_type_f or paper_filter or sel_sections or ys or ye)
+attach_active = bool(attach_file or attach_text.strip())
+
+# --- Adjunto efímero: extracción + troceado + embedding (con caché por hash) ---
+attach_mat = None
+attach_metas = []
+if attach_active:
+    attach_cfg = {"target_chars": 1000, "overlap": 150, "model_embed": embed_model}
+    if attach_file:
+        source_bytes = attach_file.getvalue()
+        filename = attach_file.name
+    else:
+        source_bytes = attach_text.strip().encode("utf-8")
+        filename = None
+    h = content_hash(source_bytes, attach_cfg)
+    cached = st.session_state["attach_cache"].get(h)
+    if cached:
+        attach_mat = cached["mat"]
+        attach_metas = cached["metas"]
+    else:
+        raw_text = extract_text(source_bytes, filename) if attach_file else attach_text.strip()
+        chunks = chunk_text(raw_text, target_chars=attach_cfg["target_chars"], overlap=attach_cfg["overlap"])
+        with st.spinner("Generando embeddings del adjunto…"):
+            ollama_client = get_ollama_client()
+            attach_mat = embed_texts(ollama_client, chunks, embed_model)
+        attach_metas = make_attachment_metas(chunks, filename, attach_label)
+        st.session_state["attach_cache"][h] = {"mat": attach_mat, "metas": attach_metas}
+    # La etiqueta puede cambiar sin cambiar el contenido: actualizar la clave de cita.
+    current_cite = attachment_citation_key(filename or "", attach_label or "")
+    for m in attach_metas:
+        m["_cite"] = current_cite
+
 with st.spinner("Generando embedding y buscando…"):
     ollama_client = get_ollama_client()
     qv = embed_query(ollama_client, query, embed_model).reshape(1, -1)
@@ -373,18 +440,28 @@ with st.spinner("Generando embedding y buscando…"):
     else:
         ranked = [(i, dist_map[i]) for i in d_idx]
 
-results = []
-for idx, score in ranked:
-    if idx >= len(meta):
-        continue
-    m = meta[idx]
-    if not passes_filters(m, type_=_type_f, paper=paper_filter or None,
-                          sections=sel_sections or None,
-                          year_start=ys, year_end=ye):
-        continue
-    results.append((score, idx, m))
-    if len(results) >= k:
-        break
+    corpus_results = []
+    for idx, score in ranked:
+        if idx >= len(meta):
+            continue
+        m = meta[idx]
+        if not passes_filters(m, type_=_type_f, paper=paper_filter or None,
+                              sections=sel_sections or None,
+                              year_start=ys, year_end=ye):
+            continue
+        corpus_results.append((score, idx, m))
+        if len(corpus_results) >= k:
+            break
+
+    if attach_active and attach_mat is not None:
+        attach_scored = rank_attachment(qv, attach_mat)
+        results = fuse_results(
+            corpus_results, attach_scored, attach_metas,
+            k=k, n_min=n_min_attach,
+            hybrid=(use_hybrid and bm25 is not None),
+        )
+    else:
+        results = corpus_results
 
 if not results:
     if sel_sections:
@@ -398,7 +475,8 @@ if not results:
     st.stop()
 
 retrieved_papers = list(dict.fromkeys(
-    m.get("paper_id", "") for _, _, m in results if m.get("paper_id")
+    m.get("paper_id", "") for _, _, m in results
+    if m.get("paper_id") and m.get("paper_id") != "__attachment__"
 ))
 st.session_state["_last_retrieved_papers"] = retrieved_papers
 st.session_state["_last_project"]          = project
