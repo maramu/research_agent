@@ -113,6 +113,8 @@ Desde Streamlit: aceptar / rechazar / mover a categoría / borrar.
 
 ✅ Cuarentena REVERSIBLE para duplicados vía `10_Duplicados.py`/`quarantine_paper()` (2026-06-11) — detalle en Mejoras_realizadas.md.
 
+✅ **Restauración REAL desde la UI (2026-06-17):** `restore_from_quarantine()` en `9_cleanup_duplicates.py` + sección "♻️ Restaurar de cuarentena" en `10_Duplicados.py`. Cuarentenas nuevas incluyen `meta_lines` en el manifiesto → la metadata se reinerta automáticamente al restaurar (dedup por `file_key`, backup `.bak`). Manifiestos legacy sin `meta_lines` → warning + regeneración manual con `4_extract_metadata.py`. **Pendiente: validar round-trip `✓ meta` con paper de juguete.**
+
 Pendiente: extender la cuarentena al resto de casos dudosos (PDF sin texto, muy corto,
 sin DOI/título fiable, material suplementario) y el OCR del item 35.
 

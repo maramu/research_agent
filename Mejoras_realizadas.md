@@ -3,6 +3,16 @@
 
 ---
 
+### ✅ Restauración reversible desde la UI de cuarentena de duplicados (2026-06-17)
+
+- **`quarantine_paper()` ampliada:** captura las líneas JSONL retiradas de `papers_metadata.jsonl` en el manifiesto como `"meta_lines"`; el manifiesto se escribe si `moved or removed_lines` (antes solo si `moved`).
+- **Nueva `restore_from_quarantine(manifest_path, base)`** en `9_cleanup_duplicates.py`: mueve los ficheros de vuelta con `shutil.move` (nunca sobrescribe — warning si orig ya existe o target falta); reinserta `meta_lines` en `papers_metadata.jsonl` con dedup por `file_key` y backup `.bak`; warning si el manifiesto es legacy sin `meta_lines` → sugiere regenerar con `4_extract_metadata.py --project <cat>`.
+- **UI en `10_Duplicados.py`:** nueva sección "♻️ Restaurar de cuarentena" — selectbox de timestamp (orden desc), multiselect de manifiestos con flag `✓/✗ meta`, preview de lo que se restaurará, checkbox de confirmación, botón "Restaurar"; reutiliza el bloque de re-index vía `dup_affected`; warnings y resumen de éxito sobreviven al `st.rerun()`.
+- **VERIFICADO en pciq22 (2026-06-17):** ruta legacy (manifiesto del 13/06 sin `meta_lines`) → 7 ficheros restaurados + warning correcto (`"manifiesto antiguo sin meta_lines: regenera con 4_extract_metadata.py --project <cat>"`) + regeneración manual con `4_extract_metadata.py` + re-index OK. Captura de `meta_lines` activa para cuarentenas nuevas.
+- **PENDIENTE:** validar el round-trip de la ruta `✓ meta` (reinserción automática de la línea de metadata al restaurar) con un paper de juguete.
+
+---
+
 ### ✅ 41. Cuarentena de índices viejos all__bge-m3 (ejecutado 2026-06-16, documentado 2026-06-17)
 
 Fases `all__bge-m3` divergentes (sin `section_canonical`/`year` en sus chunks) movidas fuera de `categorias/` para que no compitan con el índice canónico. 6 categorías afectadas:
