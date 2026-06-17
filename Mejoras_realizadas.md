@@ -8,6 +8,7 @@
 - **sort_keys=True en `promote_adhoc_to_category`** — corregido a `sort_keys=False` en `scripts/pipeline.py` (línea 1253); keywords.yml ya no se reordena alfabéticamente en cada promoción, la categoría nueva se añade al final.
 - **Filtro de año descarta papers con `year=None` en silencio** — documentado como decisión aceptada. Función `passes_filters()` en `scripts/utils/retrieval.py` líneas 76-80: si `year` no está en metadata ni es derivable de `paper_id`, el chunk se excluye cuando hay filtro de año activo. Comportamiento correcto, no requiere cambio.
 - **`run_scopus` filtraba activas también con categorías explícitas** — corregido en `scripts/pipeline.py` (~línea 734): bloque `if not categories:` envuelve el filtro de `active_categories.yml`; una petición explícita (CLI/web) ya no puede ser descartada en silencio.
+- **`section_canonical` vs `CANONICAL_SECTIONS`: riesgo de drift** — verificado que no habían divergido (6 patrones + `"other"` + `"table"` de `build_chunk_records` = 8 etiquetas del constant). Blindado con `tests/test_canonical_sections.py` (7 tests, guard de cobertura + 6 ejemplos paramétricos).
 
 ---
 

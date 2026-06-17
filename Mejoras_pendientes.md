@@ -21,8 +21,8 @@
   ✅ RESUELTO 2026-06-17 — cambiado a `sort_keys=False` en `scripts/pipeline.py`; keywords.yml ya no se reordena en cada promoción.
 - **DECISIÓN DOCUMENTADA 2026-06-17 — Filtro de año descarta papers con `year=None` en silencio (`retrieval.py`):**
   `passes_filters()` (líneas 76-80) resuelve `year` desde metadata o `year_from_paper_id`; si sigue siendo `None` y hay filtro de año activo, el chunk no pasa. Comportamiento conocido y aceptado: cuando el usuario pide filtrar por año, excluir papers sin año es lo correcto. No es un bug.
-- `section_canonical`: `CANONICAL_SECTIONS` (constants) y `canonical_section()` (3_process) se
-  sincronizan a mano → riesgo de drift. Verificar.
+- ~~`section_canonical`: `CANONICAL_SECTIONS` (constants) y `canonical_section()` (3_process) se
+  sincronizan a mano → riesgo de drift.~~ ✅ VERIFICADO/RESUELTO 2026-06-17 — no habían divergido: 6 patrones en `_CANON_PATTERNS` + fallback `"other"` + `"table"` asignado en `build_chunk_records` = las 8 etiquetas de `CANONICAL_SECTIONS`. Blindado con `tests/test_canonical_sections.py`.
 
 ### Verificaciones pendientes (ficheros no vistos) → item 43.
 

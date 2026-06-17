@@ -369,6 +369,7 @@ def extract_tables_md(tei_xml: str) -> List[Dict]:
 
 # Keyword patterns for mapping a heading title to a canonical section name.
 # Order matters: first match wins.
+# Conjunto canónico de etiquetas: utils.constants.CANONICAL_SECTIONS (guard: tests/test_canonical_sections.py).
 _CANON_PATTERNS: List[Tuple[str, List[str]]] = [
     ("abstract",     ["abstract"]),
     ("introduction", ["introduction", "background", "motivation"]),
