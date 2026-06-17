@@ -732,16 +732,19 @@ def run_scopus(
                     target_cats.append(cat)
 
     # --- Filtro de categorías activas ---
-    try:
-        from utils.constants import CANONICAL_CATEGORIES as _ALL_CATS
-        _config_path = Path(__file__).parent.parent / "config" / "active_categories.yml"
-        if _config_path.exists():
-            import yaml as _yaml
-            _active = _yaml.safe_load(_config_path.read_text(encoding="utf-8")).get("active", _ALL_CATS)
-            target_cats = [c for c in target_cats if c in _active]
-            log.info("Categorías activas tras filtro: %s", target_cats)
-    except Exception as e:
-        log.warning("No se pudo leer active_categories.yml: %s", e)
+    # Solo se aplica en el flujo automático (sin categorías explícitas); una
+    # petición explícita del usuario tiene prioridad sobre active_categories.yml.
+    if not categories:
+        try:
+            from utils.constants import CANONICAL_CATEGORIES as _ALL_CATS
+            _config_path = Path(__file__).parent.parent / "config" / "active_categories.yml"
+            if _config_path.exists():
+                import yaml as _yaml
+                _active = _yaml.safe_load(_config_path.read_text(encoding="utf-8")).get("active", _ALL_CATS)
+                target_cats = [c for c in target_cats if c in _active]
+                log.info("Categorías activas tras filtro: %s", target_cats)
+        except Exception as e:
+            log.warning("No se pudo leer active_categories.yml: %s", e)
 
     # Actualizar doi_registry antes de descargar para evitar duplicados
     log.info("Actualizando registro de DOIs antes de descargar...")

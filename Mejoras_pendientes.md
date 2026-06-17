@@ -15,8 +15,8 @@
 - ~~`detect_affected_categories` compara stems por igualdad exacta sin `_norm` → riesgo de reproceso
   por puntuación/guiones.~~ ✅ RESUELTO 2026-06-13.
 - **Caso Kisand 2003 (`anoxic`):** DOI `10.1023/B:HYDR.0000008620.87704.3b` quedó reprocesado tras renombrado manual. Verificar que el DOI esté presente en su registro de `papers_metadata.jsonl`; si no, añadirlo vía `doi_manual.xlsx` desde el editor de Artículos.
-- `run_scopus` aplica el filtro de activas también a categorías pedidas explícitamente (descarte
-  silencioso). PENDIENTE/menor.
+- ~~`run_scopus` aplica el filtro de activas también a categorías pedidas explícitamente (descarte
+  silencioso).~~ ✅ RESUELTO 2026-06-17 — el bloque de filtro en `run_scopus` (`pipeline.py` ~línea 734) ahora se envuelve en `if not categories:`; una petición explícita (CLI/web) tiene prioridad sobre `active_categories.yml`.
 - ~~`promote_adhoc_to_category` usa `sort_keys=True` → reordena todo keywords.yml en cada promoción.~~
   ✅ RESUELTO 2026-06-17 — cambiado a `sort_keys=False` en `scripts/pipeline.py`; keywords.yml ya no se reordena en cada promoción.
 - **DECISIÓN DOCUMENTADA 2026-06-17 — Filtro de año descarta papers con `year=None` en silencio (`retrieval.py`):**
