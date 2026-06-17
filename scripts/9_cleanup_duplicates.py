@@ -532,10 +532,10 @@ def quarantine_paper(category: str, paper_id: str, base: Path, dest_root: Path) 
     # Quitar del papers_metadata.jsonl por file_key del stem (con backup .bak)
     meta_path = project_dir / "metadata" / "papers_metadata.jsonl"
     meta_updated = False
+    removed_lines: list[str] = []
     if meta_path.exists():
         target_key = file_key(paper_id)
         kept: list[str] = []
-        removed = 0
         with meta_path.open(encoding="utf-8") as f:
             for line in f:
                 s = line.strip()
@@ -547,24 +547,112 @@ def quarantine_paper(category: str, paper_id: str, base: Path, dest_root: Path) 
                     kept.append(line.rstrip("\n")); continue
                 stem, _ = infer_stem(data)
                 if stem and file_key(stem) == target_key:
-                    removed += 1
+                    removed_lines.append(line.rstrip("\n"))
                     continue
                 kept.append(line.rstrip("\n"))
-        if removed:
+        if removed_lines:
             shutil.copy(meta_path, meta_path.with_name(meta_path.name + ".bak"))
             meta_path.write_text("\n".join(kept) + ("\n" if kept else ""), encoding="utf-8")
             meta_updated = True
-            log.info("Metadata: %d línea(s) quitada(s) de %s", removed, meta_path)
+            log.info("Metadata: %d línea(s) quitada(s) de %s", len(removed_lines), meta_path)
 
-    # Manifiesto para poder restaurar
-    if moved:
+    # Manifiesto para poder restaurar (ficheros movidos + líneas de metadata retiradas)
+    if moved or removed_lines:
         dest_dir.mkdir(parents=True, exist_ok=True)
         manifest = dest_dir / f"_manifest_{paper_id}.json"
         manifest.write_text(json.dumps(
             {"category": category, "paper_id": paper_id,
-             "moved": [[str(o), str(t)] for o, t in moved]},
+             "moved": [[str(o), str(t)] for o, t in moved],
+             "meta_lines": removed_lines},
             indent=2, ensure_ascii=False), encoding="utf-8")
     return moved, meta_updated
+
+
+def restore_from_quarantine(
+    manifest_path: Path, base: Path
+) -> tuple[list[tuple[Path, Path]], bool, list[str]]:
+    """Restaura (reversible) un paper desde cuarentena a partir de su manifiesto.
+
+    Inverso de quarantine_paper(): devuelve los artefactos a su sitio y reañade
+    las líneas retiradas de papers_metadata.jsonl, sin sobrescribir nada existente.
+
+    Devuelve (restaurados, meta_updated, warnings):
+      - restaurados: lista de (orig, target) devueltos a su ubicación original.
+      - meta_updated: True si se reescribió papers_metadata.jsonl con líneas recuperadas.
+      - warnings: incidencias no fatales (ficheros no restaurables, manifiesto antiguo…).
+    """
+    warnings: list[str] = []
+    manifest_path = Path(manifest_path)
+    data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    category = data.get("category", "")
+    moved = data.get("moved", []) or []
+    meta_lines = data.get("meta_lines", []) or []
+
+    # ── Ficheros: mover de vuelta solo si el destino no existe ya ─────────────
+    restored: list[tuple[Path, Path]] = []
+    for entry in moved:
+        orig, target = Path(entry[0]), Path(entry[1])
+        if not target.exists():
+            warnings.append(f"falta en cuarentena, no se restaura: {target}")
+            continue
+        if orig.exists():
+            warnings.append(f"el destino ya existe, no se sobrescribe: {orig}")
+            continue
+        orig.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(target), str(orig))   # mismo volumen (SSD) → rename rápido
+        restored.append((orig, target))
+        log.info("Restaurado: %s -> %s", target, orig)
+
+    # ── Metadata: reañadir solo las líneas cuyo file_key no esté ya presente ──
+    meta_updated = False
+    if meta_lines:
+        meta_path = base / category / "metadata" / "papers_metadata.jsonl"
+        existing_keys: set[str] = set()
+        kept: list[str] = []
+        if meta_path.exists():
+            with meta_path.open(encoding="utf-8") as f:
+                for line in f:
+                    s = line.strip()
+                    if not s:
+                        continue
+                    kept.append(line.rstrip("\n"))
+                    try:
+                        rec = json.loads(s)
+                    except Exception:
+                        continue
+                    stem, _ = infer_stem(rec)
+                    if stem:
+                        existing_keys.add(file_key(stem))
+
+        to_add: list[str] = []
+        for raw in meta_lines:
+            try:
+                rec = json.loads(raw)
+            except Exception:
+                to_add.append(raw)        # no parseable: reañadir tal cual
+                continue
+            stem, _ = infer_stem(rec)
+            key = file_key(stem) if stem else None
+            if key is not None and key in existing_keys:
+                continue                  # ya presente, no duplicar
+            to_add.append(raw)
+            if key is not None:
+                existing_keys.add(key)
+
+        if to_add:
+            if meta_path.exists():
+                shutil.copy(meta_path, meta_path.with_name(meta_path.name + ".bak"))
+            else:
+                meta_path.parent.mkdir(parents=True, exist_ok=True)
+            meta_path.write_text("\n".join(kept + to_add) + "\n", encoding="utf-8")
+            meta_updated = True
+            log.info("Metadata: %d línea(s) restaurada(s) en %s", len(to_add), meta_path)
+    elif restored:
+        warnings.append(
+            "manifiesto antiguo sin meta_lines: regenera con "
+            f"4_extract_metadata.py --project {category}")
+
+    return restored, meta_updated, warnings
 
 
 def rewrite_metadata(decisions: list[DuplicateDecision]) -> None:

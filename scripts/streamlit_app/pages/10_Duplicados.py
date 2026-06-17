@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import datetime
 import importlib.util
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -280,3 +281,94 @@ if dup_affected:
             st.error(f"Error: {', '.join(ko)}")
         # Limpiar para no re-ejecutar accidentalmente
         st.session_state.pop("dup_affected", None)
+
+
+# ── Restaurar de cuarentena ──────────────────────────────────────────────────
+st.header("♻️ Restaurar de cuarentena")
+
+_DUP_QUARANTINE = CATEGORIAS_DIR.parent / "quarantine" / "duplicates"
+
+# Warnings y resumen de la última restauración (sobreviven al st.rerun)
+for _w in st.session_state.pop("restore_warnings", []):
+    st.warning(_w)
+_flash = st.session_state.pop("restore_flash", None)
+if _flash:
+    st.success(_flash)
+
+
+@st.cache_data(show_spinner="Escaneando cuarentena…")
+def scan_quarantine(nonce: int):
+    """{ts: [{manifest, category, paper_id, has_meta}, …]} ordenado por ts desc."""
+    out: dict[str, list[dict]] = {}
+    if not _DUP_QUARANTINE.exists():
+        return out
+    for mp in sorted(_DUP_QUARANTINE.glob("*/*/_manifest_*.json")):
+        rel = mp.relative_to(_DUP_QUARANTINE).parts
+        if len(rel) < 2:
+            continue
+        ts = rel[0]
+        try:
+            data = json.loads(mp.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        out.setdefault(ts, []).append({
+            "manifest": str(mp),
+            "category": data.get("category", rel[1]),
+            "paper_id": data.get("paper_id", ""),
+            "has_meta": bool(data.get("meta_lines")),
+        })
+    return dict(sorted(out.items(), key=lambda kv: kv[0], reverse=True))
+
+
+_quarantine = scan_quarantine(st.session_state.dup_nonce)
+
+if not _quarantine:
+    st.info("No hay nada en cuarentena de duplicados.")
+else:
+    ts_sel = st.selectbox(
+        "Lote de cuarentena (timestamp):", list(_quarantine.keys()), key="restore_ts")
+    entries = _quarantine.get(ts_sel, [])
+
+    def _entry_label(e: dict) -> str:
+        flag = "✓ meta" if e["has_meta"] else "✗ sin meta"
+        return f"{e['category']} · {e['paper_id']} · {flag}"
+
+    labels = [_entry_label(e) for e in entries]
+    chosen = st.multiselect("Manifiestos a restaurar:", options=labels, key="restore_sel")
+    selected_entries = [e for e, lab in zip(entries, labels) if lab in chosen]
+
+    if selected_entries:
+        st.warning(
+            f"Se restaurarán **{len(selected_entries)}** paper(s):\n\n"
+            + "\n".join(
+                f"- `{e['category']}` · {e['paper_id']}"
+                + ("" if e["has_meta"] else " (sin meta_lines)")
+                for e in selected_entries)
+        )
+    else:
+        st.info("Nada seleccionado para restaurar.")
+
+    restore_confirm = st.checkbox(
+        "Confirmo restaurar los seleccionados", key="restore_confirm")
+
+    if st.button(
+        "♻️ Restaurar",
+        type="primary",
+        disabled=(not selected_entries or not restore_confirm),
+    ):
+        affected: set[str] = set(st.session_state.get("dup_affected", []))
+        total_restored = 0
+        all_warnings: list[str] = []
+        for e in selected_entries:
+            restored, meta_updated, warns = cleanup.restore_from_quarantine(
+                Path(e["manifest"]), CATEGORIAS_DIR)
+            total_restored += len(restored)
+            all_warnings.extend(warns)
+            if restored or meta_updated:
+                affected.add(e["category"])
+        st.session_state["dup_affected"] = sorted(affected)
+        st.session_state["restore_warnings"] = all_warnings
+        st.session_state["restore_flash"] = (
+            f"Restaurados {total_restored} fichero(s) desde cuarentena.")
+        st.session_state.dup_nonce += 1          # invalida escaneos cacheados
+        st.rerun()
