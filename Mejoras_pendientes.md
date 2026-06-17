@@ -17,9 +17,10 @@
 - **Caso Kisand 2003 (`anoxic`):** DOI `10.1023/B:HYDR.0000008620.87704.3b` quedó reprocesado tras renombrado manual. Verificar que el DOI esté presente en su registro de `papers_metadata.jsonl`; si no, añadirlo vía `doi_manual.xlsx` desde el editor de Artículos.
 - `run_scopus` aplica el filtro de activas también a categorías pedidas explícitamente (descarte
   silencioso). PENDIENTE/menor.
-- `promote_adhoc_to_category` usa `sort_keys=True` → reordena todo keywords.yml en cada promoción.
-  PENDIENTE/menor.
-- Filtro de año descarta papers con year=None en silencio (retrieval.py). Documentar.
+- ~~`promote_adhoc_to_category` usa `sort_keys=True` → reordena todo keywords.yml en cada promoción.~~
+  ✅ RESUELTO 2026-06-17 — cambiado a `sort_keys=False` en `scripts/pipeline.py`; keywords.yml ya no se reordena en cada promoción.
+- **DECISIÓN DOCUMENTADA 2026-06-17 — Filtro de año descarta papers con `year=None` en silencio (`retrieval.py`):**
+  `passes_filters()` (líneas 76-80) resuelve `year` desde metadata o `year_from_paper_id`; si sigue siendo `None` y hay filtro de año activo, el chunk no pasa. Comportamiento conocido y aceptado: cuando el usuario pide filtrar por año, excluir papers sin año es lo correcto. No es un bug.
 - `section_canonical`: `CANONICAL_SECTIONS` (constants) y `canonical_section()` (3_process) se
   sincronizan a mano → riesgo de drift. Verificar.
 

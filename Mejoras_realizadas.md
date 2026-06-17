@@ -3,6 +3,13 @@
 
 ---
 
+### Cierre de hallazgos pendientes (2026-06-17)
+
+- **sort_keys=True en `promote_adhoc_to_category`** — corregido a `sort_keys=False` en `scripts/pipeline.py` (línea 1253); keywords.yml ya no se reordena alfabéticamente en cada promoción, la categoría nueva se añade al final.
+- **Filtro de año descarta papers con `year=None` en silencio** — documentado como decisión aceptada. Función `passes_filters()` en `scripts/utils/retrieval.py` líneas 76-80: si `year` no está en metadata ni es derivable de `paper_id`, el chunk se excluye cuando hay filtro de año activo. Comportamiento correcto, no requiere cambio.
+
+---
+
 ### 47. Adjuntar documentos efímeros a la consulta RAG ✓ (16/06/2026)
 
 Permite adjuntar PDF/txt/md o pegar texto junto a la consulta en `2_RAG.py`.

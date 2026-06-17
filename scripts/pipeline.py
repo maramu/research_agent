@@ -1250,7 +1250,7 @@ def promote_adhoc_to_category(
         existing_data[new_name] = clean_kw
         _KEYWORDS_PATH.write_text(
             yaml.safe_dump(existing_data, allow_unicode=True, default_flow_style=False,
-                           sort_keys=True),
+                           sort_keys=False),
             encoding="utf-8",
         )
         kw_added = len(clean_kw)
