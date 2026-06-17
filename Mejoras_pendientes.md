@@ -212,15 +212,12 @@ que no compita con el índice canónico al vuelo (items 32/34).
 de 3+ letras, incluido un sufijo válido (`10.1000/xyz` → `10.1000/`).~~
 Corregido con `(?<=\d)[a-zA-Z]{3,}$` — solo recorta alfa-texto pegado a un dígito. Test xfail eliminado.
 
-### 45. Utilidades de texto duplicadas y divergentes (pdf_utils ↔ 1_rename) — MEDIA
+### ~~45. Utilidades de texto duplicadas y divergentes (pdf_utils ↔ 1_rename)~~ — ✅ COMPLETADO 2026-06-17
 
-`strip_accents`, `slugify`, `shorten_title`, `sanitize_filename` y `STOPWORDS` están duplicadas en
-`utils/pdf_utils.py` y en `1_rename_papers_by_doi.py`, y han DIVERGIDO: `1_rename` lleva el fix de
-2026-05-28 (guion→_ en `shorten_title`; `\s+`→`_` en `sanitize_filename`), `pdf_utils` tiene la
-versión stale. El renombrado usa las correctas (locales de `1_rename`). Consolidar a fuente única en
-`pdf_utils` portando las versiones CORRECTAS y que `1_rename` importe de ahí. Antes: grep de
-consumidores de `pdf_utils.shorten_title`/`sanitize_filename`. Tras consolidar, apuntar
-`test_rename.py` a la ubicación única.
+Fuente única en `utils/pdf_utils.py`. Las dos divergencias portadas desde `1_rename` (versiones correctas):
+- `shorten_title`: `re.sub(r"[^a-z0-9\s\-]"…)` → `re.sub(r"[^a-z0-9\s]"…)` (quitar `\-`).
+- `sanitize_filename`: añadido `re.sub(r"\s+", "_", name)` tras el paso de chars inválidos.
+`1_rename_papers_by_doi.py` ahora importa `slugify`, `shorten_title`, `sanitize_filename` desde `pdf_utils`; defs locales y banner `# UTILIDADES DE TEXTO` eliminados. Sin cambio de comportamiento en el renombrador. `test_rename.py` repuntado a `utils.pdf_utils`. Suite: 99/99 passed.
 
 ### 43. Verificaciones pendientes de la revisión 2026-06-12 — seguimiento
 3_process_corpus.py (canonical_section vs CANONICAL_SECTIONS), ~~1_rename_papers_by_doi.py (nombre

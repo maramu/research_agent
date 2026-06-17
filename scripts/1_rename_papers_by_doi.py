@@ -69,7 +69,8 @@ import fitz  # PyMuPDF
 import requests
 
 sys.path.insert(0, str(Path(__file__).parent))
-from utils.pdf_utils import extract_doi_from_pdf, extract_doi_from_text, normalize_doi, normalize_stem
+from utils.pdf_utils import (extract_doi_from_pdf, extract_doi_from_text, normalize_doi,
+                             normalize_stem, slugify, shorten_title, sanitize_filename)
 
 # ============================================================
 # CONFIGURACIÓN POR DEFECTO
@@ -84,51 +85,6 @@ FAILED_SUBFOLDER_NAME = "fallidos"
 log = logging.getLogger(__name__)
 
 CROSSREF_API = "https://api.crossref.org/works/"
-STOPWORDS = {
-    "a", "an", "and", "as", "at", "by", "for", "from", "in", "into", "of",
-    "on", "or", "the", "to", "with", "without", "via", "using", "use",
-    "towards", "toward", "over", "under", "through", "during", "between",
-    "de", "del", "la", "el", "los", "las", "y", "en", "por", "para", "con",
-    "sin", "sobre", "un", "una", "unos", "unas"
-}
-
-
-# ============================================================
-# UTILIDADES DE TEXTO
-# ============================================================
-
-def strip_accents(text: str) -> str:
-    text = unicodedata.normalize("NFKD", text)
-    return "".join(c for c in text if not unicodedata.combining(c))
-
-
-def slugify(text: str) -> str:
-    text = strip_accents(text).lower()
-    text = text.replace("&", " and ")
-    text = re.sub(r"[''`´]", "", text)
-    text = re.sub(r"[^a-z0-9\s\-]", " ", text)
-    text = re.sub(r"[\s\-]+", "_", text.strip())
-    text = re.sub(r"_+", "_", text)
-    return text.strip("_")
-
-
-def shorten_title(title: str, max_words: int = 8) -> str:
-    clean = strip_accents(title).lower()
-    clean = re.sub(r"[^a-z0-9\s]", " ", clean)
-    words = [w for w in clean.split() if w and w not in STOPWORDS]
-    if not words:
-        words = clean.split()
-    return "_".join(words[:max_words]) if words else "untitled"
-
-
-def sanitize_filename(name: str, max_len: int = 180) -> str:
-    name = re.sub(r'[<>:"/\\|?*]', "_", name)
-    name = re.sub(r"\s+", "_", name)
-    name = re.sub(r"_+", "_", name).strip("._ ")
-    if len(name) > max_len:
-        stem = Path(name).stem[: max_len - 4]
-        name = f"{stem}.pdf"
-    return name
 
 
 def unique_path(path: Path) -> Path:

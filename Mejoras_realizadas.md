@@ -3,6 +3,16 @@
 
 ---
 
+### ✅ 45. Consolidar utilidades de texto — fuente única en pdf_utils (2026-06-17)
+
+`strip_accents`, `slugify`, `shorten_title`, `sanitize_filename` y `STOPWORDS` estaban duplicadas y divergentes entre `utils/pdf_utils.py` y `1_rename_papers_by_doi.py`. Consolidadas en `pdf_utils` portando las versiones correctas de `1_rename`:
+- `shorten_title`: eliminado `\-` del `re.sub` de limpieza (guiones ya se convierten a `_` vía split).
+- `sanitize_filename`: añadido `re.sub(r"\s+", "_", name)` tras el paso de chars inválidos.
+
+`1_rename` ahora importa los cinco símbolos desde `pdf_utils`; defs locales y banner eliminados. `unicodedata` conservado (uso independiente en línea 200). `test_rename.py` repuntado de importlib a `from utils.pdf_utils import …`. Sin cambio de comportamiento en el renombrador. Suite: 99/99 passed.
+
+---
+
 ### Cierre de hallazgos pendientes (2026-06-17)
 
 - **sort_keys=True en `promote_adhoc_to_category`** — corregido a `sort_keys=False` en `scripts/pipeline.py` (línea 1253); keywords.yml ya no se reordena alfabéticamente en cada promoción, la categoría nueva se añade al final.

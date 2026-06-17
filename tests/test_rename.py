@@ -1,21 +1,9 @@
 # -*- coding: utf-8 -*-
-"""Tests de regresión para shorten_title y sanitize_filename de 1_rename_papers_by_doi.py."""
-
-import importlib.util
-import sys
-from pathlib import Path
+"""Tests de regresión para shorten_title y sanitize_filename (fuente única: utils/pdf_utils.py)."""
 
 import pytest
 
-_MODULE_NAME = "rename_papers_by_doi_1"
-_MODULE_PATH = Path(__file__).resolve().parents[1] / "scripts" / "1_rename_papers_by_doi.py"
-_spec = importlib.util.spec_from_file_location(_MODULE_NAME, _MODULE_PATH)
-_rename = importlib.util.module_from_spec(_spec)
-sys.modules[_MODULE_NAME] = _rename
-_spec.loader.exec_module(_rename)
-
-shorten_title = _rename.shorten_title
-sanitize_filename = _rename.sanitize_filename
+from utils.pdf_utils import sanitize_filename, shorten_title
 
 
 class TestShortenTitle:
