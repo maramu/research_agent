@@ -3,6 +3,16 @@
 
 ---
 
+### ✅ 41. Cuarentena de índices viejos all__bge-m3 (ejecutado 2026-06-16, documentado 2026-06-17)
+
+Fases `all__bge-m3` divergentes (sin `section_canonical`/`year` en sus chunks) movidas fuera de `categorias/` para que no compitan con el índice canónico. 6 categorías afectadas:
+`microalgae`, `advanced_oxidation_processes`, `anoxic_biogas_biodesulfurization`,
+`biogas_upgrading_biomethanation`, `bioleaching_critical_materials`, `bioplastics_microplastics`.
+
+Ruta de cuarentena: `/Volumes/research/quarantine/old_indexes/20260616_011551/<cat>/all__bge-m3/` (~8,2 MB en total). Operación reversible — los índices se conservan, no se borran. Índice canónico vivo de cada categoría: `embeddings/all/index.faiss` (fase "all", items 32/34).
+
+---
+
 ### ✅ 45. Consolidar utilidades de texto — fuente única en pdf_utils (2026-06-17)
 
 `strip_accents`, `slugify`, `shorten_title`, `sanitize_filename` y `STOPWORDS` estaban duplicadas y divergentes entre `utils/pdf_utils.py` y `1_rename_papers_by_doi.py`. Consolidadas en `pdf_utils` portando las versiones correctas de `1_rename`:

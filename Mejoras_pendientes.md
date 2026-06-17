@@ -7,7 +7,7 @@
 3. Item 36 — idempotencia.
 4. ~~Item 44 — fix `_clean_doi` (recorta sufijos DOI de 3+ letras)~~ — ✅ **CERRADO 2026-06-13**. Verificado en pciq22: DOIs con `:` y barra final se normalizan; `10.1023/B:HYDR.0000008620.87704.3b` se preserva; 53 tests pasan.
 5. Item 45 — consolidar utilidades de texto duplicadas pdf_utils↔1_rename. **Nota 2026-06-13:** el trabajo de hoy sobre DOIs tocó ambos ficheros (`normalize_doi`, `normalize_stem`, lookups por stem/título en `doi_manual`). Revisar si introdujo nueva divergencia antes de consolidar.
-6. Item 41 — índice viejo all__bge-m3.
+6. ~~Item 41 — índice viejo all__bge-m3.~~ ✅ COMPLETADO 2026-06-16.
 7. Item 35 — OCR (si hay escaneados). Item 31 — MVP libros, tras el 37.
 - ~~Timeout job semanal: subir `SCOPUS_TIMEOUT` de 2700 a 5400 (45→90 min)~~ — ✅ **COMPLETADO 2026-06-15** — `run_weekly_scopus.py`: `SCOPUS_TIMEOUT = 5400`; `WEEKLY_CATEGORIES` ampliada con `anoxic_biogas_biodesulfurization`.
 
@@ -201,10 +201,16 @@ Formalizar como tests la verificación AST que ya se incluye en los prompts de C
   ligaduras Unicode, sufijos de DOI).
 - Opcional: hook pre-commit que corra `pytest` + parseo AST de los scripts tocados.
 
-### 41. Limpiar el índice viejo all__bge-m3 de anoxic — BAJA prioridad
+### ~~41. Limpiar el índice viejo all__bge-m3~~ — ✅ COMPLETADO (ejecutado 2026-06-16, documentado 2026-06-17)
 
-Fase divergente sin `section_canonical`/`year` en sus chunks. Borrar o re-indexar para
-que no compita con el índice canónico al vuelo (items 32/34).
+~~Fase divergente sin `section_canonical`/`year` en sus chunks. Borrar o re-indexar para
+que no compita con el índice canónico al vuelo (items 32/34).~~
+
+Fases `all__bge-m3` de 6 categorías movidas a cuarentena el 16/06/2026:
+`microalgae`, `advanced_oxidation_processes`, `anoxic_biogas_biodesulfurization`,
+`biogas_upgrading_biomethanation`, `bioleaching_critical_materials`, `bioplastics_microplastics`.
+Ruta: `quarantine/old_indexes/20260616_011551/<cat>/all__bge-m3/`. ~8,2 MB, reversibles.
+Índice canónico vivo de cada categoría: `embeddings/all/index.faiss` (items 32/34).
 
 ### ~~44. `_clean_doi` recorta sufijos DOI legítimos~~ — COMPLETADO 2026-06-13
 
