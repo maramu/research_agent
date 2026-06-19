@@ -798,7 +798,7 @@ def get_paper_status(category: str) -> list[dict]:
     chunks_dir    = cat_dir / "chunks"
     summaries_dir = cat_dir / "summaries"
     meta_dir      = cat_dir / "metadata"
-    embed_dir     = cat_dir / "embeddings" / category  # índice por defecto bge-m3
+    embed_dir     = cat_dir / "embeddings" / "all"
 
     # paper_ids ya indexados en FAISS
     indexed_papers_path = embed_dir / "indexed_papers.json"
