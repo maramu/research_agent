@@ -3,6 +3,18 @@
 
 ---
 
+### ✅ Log persistente de ingesta (completado 2026-06-20)
+
+**`scripts/streamlit_app/pages/1_Ingestar.py`:**
+
+- Constantes `_LOG_ACTIVE` y `_LOG_HIST_DIR` apuntando a `/Volumes/research/logs/`.
+- `_archive_log(label)` — mueve `ingesta_en_curso.log` a `ingesta_history/ingesta_<label>_<ts>.log` al terminar.
+- `execute_with_live_output` escribe cada línea de `on_output` al fichero con `buffering=1` (line-buffered).
+- `try/finally` garantiza `_log_file.close()` + `_archive_log()` aunque el navegador esté cerrado al terminar.
+- Expander "📋 Ingesta en curso o reciente" aparece automáticamente al reconectar si el fichero existe; botón "Descartar" para archivarlo manualmente.
+
+---
+
 ### ✅ Restauración reversible desde la UI de cuarentena de duplicados (2026-06-17)
 
 - **`quarantine_paper()` ampliada:** captura las líneas JSONL retiradas de `papers_metadata.jsonl` en el manifiesto como `"meta_lines"`; el manifiesto se escribe si `moved or removed_lines` (antes solo si `moved`).
