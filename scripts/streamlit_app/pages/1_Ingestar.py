@@ -138,9 +138,10 @@ def execute_with_live_output(fn, label: str, **kwargs):
         status_box.update(label=f"✗ {label} — error: {e}", state="error")
         st.exception(e)
         _log_file.write(f"# ERROR: {e}\n")
+        return None
+    finally:
         _log_file.close()
         _archive_log(label)
-        return None
 
     overall = result.get("status")
     returncode = result.get("returncode")
@@ -151,9 +152,6 @@ def execute_with_live_output(fn, label: str, **kwargs):
     else:
         status_box.update(label=f"✗ {label} falló", state="error")
 
-    _log_file.write(f"# FIN: {overall or returncode}\n")
-    _log_file.close()
-    _archive_log(label)
     return result
 
 
