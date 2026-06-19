@@ -16,6 +16,7 @@ de Streamlit en tiempo real.
 from __future__ import annotations
 
 import re
+import shutil
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -30,12 +31,20 @@ if str(STREAMLIT_APP_DIR) not in sys.path:
 from utils.pdf_utils import normalize_stem as _norm
 from app_utils import (
     CANONICAL_CATEGORIES, CATEGORIAS_DIR, CONFIG_DIR, INBOX_DIR,
+    NAS_ROOT,
     PIPELINE_AVAILABLE, PIPELINE_IMPORT_ERROR,
     check_grobid, check_nas, check_ollama,
     get_category_stats,
     list_existing_categories,
     load_yaml,
 )
+
+# ---------------------------------------------------------------------------
+# Log persistente de ingesta
+# ---------------------------------------------------------------------------
+_LOG_ACTIVE   = NAS_ROOT / "logs" / "ingesta_en_curso.log"
+_LOG_HIST_DIR = NAS_ROOT / "logs" / "ingesta_history"
+_LOG_MAX_LINES = 2000
 
 st.set_page_config(page_title="Ingestar", page_icon="📥", layout="wide")
 from app_utils import check_password, is_public_app
@@ -90,19 +99,36 @@ st.divider()
 # Helper: lanzar un flujo capturando salida en directo
 # ---------------------------------------------------------------------------
 
+def _archive_log(label: str) -> None:
+    """Mueve ingesta_en_curso.log a ingesta_history/ al terminar."""
+    if not _LOG_ACTIVE.exists():
+        return
+    _LOG_HIST_DIR.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    slug = label.lower().replace(" ", "_")
+    dest = _LOG_HIST_DIR / f"ingesta_{slug}_{ts}.log"
+    shutil.copy(_LOG_ACTIVE, dest)
+    _LOG_ACTIVE.unlink()
+
+
 def execute_with_live_output(fn, label: str, **kwargs):
     """Ejecuta fn(**kwargs, on_output=...) y va volcando líneas a un placeholder.
 
     Devuelve el dict resultado de la función (o None si hubo excepción).
     """
     log_lines: list[str] = []
-    status_box  = st.status(f"Ejecutando {label}…", expanded=True)
-    output_box  = status_box.empty()
+    status_box = st.status(f"Ejecutando {label}…", expanded=True)
+    output_box = status_box.empty()
     MAX_LINES = 200
+
+    _LOG_ACTIVE.parent.mkdir(parents=True, exist_ok=True)
+    _log_file = _LOG_ACTIVE.open("w", encoding="utf-8", buffering=1)
+    _log_file.write(f"# {label} — {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
 
     def on_output(line: str) -> None:
         log_lines.append(line)
-        # Mostrar solo las últimas N líneas para no saturar
+        if len(log_lines) <= _LOG_MAX_LINES:
+            _log_file.write(line + "\n")
         visible = log_lines[-MAX_LINES:]
         output_box.code("\n".join(visible), language="text")
 
@@ -111,6 +137,9 @@ def execute_with_live_output(fn, label: str, **kwargs):
     except Exception as e:
         status_box.update(label=f"✗ {label} — error: {e}", state="error")
         st.exception(e)
+        _log_file.write(f"# ERROR: {e}\n")
+        _log_file.close()
+        _archive_log(label)
         return None
 
     overall = result.get("status")
@@ -122,6 +151,9 @@ def execute_with_live_output(fn, label: str, **kwargs):
     else:
         status_box.update(label=f"✗ {label} falló", state="error")
 
+    _log_file.write(f"# FIN: {overall or returncode}\n")
+    _log_file.close()
+    _archive_log(label)
     return result
 
 
@@ -190,6 +222,17 @@ if _pending_csv.exists():
             st.session_state["inbox_rows"] = list(_csv_restore.DictReader(_f))
     if _was_recovered:
         st.toast("✅ Estado de Inbox recuperado desde disco")
+
+# ---------------------------------------------------------------------------
+# Mostrar log de ingesta activa si existe (reconexión tras cerrar navegador)
+# ---------------------------------------------------------------------------
+if _LOG_ACTIVE.exists():
+    with st.expander("📋 Ingesta en curso o reciente — log recuperado", expanded=True):
+        _log_text = _LOG_ACTIVE.read_text(encoding="utf-8")
+        st.code(_log_text[-8000:], language="text")
+        if st.button("🗑️ Descartar log"):
+            _archive_log("manual")
+            st.rerun()
 
 # ---------------------------------------------------------------------------
 # Tabs por flujo
