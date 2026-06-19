@@ -3,6 +3,29 @@
 
 ---
 
+### ✅ run_eval.py — flujo de evaluación Hit@k / MRR (completado 2026-06-20)
+
+**`scripts/run_eval.py`** (nuevo, CLI):
+
+- Lee `metadatos/eval/golden_<categoria>.jsonl`, ejecuta retrieval puro reusando `utils/retrieval.py` (mismo flujo que `2_RAG.py`: `embed_query` → `dense_rank` [+ `bm25_rank` + `rrf_fuse` si `--hybrid`]), sin filtros ni síntesis LLM.
+- Calcula Hit@k y MRR por pregunta y agregado; exporta CSV a `metadatos/eval/results_<categoria>_<timestamp>.csv`.
+- Flags: `--category`, `--phase` (default `all`), `--k` (default 8), `--hybrid`.
+
+**Fix crítico de datos:** 3 `relevant_paper_ids` en `golden_anoxic_biogas_biodesulfurization.jsonl` tenían guion (`-`) en vez de guion bajo (`_`) — Claude Code los había "corregido" verificando contra nombres de fichero PDF en vez de contra el `paper_id` real indexado en FAISS (`embeddings/all/metadata.jsonl`, generado por `safe_slug()` en `3_process_corpus.py`, que usa siempre `_`). Revertido a `_` en los 3 IDs; verificado contra el índice real tras el fix.
+
+**Primeros resultados** (`anoxic_biogas_biodesulfurization`, k=8):
+
+| Modo    | Hit@8 | MRR   |
+|---------|-------|-------|
+| Denso   | 0.50  | 0.098 |
+| Híbrido | 0.25  | 0.062 |
+
+Denso supera a híbrido en esta categoría/golden set — contraintuitivo, a vigilar al añadir más categorías antes de sacar conclusiones generales.
+
+**Pendiente anotado:** integrar `run_eval.py` en Streamlit (botón + tabla de resultados) cuando haya más categorías con golden set — de momento queda como CLI por comodidad de desarrollo.
+
+---
+
 ### ✅ 37 (parcial). Golden Q&A set — anoxic_biogas_biodesulfurization (completado 2026-06-20)
 
 `/Volumes/research/metadatos/eval/golden_anoxic_biogas_biodesulfurization.jsonl` — primera categoría del golden eval set, validada manualmente por dominio experto:

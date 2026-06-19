@@ -186,6 +186,8 @@ cualquier cambio de chunking, embeddings, modelo o estrategia de retrieval.
 - Es la única forma objetiva de saber si los items 32/33/34 mejoran o empeoran.
 - Guardar en `metadatos/eval/golden_<categoria>.jsonl` + script `eval_rag.py`.
 - ✅ `anoxic_biogas_biodesulfurization` completado 2026-06-20 (4 preguntas, 16 paper_ids). Pendiente: resto de categorías.
+- ✅ `run_eval.py` creado y validado (2026-06-20) — CLI, Hit@k + MRR. Resultado inicial anoxic: Hit@8 denso 0.50, híbrido 0.25 (a vigilar).
+- Nuevo subitem pendiente: integrar `run_eval.py` en Streamlit (botón + tabla resultados) — prioridad baja, esperar a tener 2-3 categorías más con golden set antes de invertir en la UI.
 
 ### 38. Batch API de Anthropic para resúmenes — BAJA prioridad
 
