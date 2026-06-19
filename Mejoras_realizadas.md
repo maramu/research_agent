@@ -3,6 +3,20 @@
 
 ---
 
+### ✅ 36-A. Detalle de estado por paper en pestaña Pendientes (completado 2026-06-20)
+
+**`scripts/streamlit_app/app_utils.py`:**
+
+- Nueva función `get_paper_status(category)` — lee PDFs de `pdfs/`, cruza contra `tei/`, `md_clean/`, `chunks/`, `summaries/`, `metadata/papers_metadata.jsonl` e `embeddings/all/indexed_papers.json`. Devuelve solo papers con al menos un artefacto ausente.
+- Fix: ruta del índice FAISS corregida a `embeddings/all/` (el directorio real del índice bge-m3 por defecto).
+
+**`scripts/streamlit_app/pages/1_Ingestar.py` — pestaña Pendientes:**
+
+- Bloque "🔍 Detalle por paper" tras el `st.metric` de categorías incompletas.
+- Un expander por categoría incompleta con `st.dataframe` columnas: `paper_id / PDF / TEI / MD / Chunks / Resumen / Metadata / FAISS` (`✓`/`✗`). Solo muestra papers con al menos un artefacto ausente.
+
+---
+
 ### ✅ Log persistente de ingesta (completado 2026-06-20)
 
 **`scripts/streamlit_app/pages/1_Ingestar.py`:**

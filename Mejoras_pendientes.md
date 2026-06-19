@@ -161,7 +161,7 @@ GROBID no extrae nada de un PDF que es imagen → entra vacío al índice.
 - Idiomas: `eng` (corpus mayoritariamente en inglés).
 - Encaja con la carpeta de cuarentena (item 18): si tras OCR sigue vacío → cuarentena.
 
-### 36. Idempotencia y reanudación por documento — MEDIA prioridad
+### ~~36~~. ✅ (36-A completado 2026-06-20) Idempotencia y reanudación por documento — MEDIA prioridad
 
 Estado explícito por PDF (descargado → renombrado → extraído → resumido → indexado)
 para que un fallo a mitad no obligue a reprocesar todo ni deje entradas a medias.
@@ -170,6 +170,7 @@ para que un fallo a mitad no obligue a reprocesar todo ni deje entradas a medias
 - Complementa el indexado incremental de FAISS (item FAISS incremental, 2026-06-04)
   y el skip logic existente, dándole trazabilidad y reanudación explícita.
 - Útil tras timeouts del job semanal o caídas de VPN a mitad de ingesta.
+- 36-A completado 2026-06-20: visibilidad por paper en pestaña Pendientes (opción ligera, sin fichero persistente).
 
 ### 37. Set de evaluación del RAG (golden Q&A) — MEDIA prioridad (siguiente paso natural)
 
