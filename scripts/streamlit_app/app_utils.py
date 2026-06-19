@@ -777,3 +777,80 @@ def check_password(env_var: str = "PRIVATE_APP_PASSWORD") -> bool:
             st.error("Contraseña incorrecta.")
 
     return False
+
+
+def get_paper_status(category: str) -> list[dict]:
+    """
+    Devuelve una lista de dicts, uno por paper_id detectado en pdfs/,
+    con el estado de cada artefacto esperado.
+
+    Campos por fila:
+        paper_id, pdf, tei, md_clean, chunks, summary, metadata, embedded
+
+    Solo incluye papers con al menos un artefacto ausente (incompletos).
+    """
+    import json as _json
+
+    cat_dir = CATEGORIAS_DIR / category
+    pdfs_dir      = cat_dir / "pdfs"
+    tei_dir       = cat_dir / "tei"
+    md_dir        = cat_dir / "md_clean"
+    chunks_dir    = cat_dir / "chunks"
+    summaries_dir = cat_dir / "summaries"
+    meta_dir      = cat_dir / "metadata"
+    embed_dir     = cat_dir / "embeddings" / category  # índice por defecto bge-m3
+
+    # paper_ids ya indexados en FAISS
+    indexed_papers_path = embed_dir / "indexed_papers.json"
+    indexed_ids: set[str] = set()
+    if indexed_papers_path.exists():
+        try:
+            data = _json.loads(indexed_papers_path.read_text(encoding="utf-8"))
+            indexed_ids = set(data.get("paper_ids", []))
+        except Exception:
+            pass
+
+    # paper_ids con metadata
+    meta_ids: set[str] = set()
+    meta_path = meta_dir / "papers_metadata.jsonl"
+    if meta_path.exists():
+        try:
+            with meta_path.open(encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    rec = _json.loads(line)
+                    pid = rec.get("paper_id") or rec.get("stable_id")
+                    if pid:
+                        meta_ids.add(pid)
+        except Exception:
+            pass
+
+    if not pdfs_dir.exists():
+        return []
+
+    rows = []
+    for pdf in sorted(pdfs_dir.glob("*.pdf")):
+        try:
+            from utils.pdf_utils import normalize_stem
+            paper_id = normalize_stem(pdf.stem)
+        except Exception:
+            paper_id = pdf.stem
+
+        status = {
+            "paper_id": paper_id,
+            "pdf":      True,
+            "tei":      (tei_dir      / f"{paper_id}.tei.xml").exists(),
+            "md_clean": (md_dir       / f"{paper_id}.clean.md").exists(),
+            "chunks":   (chunks_dir   / f"{paper_id}.jsonl").exists(),
+            "summary":  (summaries_dir/ f"{paper_id}.summary.md").exists(),
+            "metadata": paper_id in meta_ids,
+            "embedded": paper_id in indexed_ids,
+        }
+
+        if not all(status[k] for k in ("tei", "md_clean", "chunks",
+                                        "summary", "metadata", "embedded")):
+            rows.append(status)
+
+    return rows

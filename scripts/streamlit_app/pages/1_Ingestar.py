@@ -527,6 +527,40 @@ with tab_pending:
         st.metric("Categorías incompletas", len(categories_to_resume))
         if not categories_to_resume:
             st.success("No hay brechas de procesado por paper.")
+
+        # ── Detalle por paper ─────────────────────────────────
+        if categories_to_resume:
+            st.markdown("##### 🔍 Detalle por paper")
+            from app_utils import get_paper_status
+
+            for cat in categories_to_resume:
+                paper_rows = get_paper_status(cat)
+                if not paper_rows:
+                    continue
+                with st.expander(f"{cat} — {len(paper_rows)} paper(s) incompleto(s)"):
+                    _detail_df = pd.DataFrame(paper_rows)
+                    for col in ("tei", "md_clean", "chunks", "summary",
+                                "metadata", "embedded"):
+                        _detail_df[col] = _detail_df[col].map(
+                            {True: "✓", False: "✗"}
+                        )
+                    st.dataframe(
+                        _detail_df,
+                        hide_index=True,
+                        use_container_width=True,
+                        column_config={
+                            "paper_id": st.column_config.TextColumn(
+                                "paper_id", width="large"
+                            ),
+                            "pdf":      st.column_config.TextColumn("PDF",      width="small"),
+                            "tei":      st.column_config.TextColumn("TEI",      width="small"),
+                            "md_clean": st.column_config.TextColumn("MD",       width="small"),
+                            "chunks":   st.column_config.TextColumn("Chunks",   width="small"),
+                            "summary":  st.column_config.TextColumn("Resumen",  width="small"),
+                            "metadata": st.column_config.TextColumn("Metadata", width="small"),
+                            "embedded": st.column_config.TextColumn("FAISS",    width="small"),
+                        },
+                    )
     else:
         st.info("No hay categorías con PDFs en el NAS.")
 
