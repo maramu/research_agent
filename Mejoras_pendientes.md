@@ -185,6 +185,7 @@ cualquier cambio de chunking, embeddings, modelo o estrategia de retrieval.
 - Métricas de recuperación (hit@k, MRR) y, opcionalmente, evaluación de la síntesis.
 - Es la única forma objetiva de saber si los items 32/33/34 mejoran o empeoran.
 - Guardar en `metadatos/eval/golden_<categoria>.jsonl` + script `eval_rag.py`.
+- ✅ `anoxic_biogas_biodesulfurization` completado 2026-06-20 (4 preguntas, 16 paper_ids). Pendiente: resto de categorías.
 
 ### 38. Batch API de Anthropic para resúmenes — BAJA prioridad
 

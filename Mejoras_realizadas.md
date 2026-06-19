@@ -3,6 +3,17 @@
 
 ---
 
+### ✅ 37 (parcial). Golden Q&A set — anoxic_biogas_biodesulfurization (completado 2026-06-20)
+
+`/Volumes/research/metadatos/eval/golden_anoxic_biogas_biodesulfurization.jsonl` — primera categoría del golden eval set, validada manualmente por dominio experto:
+
+- 4 preguntas: pH óptimo, ratio molar N/S → azufre elemental, especies bacterianas predominantes, fuentes de amonio nitrificadas.
+- Cada pregunta con `answer` de referencia y `relevant_paper_ids` (16 paper_ids en total, varios por pregunta).
+- 3 IDs requirieron corrección de normalización (guion vs guion bajo: `open-pore`, `pcr-dgge`, `start-up_long-term`) — los nombres de PDF con guion no siempre coinciden con el slug esperado; verificado contra el corpus real antes de cerrar el fichero.
+- Pendiente: resto de categorías (sugeridas: `biogas_upgrading_biomethanation` a continuación). Bloquea item 33 fase 2 (reranking) hasta tener cobertura suficiente.
+
+---
+
 ### ✅ 36-A. Detalle de estado por paper en pestaña Pendientes (completado 2026-06-20)
 
 **`scripts/streamlit_app/app_utils.py`:**
