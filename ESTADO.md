@@ -83,6 +83,8 @@ research_agent/
 │   ├── 6_make_packages.py
 │   ├── 7_make_master_index.py
 │   ├── 8_query_rag.py
+│   ├── run_eval.py                   ← evaluación Hit@k / MRR contra golden sets (item 37)
+│   ├── pool_candidates.py            ← pooling de candidatos → golden sets (item 37)
 │   ├── utils/
 │   │   ├── pdf_utils.py
 │   │   ├── constants.py              ← Constantes compartidas (OLLAMA_MODEL_EMBED, CANONICAL_CATEGORIES,
@@ -366,6 +368,7 @@ El backlog vivo y el orden de prioridad están en `Mejoras_pendientes.md`. El hi
 - `doi_manual.xlsx` en `/Volumes/research/metadatos/` acumula todos los DOIs procesados
 - Skip automático en todos los scripts: no reprocesa lo ya existente
 - FAISS para embeddings (no ChromaDB), manteniendo scripts originales
+- Convención de ficheros de eval en `metadatos/eval/`: `questions_<cat>.json` → `review_<cat>.md` → `golden_<cat>.jsonl` (+ `results_<cat>_<ts>.csv`)
 - Argumentos inconsistentes entre scripts: `--phase` (3_process, 3b_summarize) vs `--project` (4–8). El orquestador absorbe la diferencia.
 - `CANONICAL_CATEGORIES` y `OLLAMA_MODEL_EMBED` centralizadas en `utils/constants.py` — fuente de verdad única. `pipeline.py` importa `_CANONICAL_CATEGORIES` desde ahí con fallback inline (`except ImportError`); `app_utils.py` usa import fusionado. **Si se añade una categoría, solo actualizar `utils/constants.py`.**
 - `stable_id` en metadata: slug del DOI si existe, `paper_id` original si no. Campo estable independiente del nombre de fichero (item 16). Papers procesados antes del item 16 carecen de este campo — rellenar con página **6_Mantenimiento** → sección Backfill metadata.

@@ -3,6 +3,31 @@
 
 ---
 
+### ✅ pool_candidates.py — construcción de golden sets por pooling (2026-06-20)
+
+**`scripts/pool_candidates.py`** (nuevo, CLI con subcomandos `pool` y `build`). Reutiliza las mismas funciones de retrieval que `run_eval.py`/`2_RAG.py` (`embed_query`, `dense_rank`, `bm25_rank`, `rrf_fuse`, `pool_size`, `build_bm25`) → cero divergencia con producción.
+
+- `pool`: por pregunta de `questions_<cat>.json`, recupera candidatos (unión denso + híbrido, `--pool-k`) y escribe `review_<cat>.md` con checkboxes ordenados por `min(rank_denso, rank_híbrido)`.
+- `build`: lee las líneas `[x]` del review → `golden_<cat>.jsonl`. Valida cada `paper_id` contra `embeddings/<phase>/metadata.jsonl` y aborta si hay fantasmas (guard anti guion/underscore).
+- Flujo en `metadatos/eval/`: `questions_<cat>.json` (entrada) → `review_<cat>.md` (se marca) → `golden_<cat>.jsonl` (salida, la consume `run_eval.py`). Nunca renombrar uno sobre otro.
+
+---
+
+### ✅ 37 (parcial). Golden Q&A — biogas_upgrading_biomethanation (2026-06-20)
+
+2ª categoría, construida con `pool_candidates.py`. 6 preguntas: trickle-bed/biotrickling termófilo, transferencia de H2 (kLa) ex-situ, arqueas hidrogenotróficas termófilas, ratio H2:CO2, biometano→proteína (SCP), inhibidores.
+
+| Modo    | Hit@8 | MRR   |
+|---------|-------|-------|
+| Denso   | 1.000 | 0.889 |
+| Híbrido | 1.000 | 0.857 |
+
+- Híbrido neutro-a-negativo: arregla Q2 (kLa, pos3→pos1), rompe Q1 (trickle-bed, pos1→pos7).
+- Patrón en 2 categorías: híbrido ≤ denso (anoxic 0.50→0.25 Hit@8; biogas 0.889→0.857 MRR). BM25+RRF no ayuda de forma fiable → mantener OFF; revisar fusión antes del reranking (item 33 fase 2).
+- Nota metodológica: ground truth por pooling → Hit@8 absoluto optimista (MRR es el dato fino); denso-vs-híbrido sí es justo (pool de ambos modos). NO comparable en absoluto con anoxic (golden de autoría independiente).
+
+---
+
 ### ✅ run_eval.py — flujo de evaluación Hit@k / MRR (completado 2026-06-20)
 
 **`scripts/run_eval.py`** (nuevo, CLI):
