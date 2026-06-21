@@ -1,19 +1,6 @@
-cat > /Volumes/Disco/proyectos/research_agent/.gitignore << 'EOF'
-# Entorno Python
-venv/
-.venv/
-__pycache__/
-*.py[cod]
-
-# Variables de entorno
-config/.env
-*.env
-
-# Base de datos vectorial
-db/
-
 # Logs
 logs/
+*.log
 
 # macOS
 .DS_Store
@@ -22,9 +9,6 @@ logs/
 .vscode/
 .idea/
 *.swp
-EOFscripts/streamlit_app/streamlit.log
-scripts/streamlit_app/streamlit.log
-scripts/streamlit_app/*.log
 *.bak
 
 # Claude Code local settings (per-machine, no compartir)
