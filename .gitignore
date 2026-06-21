@@ -2,6 +2,13 @@
 logs/
 *.log
 
+# Python
+__pycache__/
+*.pyc
+
+# Secrets / entorno
+.env
+
 # macOS
 .DS_Store
 
