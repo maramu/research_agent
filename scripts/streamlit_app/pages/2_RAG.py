@@ -37,9 +37,11 @@ for d in (str(STREAMLIT_APP_DIR), str(SCRIPTS_DIR)):
 
 from app_utils import (
     ANTHROPIC_MODELS, OPENAI_MODELS, OLLAMA_MODELS_LLM, OLLAMA_MODEL_EMBED,
+    OPENROUTER_MODELS, OPENROUTER_API_KEY,
     OLLAMA_HOST, ANTHROPIC_API_KEY, OPENAI_API_KEY,
     CATEGORIAS_DIR, NAS_ROOT, LLM_PRICING,
     check_anthropic_api, check_nas, check_ollama, check_openai_api,
+    check_openrouter_api,
     embedding_phase_model, estimate_cost_pre_query, estimate_cost_usd,
     fmt_cost, get_monthly_usage, list_embedding_phases, list_existing_categories,
     record_rag_query, record_rag_query_full, check_password, is_public_app,
@@ -160,6 +162,19 @@ def get_openai_client():
     return OpenAI(api_key=OPENAI_API_KEY)
 
 
+@st.cache_resource(show_spinner=False)
+def get_openrouter_client():
+    from openai import OpenAI
+    return OpenAI(
+        base_url="https://openrouter.ai/api/v1",
+        api_key=OPENROUTER_API_KEY,
+        default_headers={
+            "HTTP-Referer": "https://github.com/maramu/research_agent",
+            "X-Title": "research_agent RAG",
+        },
+    )
+
+
 def embed_query(client, query: str, model: str) -> np.ndarray:
     resp = client.embeddings(model=model, prompt=query)
     return np.array(resp["embedding"], dtype="float32")
@@ -263,7 +278,7 @@ with st.sidebar:
         _provider_options = (
             ["Ollama (local)"]
             if is_public_app()
-            else ["Ollama (local)", "Anthropic (Claude)", "OpenAI (GPT)"]
+            else ["Ollama (local)", "Anthropic (Claude)", "OpenAI (GPT)", "OpenRouter"]
         )
         provider = st.selectbox("Provider", options=_provider_options, index=0)
 
@@ -276,13 +291,20 @@ with st.sidebar:
                 synth_model = None
             else:
                 synth_model = st.selectbox("Modelo", options=ANTHROPIC_MODELS, index=1)
-        else:  # OpenAI
+        elif provider == "OpenAI (GPT)":
             oai_ok, oai_msg = check_openai_api()
             if not oai_ok:
                 st.error(f"OpenAI: {oai_msg}")
                 synth_model = None
             else:
                 synth_model = st.selectbox("Modelo", options=OPENAI_MODELS, index=0)
+        else:  # OpenRouter
+            or_ok, or_msg = check_openrouter_api()
+            if not or_ok:
+                st.error(f"OpenRouter: {or_msg}")
+                synth_model = None
+            else:
+                synth_model = st.selectbox("Modelo", options=OPENROUTER_MODELS, index=0)
 
         max_output_tokens = st.slider(
             "Máx tokens respuesta", 256, 4096, 1024, step=256,
@@ -355,8 +377,10 @@ if do_synth and synth_model:
             f"~{fmt_cost(est_cost)} "
             f"({est_in_tk:,} input + ~{est_out_tk:,} output tokens, k={k})"
         )
+    elif provider == "OpenRouter":
+        st.info("💰 **Coste**: se calcula tras la consulta (OpenRouter devuelve el coste real)")
     else:
-        st.info(f"💰 **Coste**: gratis (Ollama local)")
+        st.info("💰 **Coste**: gratis (Ollama local)")
 
 go = st.button("🔍 Buscar", type="primary", disabled=not query.strip())
 
@@ -489,6 +513,7 @@ usage_capture = {
     "input_tokens": 0,
     "output_tokens": 0,
     "is_estimated": False,
+    "cost_usd_override": None,
 }
 
 if do_synth and synth_model:
@@ -569,6 +594,32 @@ Respuesta:"""
                 usage_capture["input_tokens"]  = chunk.usage.prompt_tokens
                 usage_capture["output_tokens"] = chunk.usage.completion_tokens
 
+    def stream_openrouter():
+        client = get_openrouter_client()
+        or_stream = client.chat.completions.create(
+            model=synth_model,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=max_output_tokens,
+            stream=True,
+            stream_options={"include_usage": True},
+            extra_body={"usage": {"include": True}},  # pide a OpenRouter el coste real
+        )
+        for chunk in or_stream:
+            if chunk.choices and len(chunk.choices) > 0:
+                delta = chunk.choices[0].delta
+                if delta and delta.content:
+                    yield delta.content
+            u = getattr(chunk, "usage", None)
+            if u:
+                usage_capture["input_tokens"]  = getattr(u, "prompt_tokens", 0) or 0
+                usage_capture["output_tokens"] = getattr(u, "completion_tokens", 0) or 0
+                _cost = getattr(u, "cost", None)
+                if _cost is None:
+                    _extra = getattr(u, "model_extra", None) or {}
+                    _cost = _extra.get("cost")
+                if _cost is not None:
+                    usage_capture["cost_usd_override"] = float(_cost)
+
     # Pintamos manualmente (no st.write_stream) para sustituir [N] por las
     # claves de cita una vez completada la generación.
     out_box = st.empty()
@@ -587,6 +638,8 @@ Respuesta:"""
             _render(stream_anthropic())
         elif provider == "OpenAI (GPT)":
             _render(stream_openai())
+        elif provider == "OpenRouter":
+            _render(stream_openrouter())
     except Exception as e:
         st.error(f"Error al generar respuesta con {provider}: {e}")
         with st.expander("Prompt enviado (debug)"):
@@ -603,7 +656,8 @@ Respuesta:"""
     # Coste real y registro
     in_tk  = usage_capture["input_tokens"]
     out_tk = usage_capture["output_tokens"]
-    cost   = estimate_cost_usd(synth_model, in_tk, out_tk)
+    _override = usage_capture.get("cost_usd_override")
+    cost = _override if _override is not None else estimate_cost_usd(synth_model, in_tk, out_tk)
 
     cost_label = "Coste estimado" if usage_capture["is_estimated"] else "Coste real"
     st.caption(

@@ -3,6 +3,17 @@
 
 ---
 
+### ✅ OpenRouter como provider de síntesis en RAG (2026-06-21)
+- Cuarto provider en `2_RAG.py` (solo app privada): deepseek-v4-flash/pro, kimi-k2.6, glm-5.2.
+- OpenAI-compatible: `get_openrouter_client()` = SDK `openai` con base_url de OpenRouter +
+  `OPENROUTER_API_KEY`. `check_openrouter_api()` valida key vía /credits.
+- Coste REAL leído de la respuesta (`extra_body={"usage":{"include":True}}`), con fallback a
+  `usage.model_extra["cost"]`; override sobre `estimate_cost_usd`. Sin precios estáticos en
+  `LLM_PRICING` para estos modelos. Pre-estimado muestra "se calcula tras la consulta".
+- `OPENROUTER_API_KEY` se añade a mano en `config/.env` (no va a git) en casa y en pciq22.
+
+---
+
 ### ✅ Ingesta semanal: +bioplastics_microplastics + filtro de año rodante (2026-06-21)
 - `scripts/run_weekly_scopus.py`: `WEEKLY_CATEGORIES` añade `"bioplastics_microplastics"`
   (3 categorías ahora).

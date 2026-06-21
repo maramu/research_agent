@@ -71,6 +71,7 @@ GROBID_URL  = os.getenv("GROBID_URL",  "http://pciq22.uca.es:8070")
 
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 OPENAI_API_KEY    = os.getenv("OPENAI_API_KEY", "")
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 
 # ---------------------------------------------------------------------------
 # Categorías canónicas
@@ -97,6 +98,13 @@ OPENAI_MODELS = [
     "gpt-4o",
 ]
 
+OPENROUTER_MODELS = [
+    "deepseek/deepseek-v4-flash",
+    "deepseek/deepseek-v4-pro",
+    "moonshotai/kimi-k2.6",
+    "z-ai/glm-5.2",
+]
+
 # ---------------------------------------------------------------------------
 # Pricing — USD por 1M tokens (input / output)
 #
@@ -117,6 +125,8 @@ LLM_PRICING: Dict[str, Dict[str, float]] = {
     # OpenAI
     "gpt-4o-mini":       {"input": 0.15, "output":  0.60},
     "gpt-4o":            {"input": 2.50, "output": 10.00},
+    # OpenRouter — coste real leído de la respuesta de la API (usage.include),
+    # no precios estáticos; ver stream_openrouter() en 2_RAG.py
     # Ollama — local, sin coste
     "qwen2.5:14b-instruct": {"input": 0.0,   "output": 0.0},
 }
@@ -128,6 +138,8 @@ def model_provider(model: str) -> str:
         return "anthropic"
     if model in OPENAI_MODELS:
         return "openai"
+    if model in OPENROUTER_MODELS:
+        return "openrouter"
     return "ollama"
 
 
@@ -410,6 +422,30 @@ def check_openai_api(timeout: float = 5.0) -> Tuple[bool, str]:
         if r.status_code == 401:
             return False, "Key inválida o revocada (401)"
         return False, f"HTTP {r.status_code}"
+    except requests.exceptions.Timeout:
+        return False, f"Timeout ({timeout}s)"
+    except Exception as e:
+        return False, f"Error: {e}"
+
+
+def check_openrouter_api(timeout: float = 5.0) -> Tuple[bool, str]:
+    """Verifica la API key de OpenRouter con una llamada a /credits."""
+    if not OPENROUTER_API_KEY:
+        return False, "OPENROUTER_API_KEY no configurada en config/.env"
+    if not OPENROUTER_API_KEY.startswith("sk-or-"):
+        return False, "Formato inesperado (se espera sk-or-...)"
+    try:
+        r = requests.get(
+            "https://openrouter.ai/api/v1/credits",
+            headers={"Authorization": f"Bearer {OPENROUTER_API_KEY}"},
+            timeout=timeout,
+        )
+        if r.status_code == 200:
+            return True, "OK"
+        if r.status_code == 401:
+            return False, "Key inválida o revocada (401)"
+        # endpoint distinto/cambio API: no bloquear si el formato es válido
+        return True, f"No verificado (HTTP {r.status_code}), formato válido"
     except requests.exceptions.Timeout:
         return False, f"Timeout ({timeout}s)"
     except Exception as e:
