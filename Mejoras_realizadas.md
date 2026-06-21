@@ -3,6 +3,18 @@
 
 ---
 
+### ✅ Ingesta semanal: +bioplastics_microplastics + filtro de año rodante (2026-06-21)
+- `scripts/run_weekly_scopus.py`: `WEEKLY_CATEGORIES` añade `"bioplastics_microplastics"`
+  (3 categorías ahora).
+- Suelo de año rodante en la descarga semanal: `run_scopus(..., year_start=año_actual-1)`.
+  Motivo: `recent_days=7` filtra por fecha de indexación en Scopus, no por año de
+  publicación, así que papers antiguos reindexados entraban en la ventana. Floor rodante
+  (vigente + anterior) sin `year_end` para no perder online-first con cover date adelantada.
+- Solo reduce ruido temporal (reindexados viejos), no topical (falsos positivos de query
+  de anoxic siguen igual). Backfill histórico aparte si se quiere recuperar lo descartado.
+
+---
+
 ### ✅ pool_candidates.py — construcción de golden sets por pooling (2026-06-20)
 
 **`scripts/pool_candidates.py`** (nuevo, CLI con subcomandos `pool` y `build`). Reutiliza las mismas funciones de retrieval que `run_eval.py`/`2_RAG.py` (`embed_query`, `dense_rank`, `bm25_rank`, `rrf_fuse`, `pool_size`, `build_bm25`) → cero divergencia con producción.

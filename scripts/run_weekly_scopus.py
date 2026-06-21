@@ -54,6 +54,7 @@ from pipeline import run_scopus  # noqa: E402
 WEEKLY_CATEGORIES: list[str] = [
     "biogas_upgrading_biomethanation",
     "anoxic_biogas_biodesulfurization",
+    "bioplastics_microplastics",
 ]
 
 SCOPUS_TIMEOUT = 5400  # 90 minutos — evita colgarse si 3a_download_pdfs.py no responde
@@ -276,7 +277,13 @@ def main(dry_run: bool = False) -> None:
         cat_results = {cat: {"status": "ok"} for cat in WEEKLY_CATEGORIES}
     else:
         executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-        future = executor.submit(run_scopus, categories=WEEKLY_CATEGORIES, recent_days=7)
+        # año vigente + anterior: recent_days filtra por fecha de indexación, no de publicación
+        future = executor.submit(
+            run_scopus,
+            categories=WEEKLY_CATEGORIES,
+            recent_days=7,
+            year_start=datetime.now().year - 1,
+        )
         try:
             result    = future.result(timeout=SCOPUS_TIMEOUT)
             cat_results = result.get("categories", {})
