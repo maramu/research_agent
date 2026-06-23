@@ -633,6 +633,40 @@ def _submit_premium_chat():
     st.session_state["premium_chat_input"]     = ""
 
 
+def _render_papers_export(papers, project, key_prefix=""):
+    """Renderiza el expander "Exportar papers recuperados" con ZIP descargable.
+
+    ``papers`` es una lista de ``paper_id``. ``key_prefix`` permite usar la
+    función en varios sitios de la misma página sin colisionar las keys de
+    widgets de Streamlit.
+    """
+    with st.expander("📦 Exportar papers recuperados", expanded=False):
+        _inc_pdf = st.checkbox(
+            "Incluir PDFs", value=True,
+            key=f"{key_prefix}zip_pdf",
+        )
+        _inc_md = st.checkbox(
+            "Incluir MD limpio", value=True,
+            key=f"{key_prefix}zip_md",
+        )
+        if _inc_pdf or _inc_md:
+            _zip = build_papers_zip(
+                papers, project, CATEGORIAS_DIR,
+                include_pdf=_inc_pdf, include_md=_inc_md,
+            )
+            st.download_button(
+                f"⬇️ Descargar ZIP ({len(papers)} papers)",
+                data=_zip,
+                file_name=f"{project}_papers_RAG.zip",
+                mime="application/zip",
+                key=f"{key_prefix}dl_papers_zip",
+            )
+            st.caption(
+                "Contiene los PDFs y/o Markdown de los papers con chunks "
+                "recuperados en esta búsqueda."
+            )
+
+
 def render_premium_block():
     """Bloque '🔎 Profundizar (modelo de pago)'.
 
@@ -688,6 +722,29 @@ def render_premium_block():
         else:
             _run_premium_chat(results)
         return
+
+    # ── Contexto: papers del conjunto actual (visible durante el chat) ──
+    _mj = CATEGORIAS_DIR / prev_project / "metadata" / "papers_metadata.jsonl"
+    _mm = _mj.stat().st_mtime if _mj.exists() else 0.0
+    papers_meta = load_papers_meta(prev_project, _mm)
+
+    with st.expander(f"📄 Papers del conjunto actual ({len(prev_papers)} papers)", expanded=False):
+        for pid in prev_papers:
+            rec = papers_meta.get(pid, {})
+            title = rec.get("title") or "Sin título"
+            authors = rec.get("authors", [])
+            if isinstance(authors, list) and authors:
+                authors_str = "; ".join(str(a) for a in authors[:3])
+                if len(authors) > 3:
+                    authors_str += " et al."
+            else:
+                authors_str = str(authors) if authors else "Autores desconocidos"
+            year = rec.get("year") or year_from_paper_id(pid) or "?"
+            doi = rec.get("doi", "")
+            doi_str = f" · DOI: {doi}" if doi else ""
+            st.markdown(f"**{title}** ({authors_str}, {year}){doi_str}")
+        if prev_papers:
+            _render_papers_export(prev_papers, prev_project, key_prefix="premium_")
 
     # Resultado premium persistido (sobrevive a reruns posteriores). Se muestra
     # junto a la respuesta gratuita, sin sobrescribirla.
@@ -1324,25 +1381,7 @@ for rank, (score, idx, m) in enumerate(results, start=1):
         st.markdown(snippet)
 
 st.divider()
-with st.expander("📦 Exportar papers recuperados", expanded=False):
-    _inc_pdf = st.checkbox("Incluir PDFs",    value=True, key="zip_pdf")
-    _inc_md  = st.checkbox("Incluir MD limpio", value=True, key="zip_md")
-    if _inc_pdf or _inc_md:
-        _zip = build_papers_zip(
-            retrieved_papers, project, CATEGORIAS_DIR,
-            include_pdf=_inc_pdf, include_md=_inc_md,
-        )
-        st.download_button(
-            f"⬇️ Descargar ZIP ({len(retrieved_papers)} papers)",
-            data=_zip,
-            file_name=f"{project}_papers_RAG.zip",
-            mime="application/zip",
-            key="dl_papers_zip",
-        )
-        st.caption(
-            "Contiene los PDFs y/o Markdown de los papers con chunks "
-            "recuperados en esta búsqueda."
-        )
+_render_papers_export(retrieved_papers, project, key_prefix="")
 
 # Bloque premium tras una búsqueda recién ejecutada (go=True): _last_results ya
 # refleja esta consulta. (El camino go=False se renderiza arriba, antes del stop.)

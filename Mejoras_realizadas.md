@@ -3,6 +3,21 @@
 
 ---
 
+### ✅ Contexto visible durante el chat premium: lista de papers + exportar ZIP (2026-06-23)
+- Nuevo expander colapsado "📄 Papers del conjunto actual (N papers)" al inicio del bloque
+  premium de `2_RAG.py` (antes de selectores de modo/provider e historial del chat), visible
+  solo en la app privada.
+- Muestra una línea compacta por paper con título, autores (truncados a 3 + et al.), año y DOI,
+  obtenidos de `papers_metadata.jsonl` vía `load_papers_meta()`.
+- Incluye el botón de exportar ZIP (PDFs y/o MD limpio) reutilizando la **misma** lógica que el
+  expander de resultados gratuitos. Se extrajo la lógica a `_render_papers_export(papers, project,
+  key_prefix)`; recibe un prefijo de clave para evitar duplicados de widgets de Streamlit cuando se
+  usa en dos sitios de la misma página.
+- Esto evita que los `st.rerun()` del chat hagan desaparecer el contexto del conjunto de papers:
+  el usuario siempre puede desplegar el expander y ver/qué papers están en juego.
+
+---
+
 ### ✅ Chat con memoria sobre papers rescatados en RAG — Fase 1 (2026-06-23)
 - Nuevo bloque "💬 Chat con memoria sobre estos papers" dentro del área premium de
   `2_RAG.py`, solo app privada (`is_public_app()` guard). No aparece en la app pública.
