@@ -27,15 +27,19 @@ Notion y búsqueda de noticias.
 | Config | `~/.hermes/config.yaml` (provider custom:ollama-local, context 64k) |
 | Provider opcional | OpenRouter (selección manual para consultas potentes) |
 | Logs | `~/Library/Logs/hermes/gateway.{log,err.log}` (cuando el gateway esté activo) |
-| Estado | CLI validado (español, sin thinking, 100% GPU). Discord + MCPs pendientes. |
+| Estado | Validado de punta a punta vía Discord (modelo `qwen3:8b-hermes`, respuesta en español sin thinking). Web search con Tavily operativo (verificado con búsqueda de noticias real). |
+| Control | Discord gateway 24/7 vía LaunchAgent `ai.hermes.gateway` (creado por el propio instalador de Hermes; se gestiona con `hermes gateway start\|stop\|restart`, **NO** con el `com.hermes.gateway` manual que proponía la guía). |
+| Acceso restringido | `DISCORD_ALLOWED_USERS` = solo el User ID propio (en `~/.hermes/config.yaml` y `~/.hermes/.env`). |
+| Home channel | Fijado con `/sethome` a un Channel ID válido (entrega de crons y mensajes proactivos). |
+| Conversaciones separadas | Tres canales temáticos en el servidor Hermes — `docencia`, `investigacion`, `noticias` — en `discord.free_response_channels` (responden sin @mención; contexto independiente por canal). Resto de canales siguen `require_mention: true`. |
 
 **Nota RAM:** `qwen3:8b-hermes` (~8.7 GB) y `qwen2.5:14b-instruct` (~12 GB) no
 coexisten residentes en 24 GB. `OLLAMA_KEEP_ALIVE=5m` en el plist de Ollama asegura
 que se turnan. La ingesta Scopus (lunes 04:00) corre antes del keep-warm de Hermes
 (pendiente de activar, horario 9:00–18:00).
 
-**Pendiente:** Discord gateway + LaunchAgent 24/7, MCPs (Notion, Google Calendar,
-Gmail, noticias), keep-warm cron, seguridad (desactivar herramientas no usadas).
+**Pendiente:** MCPs (Notion, Google Calendar, Gmail), keep-warm cron, seguridad
+(desactivar herramientas no usadas: terminal/code_execution/browser).
 
 ## Modelos Ollama disponibles
 

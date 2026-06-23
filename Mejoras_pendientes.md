@@ -9,7 +9,7 @@
 5. Item 45 — consolidar utilidades de texto duplicadas pdf_utils↔1_rename. **Nota 2026-06-13:** el trabajo de hoy sobre DOIs tocó ambos ficheros (`normalize_doi`, `normalize_stem`, lookups por stem/título en `doi_manual`). Revisar si introdujo nueva divergencia antes de consolidar.
 6. ~~Item 41 — índice viejo all__bge-m3.~~ ✅ COMPLETADO 2026-06-16.
 7. Item 35 — OCR (si hay escaneados). Item 31 — MVP libros, tras el 37.
-- Item 49 — completar Hermes Agent (Discord + MCPs).
+- Item 49 — completar Hermes Agent (Discord ✅ y Tavily ✅ hechos 2026-06-23; pendiente MCPs, keep-warm, hardening).
 - ~~Timeout job semanal: subir `SCOPUS_TIMEOUT` de 2700 a 5400 (45→90 min)~~ — ✅ **COMPLETADO 2026-06-15** — `run_weekly_scopus.py`: `SCOPUS_TIMEOUT = 5400`; `WEEKLY_CATEGORIES` ampliada con `anoxic_biogas_biodesulfurization`.
 
 ## Hallazgos pendientes (revisión 2026-06-12)
@@ -275,12 +275,17 @@ de `ESTADO.md` tras ejecutar.
 
 Pendiente de completar desde la sesión 2026-06-23:
 
-- [ ] Discord: crear bot, token, Message Content Intent ON, invitar a servidor,
+- [x] ~~Discord: crear bot, token, Message Content Intent ON, invitar a servidor,
       `DISCORD_BOT_TOKEN` + `DISCORD_ALLOWED_USERS` en `~/.hermes/.env`,
-      `hermes gateway` + LaunchAgent `com.hermes.gateway.plist`.
+      `hermes gateway` + LaunchAgent~~ — ✅ **HECHO 2026-06-23**. Validado por DM y en
+      canales; intents Message Content + Server Members ON; gateway 24/7 vía LaunchAgent
+      `ai.hermes.gateway` (del instalador, gestionado con `hermes gateway`, **no** el
+      `com.hermes.gateway` manual); tres canales temáticos en `free_response_channels`
+      (contexto separado). Ver Mejoras_realizadas.md.
 - [ ] MCPs: Notion (OAuth directo), Google Calendar + Gmail (cliente OAuth en GCP
       proyecto `hermes-pciq22`, tipo "App de escritorio").
-- [ ] Web search: Tavily API key en `.env`, `hermes config set web.backend tavily`.
+- [x] ~~Web search: Tavily API key en `.env`, `hermes config set web.backend tavily`.~~
+      — ✅ **HECHO 2026-06-23**. Operativo, verificado con búsqueda de noticias real.
 - [ ] Keep-warm cron: `~/hermes_keepwarm.sh` cada 8 min, lunes–viernes 9:00–18:00.
 - [ ] Seguridad: desactivar `terminal`, `code_execution` y `browser` con `hermes tools`.
 - [ ] Aplicar hora 04:00 en plist instalado de la ingesta (git pull + cp + launchctl en pciq22).

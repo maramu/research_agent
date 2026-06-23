@@ -5,6 +5,38 @@
 
 ## Sesión 2026-06-23
 
+### Hermes Agent: Discord operativo + canales temáticos (sin commits de pipeline)
+
+Hermes validado de punta a punta en `pciq22` a través de Discord (modelo
+`qwen3:8b-hermes`, respuesta en español sin thinking, web search con Tavily verificado):
+
+- **Bot conectado y validado** por DM y en canales. Intents **Message Content** y
+  **Server Members** activados en el portal de Discord.
+- **Gateway 24/7** vía LaunchAgent `ai.hermes.gateway` (del instalador), gestionado con
+  `hermes gateway start|stop|restart`.
+- **Acceso restringido:** `DISCORD_ALLOWED_USERS` = solo el User ID propio. Home channel
+  fijado con `/sethome` a un Channel ID válido (entrega de crons y mensajes proactivos).
+- **Tres canales temáticos** en el servidor (`docencia`, `investigacion`, `noticias`) en
+  `discord.free_response_channels`: responden sin @mención y mantienen **contexto
+  independiente por canal**. El resto sigue `require_mention: true`.
+- **Web search Tavily** operativo, verificado con una búsqueda de noticias real.
+
+**Learnings de la sesión:**
+
+- El LaunchAgent es `ai.hermes.gateway` (creado por el instalador) y se gestiona con
+  `hermes gateway`. El `launchctl bootout/bootstrap` manual por ruta dio **Input/output
+  error** con el servicio en estado zombi (`LastExitStatus -15`); se desatascó con
+  `hermes gateway stop` + arranque limpio.
+- Causa del "silencio" inicial: se probaba en `#general` (que exige @mención real
+  seleccionada del desplegable) en vez de por DM; y `DISCORD_HOME_CHANNEL` /
+  `DISCORD_ALLOWED_USERS` tenían por error el **Application ID** del bot (provoca
+  `404 Unknown Channel` al responder).
+- La "calculadora de permisos del bot" del portal **no persiste estado al recargar por
+  diseño** (genera el entero `274878286912` para la URL); los permisos reales viajan en
+  la invitación. Es distinta de los **Privileged Gateway Intents**, que sí persisten.
+- `free_response_channels` da **contexto separado por canal** = patrón para
+  conversaciones temáticas; `/reset` reinicia la sesión del DM, no crea sesiones paralelas.
+
 ### RAG: chat premium con modo A/B y contexto de papers visible (commits 0e2bc3f → e5a41da)
 
 Añadidas tres funcionalidades nuevas a `2_RAG.py` como extensión del bloque premium
