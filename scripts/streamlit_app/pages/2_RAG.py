@@ -180,6 +180,382 @@ def embed_query(client, query: str, model: str) -> np.ndarray:
     return np.array(resp["embedding"], dtype="float32")
 
 
+def synthesize_answer(provider, model, results, query, papers_meta,
+                      max_output_tokens, out_box):
+    """Sintetiza una respuesta sobre ``results`` con el provider/modelo dados.
+
+    Función ÚNICA de síntesis: la usan tanto la consulta gratuita (Ollama) como
+    la consulta premium de pago. Monta el contexto numerado, hace streaming por
+    provider, aplica el post-proceso de citas (apply_citations) y devuelve
+    ``(answer_md, usage_capture, prompt)``.
+
+    ``results`` es una lista de tuplas ``(score, idx, m)`` (m = metadata del chunk).
+    """
+    usage_capture = {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "is_estimated": False,
+        "cost_usd_override": None,
+    }
+
+    context_parts = []
+    for i, (_, _, m) in enumerate(results, start=1):
+        snippet = m.get("text", "").strip()
+        section = m.get("section", "?")
+        context_parts.append(f"[{i}] sección: {section}\n{snippet}")
+    context = "\n\n---\n\n".join(context_parts)
+
+    # Mapa [N] -> (Apellido, Año; DOI) para el post-proceso de la respuesta.
+    cite_map = build_cite_map(results, papers_meta)
+
+    prompt = f"""Eres un asistente científico. Responde a la pregunta basándote ÚNICAMENTE en los fragmentos numerados que se proporcionan a continuación.
+
+Reglas:
+- Si los fragmentos no contienen información suficiente para responder, dilo claramente.
+- No inventes datos. No uses conocimiento externo a los fragmentos.
+- Responde en el mismo idioma que la pregunta.
+{CITE_PROMPT_RULES}
+
+Fragmentos:
+{context}
+
+Pregunta: {query}
+
+Recuerda: cita con [N] junto a cada dato; sin sección de Referencias.
+
+Respuesta:"""
+
+    # ─────────────────────────── Streaming por provider ──────────────────────
+
+    def stream_ollama():
+        client = get_ollama_client()
+        full = ""
+        for chunk in client.generate(model=model, prompt=prompt, stream=True):
+            text = chunk.get("response", "")
+            full += text
+            yield text
+        # Ollama no devuelve token counts → estimar
+        usage_capture["input_tokens"]  = max(1, len(prompt) // 4)
+        usage_capture["output_tokens"] = max(1, len(full) // 4)
+        usage_capture["is_estimated"]  = True
+
+    def stream_anthropic():
+        client = get_anthropic_client()
+        with client.messages.stream(
+            model=model,
+            max_tokens=max_output_tokens,
+            messages=[{"role": "user", "content": prompt}],
+        ) as stream:
+            for text in stream.text_stream:
+                yield text
+            final = stream.get_final_message()
+            usage_capture["input_tokens"]  = final.usage.input_tokens
+            usage_capture["output_tokens"] = final.usage.output_tokens
+
+    def stream_openai():
+        client = get_openai_client()
+        oa_stream = client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=max_output_tokens,
+            stream=True,
+            stream_options={"include_usage": True},
+        )
+        for chunk in oa_stream:
+            if chunk.choices and len(chunk.choices) > 0:
+                delta = chunk.choices[0].delta
+                if delta and delta.content:
+                    yield delta.content
+            if getattr(chunk, "usage", None):
+                usage_capture["input_tokens"]  = chunk.usage.prompt_tokens
+                usage_capture["output_tokens"] = chunk.usage.completion_tokens
+
+    def stream_openrouter():
+        client = get_openrouter_client()
+        or_stream = client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=max_output_tokens,
+            stream=True,
+            stream_options={"include_usage": True},
+            extra_body={"usage": {"include": True}},  # pide a OpenRouter el coste real
+        )
+        for chunk in or_stream:
+            if chunk.choices and len(chunk.choices) > 0:
+                delta = chunk.choices[0].delta
+                if delta and delta.content:
+                    yield delta.content
+            u = getattr(chunk, "usage", None)
+            if u:
+                usage_capture["input_tokens"]  = getattr(u, "prompt_tokens", 0) or 0
+                usage_capture["output_tokens"] = getattr(u, "completion_tokens", 0) or 0
+                _cost = getattr(u, "cost", None)
+                if _cost is None:
+                    _extra = getattr(u, "model_extra", None) or {}
+                    _cost = _extra.get("cost")
+                if _cost is not None:
+                    usage_capture["cost_usd_override"] = float(_cost)
+
+    # Pintamos manualmente (no st.write_stream) para sustituir [N] por las
+    # claves de cita una vez completada la generación.
+    _raw_chunks = []
+
+    def _render(gen):
+        for piece in gen:
+            _raw_chunks.append(piece)
+            out_box.markdown("".join(_raw_chunks))
+
+    if provider == "Ollama (local)":
+        _render(stream_ollama())
+    elif provider == "Anthropic (Claude)":
+        _render(stream_anthropic())
+    elif provider == "OpenAI (GPT)":
+        _render(stream_openai())
+    elif provider == "OpenRouter":
+        _render(stream_openrouter())
+
+    raw_md    = "".join(_raw_chunks)
+    answer_md = apply_citations(raw_md, cite_map)
+    out_box.markdown(answer_md)
+    return answer_md, usage_capture, prompt
+
+
+# ---------------------------------------------------------------------------
+# Profundizar (modelo de pago) — consulta premium sobre artículos ya rescatados
+# Solo app privada (guard is_public_app en el caller). Reutiliza synthesize_answer
+# y el filtro paper_id de passes_filters (no reimplementa el retrieval).
+# ---------------------------------------------------------------------------
+
+def _run_premium_query():
+    """Ejecuta la consulta de pago sobre los artículos ya rescatados.
+
+    Lee los parámetros elegidos de session_state (fijados por el botón
+    "Profundizar"), streamea la respuesta con synthesize_answer, registra el
+    coste con mode="premium_*" y persiste el resultado para que sobreviva a
+    reruns posteriores. Corre tras el rerun disparado por el botón.
+    """
+    mode          = st.session_state.get("_premium_mode", "Mismos fragmentos")
+    provider      = st.session_state.get("_premium_provider_sel")
+    model         = st.session_state.get("_premium_model_sel")
+    top_k_premium = st.session_state.get("_premium_topk_sel")
+    max_out       = st.session_state.get("_premium_maxout_sel", 1024)
+
+    prev_query   = st.session_state.get("_last_query", "")
+    prev_papers  = st.session_state.get("_last_retrieved_papers", [])
+    prev_results = st.session_state.get("_last_results", [])
+    prev_project = st.session_state.get("_last_project", "")
+    prev_phase   = st.session_state.get("_last_phase", "")
+    prev_embed   = st.session_state.get("_last_embed_model", OLLAMA_MODEL_EMBED)
+
+    if not model or not provider:
+        st.error("Falta seleccionar provider/modelo de pago.")
+        return
+
+    # Metadata de papers (claves de cita) del proyecto de la consulta previa.
+    _mj = CATEGORIAS_DIR / prev_project / "metadata" / "papers_metadata.jsonl"
+    _mm = _mj.stat().st_mtime if _mj.exists() else 0.0
+    papers_meta = load_papers_meta(prev_project, _mm)
+
+    is_deepen = mode == "Profundizar en estos papers"
+    if is_deepen:
+        # Modo B: re-consultar FAISS restringido a los paper_id rescatados con un
+        # top_k mayor. Reutiliza el índice del proyecto/fase de la consulta previa
+        # y el filtro paper_id existente (passes_filters con un set de paper_id).
+        _ip = CATEGORIAS_DIR / prev_project / "embeddings" / prev_phase / "index.faiss"
+        _im = _ip.stat().st_mtime if _ip.exists() else 0.0
+        p_index, p_meta, _p_cfg = load_index(prev_project, prev_phase, _im)
+        if p_index is None:
+            st.error("No se pudo recargar el índice para profundizar.")
+            return
+        paper_set = set(prev_papers)
+        if not paper_set:
+            st.warning("No hay paper_id rescatados sobre los que profundizar.")
+            return
+        with st.spinner("Recuperando más fragmentos de esos papers…"):
+            client = get_ollama_client()
+            qv = embed_query(client, prev_query, prev_embed).reshape(1, -1)
+            pool = pool_size(int(top_k_premium), p_index.ntotal, True)
+            d_idx, dist_map = dense_rank(p_index, qv, pool)
+            results = []
+            for idx in d_idx:
+                if idx >= len(p_meta):
+                    continue
+                m = p_meta[idx]
+                if not passes_filters(m, paper=paper_set):
+                    continue
+                results.append((dist_map[idx], idx, m))
+                if len(results) >= int(top_k_premium):
+                    break
+        mode_key, mode_label = "premium_deepen", "profundizar en estos papers"
+    else:
+        # Modo A: exactamente los mismos chunks de la consulta gratuita. No toca FAISS.
+        results = [(d["score"], 0, d["m"]) for d in prev_results]
+        mode_key, mode_label = "premium_same_chunks", "mismos fragmentos"
+
+    if not results:
+        st.warning("No hay fragmentos disponibles para la consulta premium.")
+        return
+
+    st.markdown("**Generando respuesta premium…**")
+    out_box = st.empty()
+    try:
+        answer_md, usage_capture, _prompt = synthesize_answer(
+            provider, model, results, prev_query, papers_meta, max_out, out_box,
+        )
+    except Exception as e:
+        st.error(f"Error al generar la respuesta premium con {provider}: {e}")
+        return
+
+    in_tk  = usage_capture["input_tokens"]
+    out_tk = usage_capture["output_tokens"]
+    _override = usage_capture.get("cost_usd_override")
+    cost = _override if _override is not None else estimate_cost_usd(model, in_tk, out_tk)
+
+    retrieved = list(dict.fromkeys(
+        m.get("paper_id", "") for _, _, m in results
+        if m.get("paper_id") and m.get("paper_id") != "__attachment__"
+    ))
+
+    prov_key = provider.split(" ")[0].lower()
+    record_rag_query(
+        provider=prov_key, model=model,
+        input_tokens=in_tk, output_tokens=out_tk, cost_usd=cost,
+        query=prev_query, project=prev_project,
+        is_estimated=usage_capture["is_estimated"], mode=mode_key,
+    )
+    record_rag_query_full(
+        category=prev_project, question=prev_query,
+        provider=prov_key, model=model, top_k=len(results),
+        retrieved_papers=retrieved, answer_md=answer_md,
+        estimated_cost=0.0, real_cost=cost, mode=mode_key,
+    )
+
+    st.session_state["_premium_answer"] = answer_md
+    st.session_state["_premium_info"] = {
+        "model": model, "provider": provider,
+        "mode_key": mode_key, "mode_label": mode_label,
+        "n_chunks": len(results), "cost": cost,
+        "in_tk": in_tk, "out_tk": out_tk,
+        "is_estimated": usage_capture["is_estimated"],
+    }
+    st.rerun()
+
+
+def render_premium_block():
+    """Bloque '🔎 Profundizar (modelo de pago)'.
+
+    Visible SOLO si hay una consulta previa con chunks en session_state. El guard
+    is_public_app() lo aplica el caller (no se renderiza en la app pública).
+    """
+    prev_results = st.session_state.get("_last_results")
+    if not prev_results:
+        return
+
+    st.divider()
+    st.subheader("🔎 Profundizar (modelo de pago)")
+    prev_query  = st.session_state.get("_last_query", "")
+    prev_papers = st.session_state.get("_last_retrieved_papers", [])
+    st.caption(
+        f"Sobre la consulta previa: «{prev_query[:90]}» · "
+        f"{len(prev_results)} fragmentos · {len(prev_papers)} papers. "
+        "El modelo de pago razona sobre lo ya recuperado por el local (gratis): "
+        "solo paga la síntesis, no la recuperación."
+    )
+
+    # Handler del flag: corre tras el rerun que dispara el botón "Profundizar".
+    if st.session_state.pop("_do_premium", False):
+        _run_premium_query()
+        return  # _run_premium_query hace st.rerun() al terminar correctamente
+
+    # Resultado premium persistido (sobrevive a reruns posteriores). Se muestra
+    # junto a la respuesta gratuita, sin sobrescribirla.
+    info = st.session_state.get("_premium_info")
+    pa   = st.session_state.get("_premium_answer")
+    if info and pa:
+        st.success(
+            f"**Respuesta premium** · modelo `{info['model']}` · "
+            f"modo *{info['mode_label']}* · {info['n_chunks']} fragmentos · "
+            f"{'coste estimado' if info.get('is_estimated') else 'coste real'} "
+            f"**{fmt_cost(info['cost'])}** "
+            f"({info['in_tk']:,} in + {info['out_tk']:,} out)"
+        )
+        st.markdown(pa)
+        st.divider()
+
+    # ── Controles ──
+    mode = st.radio(
+        "Modo",
+        ["Mismos fragmentos", "Profundizar en estos papers"],
+        key="premium_mode_radio",
+        help="A — el modelo de pago razona sobre los MISMOS fragmentos que recuperó "
+             "el local (coste mínimo). B — re-consulta FAISS sobre esos mismos papers "
+             "recuperando más fragmentos por paper.",
+    )
+    is_deepen = mode == "Profundizar en estos papers"
+
+    p_provider = st.selectbox(
+        "Provider de pago",
+        options=["Anthropic (Claude)", "OpenAI (GPT)", "OpenRouter"],
+        key="premium_provider",
+    )
+    p_model = None
+    if p_provider == "Anthropic (Claude)":
+        ok, msg = check_anthropic_api()
+        if not ok:
+            st.error(f"Anthropic: {msg}")
+        else:
+            p_model = st.selectbox("Modelo", options=ANTHROPIC_MODELS, index=1,
+                                   key="premium_model_ant")
+    elif p_provider == "OpenAI (GPT)":
+        ok, msg = check_openai_api()
+        if not ok:
+            st.error(f"OpenAI: {msg}")
+        else:
+            p_model = st.selectbox("Modelo", options=OPENAI_MODELS, index=0,
+                                   key="premium_model_oai")
+    else:  # OpenRouter
+        ok, msg = check_openrouter_api()
+        if not ok:
+            st.error(f"OpenRouter: {msg}")
+        else:
+            p_model = st.selectbox("Modelo", options=OPENROUTER_MODELS, index=0,
+                                   key="premium_model_or")
+
+    p_topk = None
+    if is_deepen:
+        p_topk = st.slider(
+            "Top-k ampliado (fragmentos a recuperar de esos papers)",
+            8, 30, 15, key="premium_topk",
+        )
+
+    p_maxout = st.slider("Máx tokens respuesta", 256, 4096, 1024, step=256,
+                         key="premium_maxout")
+
+    # Pre-estimación de coste (misma lógica heurística que la consulta gratuita).
+    if p_model:
+        _k_est   = int(p_topk) if is_deepen else len(prev_results)
+        _est_in  = (1200 * _k_est + 500) // 4
+        _est_out = p_maxout // 3
+        _est     = estimate_cost_usd(p_model, _est_in, _est_out)
+        if _est > 0:
+            st.info(
+                f"💰 **Coste estimado**: ~{fmt_cost(_est)} "
+                f"({_est_in:,} input + ~{_est_out:,} output tokens, k={_k_est})"
+            )
+        elif p_provider == "OpenRouter":
+            st.info("💰 **Coste**: se calcula tras la consulta (OpenRouter devuelve el coste real)")
+
+    if st.button("🔎 Profundizar", type="primary", key="premium_go",
+                 disabled=not p_model):
+        st.session_state["_premium_mode"]         = mode
+        st.session_state["_premium_provider_sel"] = p_provider
+        st.session_state["_premium_model_sel"]    = p_model
+        st.session_state["_premium_topk_sel"]     = p_topk
+        st.session_state["_premium_maxout_sel"]   = p_maxout
+        st.session_state["_do_premium"]           = True
+        st.rerun()
+
+
 # ---------------------------------------------------------------------------
 # Sidebar
 # ---------------------------------------------------------------------------
@@ -414,6 +790,14 @@ if st.session_state.pop("_do_save", False):
         (notes_dir / note_filename).write_text(note_content, encoding="utf-8")
         st.success(f"Nota guardada: `notas_rag/{_project}/{note_filename}`")
 
+# Bloque premium (modelo de pago) sobre los artículos rescatados por la consulta
+# previa. En el camino go=False (rerun del botón premium o página inactiva) se
+# renderiza aquí, antes del st.stop(). En el camino go=True se renderiza al final
+# de la página (con los _last_results ya actualizados por la búsqueda en curso).
+# Solo en la app privada: en la pública NO debe aparecer (evita gasto del grupo).
+if not is_public_app() and not go:
+    render_premium_block()
+
 if not go:
     st.stop()
 
@@ -505,16 +889,24 @@ retrieved_papers = list(dict.fromkeys(
 st.session_state["_last_retrieved_papers"] = retrieved_papers
 st.session_state["_last_project"]          = project
 
+# Persistir los chunks recuperados para una posible consulta premium posterior
+# (Modo A "mismos fragmentos"). Solo lo necesario y JSON-serializable: el score
+# y la metadata del chunk (texto, sección, paper_id, _cite si es adjunto).
+# session_state basta: sobrevive a los reruns dentro de la sesión, que es lo que
+# necesita el flujo "consulta gratis → Profundizar a continuación".
+st.session_state["_last_results"] = [
+    {"score": float(score), "m": m} for score, _idx, m in results
+]
+st.session_state["_last_query"]       = query
+st.session_state["_last_phase"]       = phase
+st.session_state["_last_embed_model"] = embed_model
+# Una consulta gratuita nueva invalida cualquier respuesta premium anterior.
+st.session_state.pop("_premium_answer", None)
+st.session_state.pop("_premium_info", None)
+
 # ---------------------------------------------------------------------------
 # Síntesis
 # ---------------------------------------------------------------------------
-
-usage_capture = {
-    "input_tokens": 0,
-    "output_tokens": 0,
-    "is_estimated": False,
-    "cost_usd_override": None,
-}
 
 if do_synth and synth_model:
     st.subheader("Respuesta")
@@ -523,132 +915,18 @@ if do_synth and synth_model:
     _meta_mtime = _meta_jsonl.stat().st_mtime if _meta_jsonl.exists() else 0.0
     papers_meta = load_papers_meta(project, _meta_mtime)
 
-    context_parts = []
-    for i, (_, _, m) in enumerate(results, start=1):
-        snippet  = m.get("text", "").strip()
-        section  = m.get("section", "?")
-        context_parts.append(f"[{i}] sección: {section}\n{snippet}")
-    context = "\n\n---\n\n".join(context_parts)
-
-    # Mapa [N] -> (Apellido, Año; DOI) para el post-proceso de la respuesta.
-    cite_map = build_cite_map(results, papers_meta)
-
-    prompt = f"""Eres un asistente científico. Responde a la pregunta basándote ÚNICAMENTE en los fragmentos numerados que se proporcionan a continuación.
-
-Reglas:
-- Si los fragmentos no contienen información suficiente para responder, dilo claramente.
-- No inventes datos. No uses conocimiento externo a los fragmentos.
-- Responde en el mismo idioma que la pregunta.
-{CITE_PROMPT_RULES}
-
-Fragmentos:
-{context}
-
-Pregunta: {query}
-
-Recuerda: cita con [N] junto a cada dato; sin sección de Referencias.
-
-Respuesta:"""
-
-    # ─────────────────────────── Streaming por provider ──────────────────────
-
-    def stream_ollama():
-        full = ""
-        for chunk in ollama_client.generate(model=synth_model, prompt=prompt, stream=True):
-            text = chunk.get("response", "")
-            full += text
-            yield text
-        # Ollama no devuelve token counts → estimar
-        usage_capture["input_tokens"]  = max(1, len(prompt) // 4)
-        usage_capture["output_tokens"] = max(1, len(full) // 4)
-        usage_capture["is_estimated"]  = True
-
-    def stream_anthropic():
-        client = get_anthropic_client()
-        with client.messages.stream(
-            model=synth_model,
-            max_tokens=max_output_tokens,
-            messages=[{"role": "user", "content": prompt}],
-        ) as stream:
-            for text in stream.text_stream:
-                yield text
-            final = stream.get_final_message()
-            usage_capture["input_tokens"]  = final.usage.input_tokens
-            usage_capture["output_tokens"] = final.usage.output_tokens
-
-    def stream_openai():
-        client = get_openai_client()
-        oa_stream = client.chat.completions.create(
-            model=synth_model,
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=max_output_tokens,
-            stream=True,
-            stream_options={"include_usage": True},
-        )
-        for chunk in oa_stream:
-            if chunk.choices and len(chunk.choices) > 0:
-                delta = chunk.choices[0].delta
-                if delta and delta.content:
-                    yield delta.content
-            if getattr(chunk, "usage", None):
-                usage_capture["input_tokens"]  = chunk.usage.prompt_tokens
-                usage_capture["output_tokens"] = chunk.usage.completion_tokens
-
-    def stream_openrouter():
-        client = get_openrouter_client()
-        or_stream = client.chat.completions.create(
-            model=synth_model,
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=max_output_tokens,
-            stream=True,
-            stream_options={"include_usage": True},
-            extra_body={"usage": {"include": True}},  # pide a OpenRouter el coste real
-        )
-        for chunk in or_stream:
-            if chunk.choices and len(chunk.choices) > 0:
-                delta = chunk.choices[0].delta
-                if delta and delta.content:
-                    yield delta.content
-            u = getattr(chunk, "usage", None)
-            if u:
-                usage_capture["input_tokens"]  = getattr(u, "prompt_tokens", 0) or 0
-                usage_capture["output_tokens"] = getattr(u, "completion_tokens", 0) or 0
-                _cost = getattr(u, "cost", None)
-                if _cost is None:
-                    _extra = getattr(u, "model_extra", None) or {}
-                    _cost = _extra.get("cost")
-                if _cost is not None:
-                    usage_capture["cost_usd_override"] = float(_cost)
-
     # Pintamos manualmente (no st.write_stream) para sustituir [N] por las
     # claves de cita una vez completada la generación.
     out_box = st.empty()
-    _raw_chunks = []
-
-    def _render(gen):
-        for piece in gen:
-            _raw_chunks.append(piece)
-            out_box.markdown("".join(_raw_chunks))
-
-    answer_md = ""
     try:
-        if provider == "Ollama (local)":
-            _render(stream_ollama())
-        elif provider == "Anthropic (Claude)":
-            _render(stream_anthropic())
-        elif provider == "OpenAI (GPT)":
-            _render(stream_openai())
-        elif provider == "OpenRouter":
-            _render(stream_openrouter())
+        answer_md, usage_capture, prompt = synthesize_answer(
+            provider, synth_model, results, query, papers_meta,
+            max_output_tokens, out_box,
+        )
     except Exception as e:
         st.error(f"Error al generar respuesta con {provider}: {e}")
-        with st.expander("Prompt enviado (debug)"):
-            st.code(prompt, language="text")
         st.stop()
 
-    raw_md    = "".join(_raw_chunks)
-    answer_md = apply_citations(raw_md, cite_map)
-    out_box.markdown(answer_md)
     st.session_state["_last_answer_md"] = answer_md
     st.session_state["_last_query"]     = query
     st.session_state["_last_model"]     = synth_model
@@ -739,3 +1017,8 @@ with st.expander("📦 Exportar papers recuperados", expanded=False):
             "Contiene los PDFs y/o Markdown de los papers con chunks "
             "recuperados en esta búsqueda."
         )
+
+# Bloque premium tras una búsqueda recién ejecutada (go=True): _last_results ya
+# refleja esta consulta. (El camino go=False se renderiza arriba, antes del stop.)
+if not is_public_app():
+    render_premium_block()

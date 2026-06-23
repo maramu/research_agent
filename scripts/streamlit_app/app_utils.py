@@ -189,8 +189,12 @@ def record_rag_query(
     query: str,
     project: str,
     is_estimated: bool = False,
+    mode: str = "standard",
 ) -> None:
     """Apenda un registro al jsonl del mes actual.
+
+    ``mode`` distingue el tipo de consulta ("standard" o, para la consulta de
+    pago sobre artículos ya rescatados, "premium_same_chunks"/"premium_deepen").
 
     Si el NAS no está accesible, falla silenciosamente — no se quiere bloquear
     la respuesta del RAG por no poder escribir el contador.
@@ -207,6 +211,7 @@ def record_rag_query(
             "is_estimated":  is_estimated,
             "project":       project,
             "query_preview": (query or "")[:120],
+            "mode":          mode,
         }
         with usage_file.open("a", encoding="utf-8") as f:
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")
@@ -225,8 +230,13 @@ def record_rag_query_full(
     answer_md: str,
     estimated_cost: float,
     real_cost: float,
+    mode: str = "standard",
 ) -> None:
-    """Guarda log completo en rag_queries/rag_queries_YYYY-MM.jsonl"""
+    """Guarda log completo en rag_queries/rag_queries_YYYY-MM.jsonl.
+
+    ``mode`` distingue consultas estándar de las premium sobre artículos ya
+    rescatados ("premium_same_chunks"/"premium_deepen").
+    """
     now = datetime.now()
     record = {
         "date":             now.strftime("%Y-%m-%d %H:%M"),
@@ -239,6 +249,7 @@ def record_rag_query_full(
         "answer_md":        answer_md,
         "estimated_cost":   estimated_cost,
         "real_cost":        real_cost,
+        "mode":             mode,
     }
     out_dir = NAS_ROOT / "metadatos" / "rag_queries"
     out_dir.mkdir(parents=True, exist_ok=True)

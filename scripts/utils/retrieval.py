@@ -65,12 +65,23 @@ def rrf_fuse(*ranked_lists, k=RRF_K):
 
 def passes_filters(m, type_=None, paper=None, sections=None,
                    year_start=None, year_end=None):
-    """True si el chunk m pasa los filtros. Centraliza la lógica de items 32/34."""
+    """True si el chunk m pasa los filtros. Centraliza la lógica de items 32/34.
+
+    ``paper`` admite dos formas:
+      - str  -> match por substring case-insensitive sobre paper_id (uso UI).
+      - colección (set/list/tuple) -> match EXACTO contra ese conjunto de
+        paper_id (uso de la consulta premium "profundizar en estos papers").
+    """
     from utils.constants import year_from_paper_id
     if type_ and m.get("type") != type_:
         return False
-    if paper and paper.lower() not in m.get("paper_id", "").lower():
-        return False
+    if paper:
+        pid = m.get("paper_id", "")
+        if isinstance(paper, str):
+            if paper.lower() not in pid.lower():
+                return False
+        elif pid not in paper:
+            return False
     if sections and m.get("section_canonical") not in sections:
         return False
     if year_start or year_end:

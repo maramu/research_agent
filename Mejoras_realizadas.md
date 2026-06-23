@@ -3,6 +3,34 @@
 
 ---
 
+### ✅ Consulta premium (modelo de pago) sobre artículos rescatados en RAG (2026-06-23)
+- Nuevo bloque "🔎 Profundizar (modelo de pago)" en `2_RAG.py`, visible SOLO cuando ya hay
+  una consulta previa con artículos rescatados y SOLO en la app privada (guard
+  `is_public_app()` → no aparece en la pública, para que el grupo no dispare gasto).
+- Dos modos en un selector:
+  - **A "Mismos fragmentos"**: el modelo de pago razona sobre exactamente los chunks que
+    recuperó la consulta gratuita (local). No toca FAISS → coste mínimo.
+  - **B "Profundizar en estos papers"**: re-consulta FAISS restringido a los `paper_id`
+    rescatados con un top_k ampliado (slider 8–30, default 15) para dar más contexto.
+- Valor económico: la recuperación (lo caro en cómputo) la hace el modelo local gratis; al
+  de pago solo se le pasa un contexto pequeño y ya filtrado → céntimos por consulta.
+- Reutiliza el mecanismo de provider existente (Anthropic / OpenAI / OpenRouter, sin Ollama
+  aquí) y la **misma** función de síntesis: se refactorizó la síntesis inline a
+  `synthesize_answer()`, usada por la ruta gratuita y la premium (sin implementación LLM
+  paralela). El post-proceso de citas (`apply_citations` / `strip_reference_section`) se
+  aplica igual a la respuesta premium.
+- La respuesta premium se muestra **junto a** la gratuita (no la sobrescribe), etiquetada con
+  modelo, modo, nº de fragmentos y coste real. Pre-estimación de coste antes de lanzar.
+- Registro de coste en `rag_usage_*.jsonl` y `rag_queries_*.jsonl` con campo
+  `mode` ("premium_same_chunks" | "premium_deepen"; "standard" en las normales).
+- Persistencia: solo `st.session_state` (chunks de la consulta previa en `_last_results`);
+  basta para el flujo "consulta gratis → Profundizar a continuación". No se creó cache en
+  disco (menos es más). Patrón flag (`_do_premium`) + `st.rerun()`.
+- `passes_filters()` (utils/retrieval.py) admite ahora `paper` como colección de `paper_id`
+  exactos además de substring, para el filtro del Modo B (reutilizado, no reimplementado).
+
+---
+
 ### ✅ OpenRouter como provider de síntesis en RAG (2026-06-21)
 - Cuarto provider en `2_RAG.py` (solo app privada): deepseek-v4-flash/pro, kimi-k2.6, glm-5.2.
 - OpenAI-compatible: `get_openrouter_client()` = SDK `openai` con base_url de OpenRouter +
