@@ -15,11 +15,35 @@
 | Streamlit | `http://<ip-pciq22>:8501` — servicio launchd 24/7 en pciq22 |
 | GitHub | `https://github.com/maramu/research_agent` |
 
+### Hermes Agent (productividad personal)
+
+Instalado en pciq22, independiente del pipeline RAG. Gestiona agenda, correo,
+Notion y búsqueda de noticias.
+
+| Componente | Detalle |
+|---|---|
+| Instalación | `~/.hermes/` (install.sh oficial, aislado de venv rag_papers) |
+| Modelo | `qwen3:8b-hermes` (Modelfile derivado, num_ctx 64000, thinking OFF) |
+| Config | `~/.hermes/config.yaml` (provider custom:ollama-local, context 64k) |
+| Provider opcional | OpenRouter (selección manual para consultas potentes) |
+| Logs | `~/Library/Logs/hermes/gateway.{log,err.log}` (cuando el gateway esté activo) |
+| Estado | CLI validado (español, sin thinking, 100% GPU). Discord + MCPs pendientes. |
+
+**Nota RAM:** `qwen3:8b-hermes` (~8.7 GB) y `qwen2.5:14b-instruct` (~12 GB) no
+coexisten residentes en 24 GB. `OLLAMA_KEEP_ALIVE=5m` en el plist de Ollama asegura
+que se turnan. La ingesta Scopus (lunes 04:00) corre antes del keep-warm de Hermes
+(pendiente de activar, horario 9:00–18:00).
+
+**Pendiente:** Discord gateway + LaunchAgent 24/7, MCPs (Notion, Google Calendar,
+Gmail, noticias), keep-warm cron, seguridad (desactivar herramientas no usadas).
+
 ## Modelos Ollama disponibles
 
-- `qwen3:14b` — resúmenes detallados
-- `gemma3:4b` — cribado rápido de abstracts
-- `qwen3:8b` — uso general (RAG: síntesis por defecto en la web)
+- `qwen2.5:14b-instruct` — síntesis RAG (modelo de producción, ~12 GB)
+- `qwen3:8b` — base del modelo de Hermes (NO borrar — ver item 46 actualizado)
+- `qwen3:8b-hermes` — Hermes Agent (Modelfile derivado de qwen3:8b, num_ctx 64000, ~8.7 GB GPU)
+- `qwen3:14b` — resúmenes detallados (candidato a `ollama rm` — ver item 46)
+- `gemma3:4b` — cribado rápido (candidato a `ollama rm` — ver item 46)
 - ~~`nomic-embed-text`~~ — embeddings FAISS (768 dims) — **retirado**, reemplazado por bge-m3
 - `bge-m3` — embeddings FAISS (8192 ctx, 1024 dims, multilingüe) — **modelo de producción**
 
@@ -220,7 +244,16 @@ herramientas adicionales (RAG, editores de configuración, visor de DOIs).
 |---|---|
 | `app.py` (portada) | Health checks en 2 filas: NAS / Ollama (+ latencia) / GROBID (+ latencia) + espacio libre NAS / bge-m3 disponible / permisos escritura NAS. Tabla de categorías con conteos (PDFs, pendientes, MD, resúmenes, chunks, metadata, FAISS, paquetes). Filas de categorías inactivas en gris (`df.style.apply`). **Banner de backup** (solo app privada): aviso si `last_backup.json` no existe o la última copia tiene >15 días. |
 | `1_Ingestar` | 4 tabs: **Scopus** / **Inbox** / **Pendientes** / **Ad-hoc**. Progreso en directo vía `on_output`. Pendientes: tabla de brechas por categoría con reprocesado selectivo. Ad-hoc: formulario + sección **🔗 Integrar ad-hoc en categoría** (selectbox origen/destino, checkbox borrar fuente, llama a `integrate_adhoc()`). Auto-recuperación de estado Inbox al inicio: si `cribado_pendiente.csv` existe en disco (p.ej. tras reinicio launchd), restaura `session_state` y muestra toast. Tab Pendientes: botón 📝 Renombrar PDFs por DOI por categoría (ejecuta `1_rename_papers_by_doi.py --folder categorias/<cat>/pdfs --apply`; PDFs sin DOI se registran en `doi_manual.xlsx`). Usar antes de Reprocesar cuando se copian PDFs con nombres sucios directamente a `pdfs/`. Botón 📝 Renombrar PDFs por DOI protegido: salta PDFs que ya tienen md_clean correspondiente, procesando solo PDFs realmente nuevos. Log persistente en NAS (`ingesta_en_curso.log` → `ingesta_history/`) con recuperación automática al reconectar. |
-| `2_RAG` | Búsqueda FAISS sobre cualquier proyecto+fase. Filtros por tipo y paper_id. Selector de provider (Ollama / Anthropic / OpenAI / OpenRouter) y modelo. Toggle síntesis LLM con streaming. Pre-estimación de coste pre-query. Coste real post-query (OpenRouter registra el coste real devuelto por la API, sin precios estáticos en `LLM_PRICING`). Contador acumulado mensual en sidebar. Log completo de consultas en `metadatos/rag_queries/rag_queries_YYYY-MM.jsonl` (11 campos: pregunta, papers recuperados, respuesta, costes, `mode`). Botón "💾 Guardar como nota" → `notas_rag/<proyecto>/YYYY-MM-DD_<proyecto>_<slug>.md`. Patrón flag+`st.rerun()` para persistencia entre reruns de Streamlit. Expander "📦 Exportar papers recuperados": ZIP en memoria con PDFs y/o md_clean de los papers recuperados (fallback año+autor para PDFs renombrados por Crossref). Botón guardar nota movido al bloque de síntesis (fix rerun). **2026-06-11**: multiselect de Secciones (item 34), filtro de año opt-in, toggle "Recuperación híbrida (denso+BM25)" OFF por defecto (`load_bm25` cacheado por mtime), etiqueta rrf/dist en resultados. **2026-06-16 (item 47)**: uploader de documentos efímeros (PDF/txt/md) + text_area para pegar texto; etiqueta de cita configurable + cupo mínimo de chunks del adjunto (default 3); caché por hash SHA-256 en `st.session_state` (re-preguntar sobre el mismo adjunto no re-embebe); cita sintética `(Etiqueta; adjunto)` vía `utils/attachments.py` + `utils/citations.py`. **2026-06-23**: bloque "🔎 Profundizar (modelo de pago)" — solo app privada (`is_public_app()`), visible solo si hay consulta previa con artículos rescatados. Lanza una segunda consulta con provider de pago (Anthropic/OpenAI/OpenRouter) sobre lo ya rescatado por el modelo local: Modo A "mismos fragmentos" (no toca FAISS, coste mínimo) o Modo B "profundizar en estos papers" (re-consulta FAISS filtrando por los `paper_id` rescatados con top_k ampliado 8–30). Respuesta premium mostrada junto a la gratuita (no la sobrescribe), con modelo/modo/nº fragmentos/coste real; registrada con campo `mode` (`premium_same_chunks`/`premium_deepen`). Reutiliza la función única `synthesize_answer()` y el filtro `paper_id` de `passes_filters` (acepta colección de ids). Persistencia solo en `st.session_state` (`_last_results`). **2026-06-23 (Fase 1)**: chat con memoria sobre los papers rescatados — historial de turnos en `_premium_chat_history`, coste acumulado en `_premium_chat_cost`; en cada turno se reenvían todos los chunks + historial + nueva pregunta; reutiliza `synthesize_answer()` extendida con `history=None`; aviso de contexto largo por chars/4 contra `LLM_CONTEXT_WINDOWS`; modo de registro `premium_chat`; botón "🗑 Nuevo hilo" limpia el historial sin tocar el conjunto de papers. **2026-06-23**: expander "📄 Papers del conjunto actual (N papers)" dentro del bloque premium, con lista compacta (título, autores, año, DOI) y exportación ZIP reutilizando `_render_papers_export()`; mantiene el contexto de papers visible durante los reruns del chat. Fase 2 pendiente: dossier editable / acumulación multi-búsqueda. |
+| `2_RAG` | Búsqueda FAISS sobre cualquier proyecto+fase. Filtros por tipo y paper_id. Selector de provider (Ollama / Anthropic / OpenAI / OpenRouter) y modelo. Toggle síntesis LLM con streaming. Pre-estimación de coste pre-query. Coste real post-query (OpenRouter registra el coste real devuelto por la API, sin precios estáticos en `LLM_PRICING`). Contador acumulado mensual en sidebar. Log completo de consultas en `metadatos/rag_queries/rag_queries_YYYY-MM.jsonl` (11 campos: pregunta, papers recuperados, respuesta, costes, `mode`). Botón "💾 Guardar como nota" → `notas_rag/<proyecto>/YYYY-MM-DD_<proyecto>_<slug>.md`. Patrón flag+`st.rerun()` para persistencia entre reruns de Streamlit. Expander "📦 Exportar papers recuperados": ZIP en memoria con PDFs y/o md_clean de los papers recuperados (fallback año+autor para PDFs renombrados por Crossref). Botón guardar nota movido al bloque de síntesis (fix rerun). **2026-06-11**: multiselect de Secciones (item 34), filtro de año opt-in, toggle "Recuperación híbrida (denso+BM25)" OFF por defecto (`load_bm25` cacheado por mtime), etiqueta rrf/dist en resultados. **2026-06-16 (item 47)**: uploader de documentos efímeros (PDF/txt/md) + text_area para pegar texto; etiqueta de cita configurable + cupo mínimo de chunks del adjunto (default 3); caché por hash SHA-256 en `st.session_state` (re-preguntar sobre el mismo adjunto no re-embebe); cita sintética `(Etiqueta; adjunto)` vía `utils/attachments.py` + `utils/citations.py`. **2026-06-23**: bloque "🔎 Profundizar (modelo de pago)" — solo app privada (`is_public_app()`), visible solo si hay consulta previa con artículos rescatados. Lanza una segunda consulta con provider de pago (Anthropic/OpenAI/OpenRouter) sobre lo ya rescatado por el modelo local: Modo A "mismos fragmentos" (no toca FAISS, coste mínimo) o Modo B "profundizar en estos papers" (re-consulta FAISS filtrando por los `paper_id` rescatados con top_k ampliado 8–30). Respuesta premium mostrada junto a la gratuita (no la sobrescribe), con modelo/modo/nº fragmentos/coste real; registrada con campo `mode` (`premium_same_chunks`/`premium_deepen`). Reutiliza la función única `synthesize_answer()` y el filtro `paper_id` de `passes_filters` (acepta colección de ids). Persistencia solo en `st.session_state` (`_last_results`). **2026-06-23 (Fase 1)**: chat con memoria sobre los papers rescatados — historial de turnos en `_premium_chat_history`, coste acumulado en `_premium_chat_cost`; en cada turno se reenvían todos los chunks + historial + nueva pregunta; reutiliza `synthesize_answer()` extendida con `history=None`; aviso de contexto largo por chars/4 contra `LLM_CONTEXT_WINDOWS`; modo de registro `premium_chat`; botón "🗑 Nuevo hilo" limpia el historial sin tocar el conjunto de papers. **2026-06-23**: bloque "🔎 Profundizar (modelo de pago)" — solo app privada, visible
+  si hay consulta previa con artículos. Dos modos: A "mismos fragmentos" (cero FAISS) y
+  B "profundizar en estos papers" (re-consulta FAISS por `paper_id`, top_k 8–30).
+  Respuesta premium junto a la gratuita; registrada con campo `mode`. **Chat con memoria
+  (Fase 1)**: historial multi-turno sobre los papers rescatados, modo A/B por sesión
+  (fragmentos vs papers completos), coste acumulado visible, aviso de contexto al 80%
+  de ventana, botón "🗑 Nuevo hilo". Expander "📄 Papers del conjunto actual" con lista
+  compacta y exportar ZIP dentro del bloque premium (persiste durante los reruns del
+  chat). `synthesize_answer()` como función única; `_render_papers_export()` reutilizable.
+  Fase 2 pendiente: dossier editable / acumulación multi-búsqueda (item 48). |
 | `3_Keywords` | Editor por textarea de `config/keywords.yml` (una keyword por línea, backup .bak automático) |
 | `4_Scopus_queries` | Editor por categoría de `config/scopus_queries.yml` (multilínea, añadir/duplicar/borrar queries) |
 | `5_DOI_manual` | Visor con filtros de `doi_manual.xlsx`, descarga CSV de vista filtrada. Filtros: búsqueda libre, status, **Solo sin DOI** (checkbox), **Fecha desde** (date_input). |
@@ -290,7 +323,7 @@ Consumo idle ≈ 5-10W.
 | Comando | `python3.13 run_weekly_scopus.py` (venv) |
 | WorkingDirectory | `/Users/martinramirez/proyectos/research_agent/scripts` |
 | Logs | `~/Library/Logs/research_agent/scopus_weekly.{log,err.log}` |
-| Schedule | Lunes a las 06:00 (`StartCalendarInterval`) |
+| Schedule | Lunes a las **04:00** (`StartCalendarInterval`) — plist del repo actualizado; pendiente aplicar en pciq22 |
 | RunAtLoad | false |
 | KeepAlive | false |
 
@@ -439,3 +472,5 @@ UCA) porque:
 
 ⚠️ Los modelos en `~/.ollama/models/` no se tocan al actualizar.
 ⚠️ Evitar abrir Ollama.app — interfiere con el servicio headless.
+
+- **Identidad git:** `user.email = martinconil@gmail.com` / `user.name = Martín Ramírez` configurada globalmente en ambas máquinas (2026-06-23). El NAS (`/Volumes/Disco/`) hereda la identidad del entorno desde el que se ejecuta git — usar siempre desde pciq22 o con la global correcta.

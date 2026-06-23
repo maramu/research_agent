@@ -3,6 +3,88 @@
 
 ---
 
+## Sesión 2026-06-23
+
+### RAG: chat premium con modo A/B y contexto de papers visible (commits 0e2bc3f → e5a41da)
+
+Añadidas tres funcionalidades nuevas a `2_RAG.py` como extensión del bloque premium
+(solo app privada):
+
+**1. Consulta premium de un disparo (commit 0e2bc3f):**
+
+- Bloque "🔎 Profundizar (modelo de pago)" visible solo si hay consulta previa con
+  artículos rescatados. Lanza una segunda consulta con provider de pago
+  (Anthropic/OpenAI/OpenRouter) sobre lo ya rescatado por el modelo local, sin re-recuperar.
+- Modo A "mismos fragmentos" (cero FAISS, coste mínimo) o Modo B "profundizar en estos
+  papers" (re-consulta FAISS filtrando por los `paper_id` rescatados, top_k 8–30).
+- Respuesta premium junto a la gratuita (no la sobrescribe); registrada con campo `mode`
+  (`premium_same_chunks` / `premium_deepen`).
+- Refactor: `synthesize_answer()` como función única (ruta gratuita + premium + chat);
+  `passes_filters()` en `utils/retrieval.py` ampliado para aceptar colección de `paper_id`
+  exactos (Modo B). Campo `mode` añadido a `record_rag_query` / `record_rag_query_full`
+  en `app_utils.py`.
+
+**2. Chat con memoria — Fase 1 (commits 2ec6a6b, dffa3ed, 1e323bf, 7dccb18, e5a41da):**
+
+- Bloque "💬 Chat con memoria sobre estos papers": historial de turnos en
+  `_premium_chat_history`, coste acumulado en `_premium_chat_cost`.
+- En cada turno se reenvían todos los chunks + historial + nueva pregunta (fidelidad
+  máxima; el coste visible refleja la acumulación).
+- Selector de modo por sesión: "Fragmentos recuperados" (usa `_last_results`, Modo A) o
+  "Papers completos" (re-consulta FAISS filtrando por `paper_id` con top_k ampliado,
+  Modo B). Helper reutilizable `_retrieve_paper_deepen_results()` compartido con la
+  consulta de un disparo.
+- Aviso de contexto largo cuando la estimación por caracteres/4 supera el 80 % de
+  `LLM_CONTEXT_WINDOWS` (dict en `app_utils.py`).
+- Botón "🗑 Nuevo hilo" limpia historial sin tocar el conjunto de papers.
+- Expander "📄 Papers del conjunto actual (N papers)" al inicio del bloque premium:
+  lista compacta (título, autores truncados a 3 + et al., año, DOI) + exportar ZIP;
+  función reutilizable `_render_papers_export(papers, project, key_prefix)` usada
+  también en los resultados de la búsqueda gratuita.
+- Registro con `mode="premium_chat"`.
+- **Fase 2 pendiente:** dossier editable / acumulación multi-búsqueda (item 48).
+
+**3. Fixes de Streamlit aplicados durante la iteración:**
+
+- `fix(rag): resetear input del chat premium sin violar regla de widget` (commit dffa3ed):
+  asignación directa `st.session_state["premium_chat_input"] = ""` movida a callback
+  `_submit_premium_chat` (corre antes de reinstanciar el widget).
+- `fix(rag): inicializar prev_project antes de usarlo en render_premium_block`
+  (commit e5a41da): `prev_project` inicializado junto a `prev_query` y `prev_papers`
+  al inicio de `render_premium_block()` con `session_state.get(…, "")`.
+
+### Infraestructura Hermes Agent en pciq22 (instalación manual, sin commits en este repo)
+
+Instalado y validado Hermes Agent (Nous Research) en `pciq22.uca.es` como asistente
+personal de productividad, independiente del RAG. Estado actual:
+
+- **Modelo:** `qwen3:8b-hermes` (Modelfile derivado de `qwen3:8b`, `num_ctx 64000`,
+  temperatura 0.6). Footprint 8.7 GB GPU, 100 % Metal, thinking desactivado vía
+  `enable_thinking: false` en `extra_body` del provider.
+- **Ollama** actualizado con `OLLAMA_FLASH_ATTENTION=1` y `OLLAMA_KV_CACHE_TYPE=q8_0`
+  en el plist `com.martin.ollama.plist`. KV-cache `q8_0` reduce el footprint de 11 GB
+  a 8.7 GB. Keep-alive global 5m (RAG y Hermes no coexisten residentes en 24 GB).
+- **Config:** `~/.hermes/config.yaml` — provider `custom:ollama-local` apuntando a
+  `http://localhost:11434/v1`; `context_length: 64000`; Nous Portal logueado pero
+  dormido (no seleccionado como provider).
+- **OpenRouter** añadido como provider opcional en `custom_providers` (para consultas
+  puntuales potentes; selección manual, nunca automática).
+- **Validado en CLI:** responde en español, sin thinking, 100 % GPU.
+- **Pendiente:** Discord (bot, token, intents), MCPs (Notion OAuth, Google Calendar +
+  Gmail vía cliente OAuth en GCP proyecto `hermes-pciq22`), web search (Tavily),
+  keep-warm cron (9:00–18:00), seguridad (desactivar terminal/code_execution),
+  LaunchAgent 24/7, actualizar `ESTADO.md` sección Hermes cuando esté completo.
+
+### Ingesta semanal Scopus: hora cambiada de 06:00 a 04:00 (lunes)
+
+- Plist `deployment/com.research_agent.scopus_weekly.plist` actualizado con `Hour=4`.
+- Commit `chore:` mover ingesta semanal Scopus a las 04:00 (hash 0e2bc3f aprox).
+- **Pendiente en pciq22:** `git pull` + `cp deployment/... ~/Library/LaunchAgents/` +
+  `launchctl bootout/bootstrap` para que el launchd instalado recoja la nueva hora.
+  Hasta que se aplique, la ingesta sigue a las 06:00.
+
+---
+
 ### ✅ Contexto visible durante el chat premium: lista de papers + exportar ZIP (2026-06-23)
 - Nuevo expander colapsado "📄 Papers del conjunto actual (N papers)" al inicio del bloque
   premium de `2_RAG.py` (antes de selectores de modo/provider e historial del chat), visible

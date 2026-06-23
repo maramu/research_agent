@@ -1,7 +1,7 @@
 # Mejoras pendientes — research_agent
 > Backlog vivo. Histórico de lo hecho: Mejoras_realizadas.md · Estado/arquitectura: ESTADO.md
 
-## Orden de prioridad (revisión 2026-06-13)
+## Orden de prioridad (revisión 2026-06-23)
 1. ~~`detect_affected_categories` con `normalize_stem`~~ — ✅ **COMPLETADO 2026-06-13** (incluido en puerta de dedup por DOI).
 2. Item 37 — golden Q&A.
 3. Item 36 — idempotencia.
@@ -9,6 +9,7 @@
 5. Item 45 — consolidar utilidades de texto duplicadas pdf_utils↔1_rename. **Nota 2026-06-13:** el trabajo de hoy sobre DOIs tocó ambos ficheros (`normalize_doi`, `normalize_stem`, lookups por stem/título en `doi_manual`). Revisar si introdujo nueva divergencia antes de consolidar.
 6. ~~Item 41 — índice viejo all__bge-m3.~~ ✅ COMPLETADO 2026-06-16.
 7. Item 35 — OCR (si hay escaneados). Item 31 — MVP libros, tras el 37.
+- Item 49 — completar Hermes Agent (Discord + MCPs).
 - ~~Timeout job semanal: subir `SCOPUS_TIMEOUT` de 2700 a 5400 (45→90 min)~~ — ✅ **COMPLETADO 2026-06-15** — `run_weekly_scopus.py`: `SCOPUS_TIMEOUT = 5400`; `WEEKLY_CATEGORIES` ampliada con `anoxic_biogas_biodesulfurization`.
 
 ## Hallazgos pendientes (revisión 2026-06-12)
@@ -256,14 +257,30 @@ categorías explícitas; sort_keys=True en promote_adhoc_to_category.
 
 ### 46. Borrar modelos Ollama obsoletos en pciq22 — BAJA prioridad
 
-Tras validar `qwen2.5:14b-instruct` como único modelo de síntesis local
-(formato de citas correcto + síntesis en español sin alucinar), retirados del
-selector `gemma3:4b`, `qwen3:8b` y `qwen3:14b`. Siguen ocupando ~18 GB en disco.
+`qwen3:8b` **ya no es candidato a borrado**: es la base del modelo `qwen3:8b-hermes`
+de Hermes Agent (2026-06-23). **No ejecutar `ollama rm qwen3:8b`.**
 
-Cuando se confirme en uso real que `qwen2.5:14b-instruct` cubre todos los casos
-(unos días de uso), liberar espacio en pciq22:
+Candidatos actuales a liberar cuando se confirme que no se necesitan:
+- `gemma3:4b` (~2.5 GB) — retirado del selector RAG
+- `qwen3:14b` (~8 GB) — retirado del selector RAG
 
-    ollama rm gemma3:4b qwen3:8b qwen3:14b
+```bash
+ollama rm gemma3:4b qwen3:14b
+```
 
-Ejecución pura de datos (no toca código). Reversible con `ollama pull` si hiciera
-falta. Actualizar entonces la lista de "Required Ollama models" en ESTADO.md.
+Reversible con `ollama pull`. Actualizar la sección "Modelos Ollama disponibles"
+de `ESTADO.md` tras ejecutar.
+
+### 49. Hermes Agent — completar infraestructura en pciq22 — MEDIA prioridad
+
+Pendiente de completar desde la sesión 2026-06-23:
+
+- [ ] Discord: crear bot, token, Message Content Intent ON, invitar a servidor,
+      `DISCORD_BOT_TOKEN` + `DISCORD_ALLOWED_USERS` en `~/.hermes/.env`,
+      `hermes gateway` + LaunchAgent `com.hermes.gateway.plist`.
+- [ ] MCPs: Notion (OAuth directo), Google Calendar + Gmail (cliente OAuth en GCP
+      proyecto `hermes-pciq22`, tipo "App de escritorio").
+- [ ] Web search: Tavily API key en `.env`, `hermes config set web.backend tavily`.
+- [ ] Keep-warm cron: `~/hermes_keepwarm.sh` cada 8 min, lunes–viernes 9:00–18:00.
+- [ ] Seguridad: desactivar `terminal`, `code_execution` y `browser` con `hermes tools`.
+- [ ] Aplicar hora 04:00 en plist instalado de la ingesta (git pull + cp + launchctl en pciq22).
