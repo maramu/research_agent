@@ -571,6 +571,38 @@ def _run_premium_chat():
     st.rerun()
 
 
+def _submit_premium_chat():
+    """Callback del botón 'Preguntar' del chat premium.
+
+    Se ejecuta antes de que el widget de entrada se vuelva a instanciar, por lo
+    que es seguro leer y limpiar ``st.session_state["premium_chat_input"]``.
+    """
+    question = st.session_state.get("premium_chat_input", "").strip()
+    if not question:
+        return
+
+    provider = st.session_state.get("premium_provider")
+    if provider == "Anthropic (Claude)":
+        model = st.session_state.get("premium_model_ant")
+    elif provider == "OpenAI (GPT)":
+        model = st.session_state.get("premium_model_oai")
+    elif provider == "OpenRouter":
+        model = st.session_state.get("premium_model_or")
+    else:
+        model = None
+    max_out = st.session_state.get("premium_maxout", 1024)
+
+    if not model or not provider:
+        return
+
+    st.session_state["_premium_chat_question"] = question
+    st.session_state["_premium_chat_provider"] = provider
+    st.session_state["_premium_chat_model"]    = model
+    st.session_state["_premium_chat_maxout"]   = max_out
+    st.session_state["_do_premium_chat"]       = True
+    st.session_state["premium_chat_input"]     = ""
+
+
 def render_premium_block():
     """Bloque '🔎 Profundizar (modelo de pago)'.
 
@@ -720,7 +752,7 @@ def render_premium_block():
 
     col_chat1, col_chat2 = st.columns([4, 1])
     with col_chat1:
-        new_question = st.text_input(
+        st.text_input(
             "Nueva pregunta",
             placeholder="Pregunta de seguimiento sobre los papers rescatados…",
             key="premium_chat_input",
@@ -735,15 +767,16 @@ def render_premium_block():
             st.session_state.pop("_premium_chat_last_info", None)
             st.rerun()
 
-    if st.button("Preguntar", type="primary", key="premium_chat_ask",
-                 disabled=not (p_model and new_question.strip())):
-        st.session_state["_premium_chat_question"] = new_question.strip()
-        st.session_state["_premium_chat_provider"] = p_provider
-        st.session_state["_premium_chat_model"]    = p_model
-        st.session_state["_premium_chat_maxout"]   = p_maxout
-        st.session_state["_do_premium_chat"]       = True
-        st.session_state["premium_chat_input"]     = ""
-        st.rerun()
+    # on_click ejecuta el callback ANTES de reinstanciar el widget de entrada,
+    # evitando StreamlitAPIException al limpiar la clave del input.
+    st.button(
+        "Preguntar", type="primary", key="premium_chat_ask",
+        disabled=not (
+            p_model
+            and st.session_state.get("premium_chat_input", "").strip()
+        ),
+        on_click=_submit_premium_chat,
+    )
 
     # Métricas de coste del chat.
     last_cost = st.session_state.get("_premium_chat_last_cost")
