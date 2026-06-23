@@ -16,7 +16,7 @@ Hermes validado de punta a punta en `pciq22` a través de Discord (modelo
   `hermes gateway start|stop|restart`.
 - **Acceso restringido:** `DISCORD_ALLOWED_USERS` = solo el User ID propio. Home channel
   fijado con `/sethome` a un Channel ID válido (entrega de crons y mensajes proactivos).
-- **Tres canales temáticos** en el servidor (`docencia`, `investigacion`, `noticias`) en
+- **Tres canales temáticos** en el servidor (`docencia`, `investigacion`, `noticias`, `general`) en
   `discord.free_response_channels`: responden sin @mención y mantienen **contexto
   independiente por canal**. El resto sigue `require_mention: true`.
 - **Web search Tavily** operativo, verificado con una búsqueda de noticias real.
