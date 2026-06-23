@@ -685,8 +685,9 @@ def render_premium_block():
 
     st.divider()
     st.subheader("🔎 Profundizar (modelo de pago)")
-    prev_query  = st.session_state.get("_last_query", "")
-    prev_papers = st.session_state.get("_last_retrieved_papers", [])
+    prev_query   = st.session_state.get("_last_query", "")
+    prev_papers  = st.session_state.get("_last_retrieved_papers", [])
+    prev_project = st.session_state.get("_last_project", "")
     st.caption(
         f"Sobre la consulta previa: «{prev_query[:90]}» · "
         f"{len(prev_results)} fragmentos · {len(prev_papers)} papers. "

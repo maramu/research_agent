@@ -15,6 +15,9 @@
   usa en dos sitios de la misma página.
 - Esto evita que los `st.rerun()` del chat hagan desaparecer el contexto del conjunto de papers:
   el usuario siempre puede desplegar el expander y ver/qué papers están en juego.
+- **Fix**: inicialización de `prev_project` al inicio de `render_premium_block()` para evitar
+  `UnboundLocalError` al construir la ruta a `papers_metadata.jsonl` cuando el usuario entra al
+  bloque premium sin haber disparado previamente el handler del chat.
 
 ---
 
