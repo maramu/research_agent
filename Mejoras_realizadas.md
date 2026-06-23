@@ -3,6 +3,34 @@
 
 ---
 
+### ✅ Chat con memoria sobre papers rescatados en RAG — Fase 1 (2026-06-23)
+- Nuevo bloque "💬 Chat con memoria sobre estos papers" dentro del área premium de
+  `2_RAG.py`, solo app privada (`is_public_app()` guard). No aparece en la app pública.
+- Mantiene un historial de turnos en `st.session_state["_premium_chat_history"]` y un coste
+  acumulado de la sesión en `st.session_state["_premium_chat_cost"]`.
+- En cada turno se reenvían al modelo de pago **todos los chunks** de la última búsqueda más
+  el historial completo y la nueva pregunta (máxima fidelidad, decisión documentada).
+- Reutiliza el mismo selector de provider/modelo de pago (Anthropic / OpenAI / OpenRouter) y
+  la **misma** función `synthesize_answer()`, extendida aditivamente con un parámetro opcional
+  `history=None`. Cuando `history` es `None` el comportamiento es idéntico al anterior (rutas
+  gratuita y premium de un disparo intactas).
+- El historial se pasa como mensajes `system` (reglas + fragmentos) + mensajes previos
+  `user`/`assistant` + nueva pregunta. Ollama recibe un prompt plano equivalente.
+- Botón "🗑 Nuevo hilo" que limpia el historial y el coste acumulado pero conserva el conjunto
+  de papers (`_last_results`). Una nueva búsqueda gratuita también resetea el hilo.
+- Coste acumulado visible en la UI (`Coste acumulado del hilo` + `Último turno`), actualizado
+  en cada turno sumando al acumulado previo.
+- Aviso de contexto largo: estimación por caracteres/4 del payload (chunks + historial +
+  pregunta + tokens de salida); si supera el 80 % de la ventana del modelo seleccionado se
+  muestra `st.warning` sugiriendo nuevo hilo o reducir el conjunto.
+- Cada turno se registra en `rag_usage_*.jsonl` y `rag_queries_*.jsonl` con `mode="premium_chat"`.
+- Hereda el post-procesado de citas (`apply_citations`, que incluye `strip_reference_section`)
+  de `synthesize_answer()`; las respuestas del chat usan `[N]` como el resto de rutas.
+- Mapa de ventanas de contexto añadido a `app_utils.py` (`LLM_CONTEXT_WINDOWS`) para los
+  modelos de pago y Ollama.
+
+---
+
 ### ✅ Consulta premium (modelo de pago) sobre artículos rescatados en RAG (2026-06-23)
 - Nuevo bloque "🔎 Profundizar (modelo de pago)" en `2_RAG.py`, visible SOLO cuando ya hay
   una consulta previa con artículos rescatados y SOLO en la app privada (guard

@@ -39,7 +39,7 @@ from app_utils import (
     ANTHROPIC_MODELS, OPENAI_MODELS, OLLAMA_MODELS_LLM, OLLAMA_MODEL_EMBED,
     OPENROUTER_MODELS, OPENROUTER_API_KEY,
     OLLAMA_HOST, ANTHROPIC_API_KEY, OPENAI_API_KEY,
-    CATEGORIAS_DIR, NAS_ROOT, LLM_PRICING,
+    CATEGORIAS_DIR, NAS_ROOT, LLM_PRICING, LLM_CONTEXT_WINDOWS,
     check_anthropic_api, check_nas, check_ollama, check_openai_api,
     check_openrouter_api,
     embedding_phase_model, estimate_cost_pre_query, estimate_cost_usd,
@@ -180,8 +180,32 @@ def embed_query(client, query: str, model: str) -> np.ndarray:
     return np.array(resp["embedding"], dtype="float32")
 
 
+def _build_context_text(chunks):
+    """Construye el bloque de fragmentos numerados a partir de metadata de chunks.
+
+    ``chunks`` es un iterable de dicts con al menos ``text`` y ``section``.
+    """
+    parts = []
+    for i, m in enumerate(chunks, start=1):
+        snippet = m.get("text", "").strip()
+        section = m.get("section", "?")
+        parts.append(f"[{i}] sección: {section}\n{snippet}")
+    return "\n\n---\n\n".join(parts)
+
+
+def _format_chat_prompt(system_content, history, query):
+    """Formatea un prompt plano (Ollama) con sistema, historial y pregunta nueva."""
+    lines = [system_content, ""]
+    for turn in history:
+        label = "Usuario" if turn["role"] == "user" else "Asistente"
+        lines.append(f"{label}: {turn['content']}")
+    lines.append(f"Usuario: {query}")
+    lines.append("Asistente:")
+    return "\n\n".join(lines)
+
+
 def synthesize_answer(provider, model, results, query, papers_meta,
-                      max_output_tokens, out_box):
+                      max_output_tokens, out_box, history=None):
     """Sintetiza una respuesta sobre ``results`` con el provider/modelo dados.
 
     Función ÚNICA de síntesis: la usan tanto la consulta gratuita (Ollama) como
@@ -190,6 +214,11 @@ def synthesize_answer(provider, model, results, query, papers_meta,
     ``(answer_md, usage_capture, prompt)``.
 
     ``results`` es una lista de tuplas ``(score, idx, m)`` (m = metadata del chunk).
+
+    ``history`` (opcional) es una lista de turnos ``{"role": "user"/"assistant",
+    "content": ...}``. Cuando se pasa, el LLM recibe el contexto como mensaje
+    ``system`` seguido del historial completo y la nueva pregunta. Cuando es
+    ``None`` el comportamiento es idéntico al anterior: un único mensaje ``user``.
     """
     usage_capture = {
         "input_tokens": 0,
@@ -198,17 +227,12 @@ def synthesize_answer(provider, model, results, query, papers_meta,
         "cost_usd_override": None,
     }
 
-    context_parts = []
-    for i, (_, _, m) in enumerate(results, start=1):
-        snippet = m.get("text", "").strip()
-        section = m.get("section", "?")
-        context_parts.append(f"[{i}] sección: {section}\n{snippet}")
-    context = "\n\n---\n\n".join(context_parts)
+    context = _build_context_text(m for _, _, m in results)
 
     # Mapa [N] -> (Apellido, Año; DOI) para el post-proceso de la respuesta.
     cite_map = build_cite_map(results, papers_meta)
 
-    prompt = f"""Eres un asistente científico. Responde a la pregunta basándote ÚNICAMENTE en los fragmentos numerados que se proporcionan a continuación.
+    system_content = f"""Eres un asistente científico. Responde a la pregunta basándote ÚNICAMENTE en los fragmentos numerados que se proporcionan a continuación.
 
 Reglas:
 - Si los fragmentos no contienen información suficiente para responder, dilo claramente.
@@ -219,33 +243,51 @@ Reglas:
 Fragmentos:
 {context}
 
-Pregunta: {query}
+Recuerda: cita con [N] junto a cada dato; sin sección de Referencias."""
 
-Recuerda: cita con [N] junto a cada dato; sin sección de Referencias.
-
-Respuesta:"""
+    if history is None:
+        # Comportamiento original: un único mensaje user con todo el contexto.
+        prompt = f"{system_content}\n\nPregunta: {query}\n\nRespuesta:"
+        ollama_prompt = prompt
+        anthropic_system = None
+        anthropic_messages = [{"role": "user", "content": prompt}]
+        openai_messages = [{"role": "user", "content": prompt}]
+    else:
+        # Chat con memoria: system + historial + nueva pregunta.
+        chat_tail = [
+            {"role": turn["role"], "content": turn["content"]}
+            for turn in history
+        ] + [{"role": "user", "content": query}]
+        ollama_prompt = _format_chat_prompt(system_content, history, query)
+        prompt = ollama_prompt
+        anthropic_system = system_content
+        anthropic_messages = chat_tail
+        openai_messages = [{"role": "system", "content": system_content}] + chat_tail
 
     # ─────────────────────────── Streaming por provider ──────────────────────
 
     def stream_ollama():
         client = get_ollama_client()
         full = ""
-        for chunk in client.generate(model=model, prompt=prompt, stream=True):
+        for chunk in client.generate(model=model, prompt=ollama_prompt, stream=True):
             text = chunk.get("response", "")
             full += text
             yield text
         # Ollama no devuelve token counts → estimar
-        usage_capture["input_tokens"]  = max(1, len(prompt) // 4)
+        usage_capture["input_tokens"]  = max(1, len(ollama_prompt) // 4)
         usage_capture["output_tokens"] = max(1, len(full) // 4)
         usage_capture["is_estimated"]  = True
 
     def stream_anthropic():
         client = get_anthropic_client()
-        with client.messages.stream(
-            model=model,
-            max_tokens=max_output_tokens,
-            messages=[{"role": "user", "content": prompt}],
-        ) as stream:
+        kwargs = {
+            "model": model,
+            "max_tokens": max_output_tokens,
+            "messages": anthropic_messages,
+        }
+        if anthropic_system:
+            kwargs["system"] = anthropic_system
+        with client.messages.stream(**kwargs) as stream:
             for text in stream.text_stream:
                 yield text
             final = stream.get_final_message()
@@ -256,7 +298,7 @@ Respuesta:"""
         client = get_openai_client()
         oa_stream = client.chat.completions.create(
             model=model,
-            messages=[{"role": "user", "content": prompt}],
+            messages=openai_messages,
             max_tokens=max_output_tokens,
             stream=True,
             stream_options={"include_usage": True},
@@ -274,7 +316,7 @@ Respuesta:"""
         client = get_openrouter_client()
         or_stream = client.chat.completions.create(
             model=model,
-            messages=[{"role": "user", "content": prompt}],
+            messages=openai_messages,
             max_tokens=max_output_tokens,
             stream=True,
             stream_options={"include_usage": True},
@@ -441,6 +483,94 @@ def _run_premium_query():
     st.rerun()
 
 
+def _estimate_premium_chat_tokens(chunks, history, query, max_out):
+    """Estimación grosera (chars/4) del tamaño del payload de un turno de chat."""
+    overhead_chars = 500  # instrucciones del sistema sin contar fragmentos
+    context_chars = len(_build_context_text(chunks))
+    history_chars = sum(len(t.get("content", "")) for t in history)
+    query_chars = len(query)
+    input_tk = (overhead_chars + context_chars + history_chars + query_chars) // 4
+    return input_tk + max_out
+
+
+def _run_premium_chat():
+    """Ejecuta un turno del chat premium con memoria.
+
+    Reutiliza los chunks de la última búsqueda, envía el historial completo más
+    la nueva pregunta, acumula el coste en session_state y registra el turno con
+    mode="premium_chat".
+    """
+    provider = st.session_state.get("_premium_chat_provider")
+    model    = st.session_state.get("_premium_chat_model")
+    max_out  = st.session_state.get("_premium_chat_maxout", 1024)
+    question = st.session_state.pop("_premium_chat_question", "")
+
+    prev_results = st.session_state.get("_last_results", [])
+    prev_project = st.session_state.get("_last_project", "")
+    history      = list(st.session_state.get("_premium_chat_history", []))
+
+    if not question.strip():
+        return
+    if not model or not provider:
+        st.error("Falta seleccionar provider/modelo de pago.")
+        return
+
+    _mj = CATEGORIAS_DIR / prev_project / "metadata" / "papers_metadata.jsonl"
+    _mm = _mj.stat().st_mtime if _mj.exists() else 0.0
+    papers_meta = load_papers_meta(prev_project, _mm)
+
+    results = [(d["score"], 0, d["m"]) for d in prev_results]
+    if not results:
+        st.warning("No hay fragmentos disponibles para el chat premium.")
+        return
+
+    st.markdown("**Generando respuesta del chat…**")
+    out_box = st.empty()
+    try:
+        answer_md, usage_capture, _prompt = synthesize_answer(
+            provider, model, results, question, papers_meta, max_out, out_box,
+            history=history,
+        )
+    except Exception as e:
+        st.error(f"Error al generar la respuesta del chat con {provider}: {e}")
+        return
+
+    in_tk  = usage_capture["input_tokens"]
+    out_tk = usage_capture["output_tokens"]
+    _override = usage_capture.get("cost_usd_override")
+    cost = _override if _override is not None else estimate_cost_usd(model, in_tk, out_tk)
+
+    history.append({"role": "user", "content": question})
+    history.append({"role": "assistant", "content": answer_md})
+    st.session_state["_premium_chat_history"] = history
+    st.session_state["_premium_chat_cost"] = st.session_state.get("_premium_chat_cost", 0.0) + cost
+    st.session_state["_premium_chat_last_cost"] = cost
+    st.session_state["_premium_chat_last_info"] = {
+        "model": model, "provider": provider,
+        "in_tk": in_tk, "out_tk": out_tk,
+        "is_estimated": usage_capture["is_estimated"],
+    }
+
+    retrieved = list(dict.fromkeys(
+        m.get("paper_id", "") for _, _, m in results
+        if m.get("paper_id") and m.get("paper_id") != "__attachment__"
+    ))
+    prov_key = provider.split(" ")[0].lower()
+    record_rag_query(
+        provider=prov_key, model=model,
+        input_tokens=in_tk, output_tokens=out_tk, cost_usd=cost,
+        query=question, project=prev_project,
+        is_estimated=usage_capture["is_estimated"], mode="premium_chat",
+    )
+    record_rag_query_full(
+        category=prev_project, question=question,
+        provider=prov_key, model=model, top_k=len(results),
+        retrieved_papers=retrieved, answer_md=answer_md,
+        estimated_cost=0.0, real_cost=cost, mode="premium_chat",
+    )
+    st.rerun()
+
+
 def render_premium_block():
     """Bloque '🔎 Profundizar (modelo de pago)'.
 
@@ -450,6 +580,12 @@ def render_premium_block():
     prev_results = st.session_state.get("_last_results")
     if not prev_results:
         return
+
+    # Estado del chat con memoria (independiente del resultado premium de un solo uso).
+    if "_premium_chat_history" not in st.session_state:
+        st.session_state["_premium_chat_history"] = []
+    if "_premium_chat_cost" not in st.session_state:
+        st.session_state["_premium_chat_cost"] = 0.0
 
     st.divider()
     st.subheader("🔎 Profundizar (modelo de pago)")
@@ -466,6 +602,11 @@ def render_premium_block():
     if st.session_state.pop("_do_premium", False):
         _run_premium_query()
         return  # _run_premium_query hace st.rerun() al terminar correctamente
+
+    # Handler del flag: corre tras el rerun que dispara el botón "Preguntar" del chat.
+    if st.session_state.pop("_do_premium_chat", False):
+        _run_premium_chat()
+        return  # _run_premium_chat hace st.rerun() al terminar correctamente
 
     # Resultado premium persistido (sobrevive a reruns posteriores). Se muestra
     # junto a la respuesta gratuita, sin sobrescribirla.
@@ -554,6 +695,70 @@ def render_premium_block():
         st.session_state["_premium_maxout_sel"]   = p_maxout
         st.session_state["_do_premium"]           = True
         st.rerun()
+
+    # ── Chat con memoria sobre los papers rescatados ──
+    st.divider()
+    st.subheader("💬 Chat con memoria sobre estos papers")
+    chat_history = st.session_state.get("_premium_chat_history", [])
+    chat_cost    = st.session_state.get("_premium_chat_cost", 0.0)
+
+    for turn in chat_history:
+        with st.chat_message(turn["role"]):
+            st.markdown(turn["content"])
+
+    # Aviso de contexto largo (estimación chars/4).
+    _chat_input_val = st.session_state.get("premium_chat_input", "")
+    _window_limit = LLM_CONTEXT_WINDOWS.get(p_model, 128_000) if p_model else 128_000
+    _estimated_tk = _estimate_premium_chat_tokens(
+        [d["m"] for d in prev_results], chat_history, _chat_input_val, p_maxout or 1024,
+    )
+    if _estimated_tk > 0.8 * _window_limit:
+        st.warning(
+            "La conversación es larga; considera empezar un hilo nuevo o reducir el conjunto. "
+            f"Estimación: ~{_estimated_tk:,} tokens / límite ~{_window_limit:,}."
+        )
+
+    col_chat1, col_chat2 = st.columns([4, 1])
+    with col_chat1:
+        new_question = st.text_input(
+            "Nueva pregunta",
+            placeholder="Pregunta de seguimiento sobre los papers rescatados…",
+            key="premium_chat_input",
+        )
+    with col_chat2:
+        st.write("")
+        st.write("")
+        if st.button("🗑 Nuevo hilo", key="premium_chat_reset"):
+            st.session_state["_premium_chat_history"] = []
+            st.session_state["_premium_chat_cost"] = 0.0
+            st.session_state.pop("_premium_chat_last_cost", None)
+            st.session_state.pop("_premium_chat_last_info", None)
+            st.rerun()
+
+    if st.button("Preguntar", type="primary", key="premium_chat_ask",
+                 disabled=not (p_model and new_question.strip())):
+        st.session_state["_premium_chat_question"] = new_question.strip()
+        st.session_state["_premium_chat_provider"] = p_provider
+        st.session_state["_premium_chat_model"]    = p_model
+        st.session_state["_premium_chat_maxout"]   = p_maxout
+        st.session_state["_do_premium_chat"]       = True
+        st.session_state["premium_chat_input"]     = ""
+        st.rerun()
+
+    # Métricas de coste del chat.
+    last_cost = st.session_state.get("_premium_chat_last_cost")
+    if chat_history:
+        c1, c2 = st.columns(2)
+        c1.metric("Coste acumulado del hilo", fmt_cost(chat_cost))
+        if last_cost is not None:
+            c2.metric("Último turno", fmt_cost(last_cost))
+        last_info = st.session_state.get("_premium_chat_last_info")
+        if last_info:
+            st.caption(
+                f"Último turno: `{last_info['model']}` · "
+                f"{last_info['in_tk']:,} in + {last_info['out_tk']:,} out · "
+                f"{'estimado' if last_info.get('is_estimated') else 'real'}"
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -900,9 +1105,14 @@ st.session_state["_last_results"] = [
 st.session_state["_last_query"]       = query
 st.session_state["_last_phase"]       = phase
 st.session_state["_last_embed_model"] = embed_model
-# Una consulta gratuita nueva invalida cualquier respuesta premium anterior.
+# Una consulta gratuita nueva invalida cualquier respuesta premium anterior
+# y también el hilo de chat (el chat va ligado al conjunto de papers actual).
 st.session_state.pop("_premium_answer", None)
 st.session_state.pop("_premium_info", None)
+st.session_state.pop("_premium_chat_history", None)
+st.session_state.pop("_premium_chat_cost", None)
+st.session_state.pop("_premium_chat_last_cost", None)
+st.session_state.pop("_premium_chat_last_info", None)
 
 # ---------------------------------------------------------------------------
 # Síntesis

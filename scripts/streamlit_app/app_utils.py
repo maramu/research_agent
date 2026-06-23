@@ -131,6 +131,25 @@ LLM_PRICING: Dict[str, Dict[str, float]] = {
     "qwen2.5:14b-instruct": {"input": 0.0,   "output": 0.0},
 }
 
+# Ventanas de contexto aproximadas (tokens) para los modelos usables en RAG.
+# Se usan para advertir cuando un hilo de chat se acerca al límite.
+LLM_CONTEXT_WINDOWS: Dict[str, int] = {
+    # Anthropic
+    "claude-haiku-4-5":  200_000,
+    "claude-sonnet-4-6": 200_000,
+    "claude-opus-4-7":   200_000,
+    # OpenAI
+    "gpt-4o-mini": 128_000,
+    "gpt-4o":      128_000,
+    # OpenRouter (valores conservadores/estimados)
+    "deepseek/deepseek-v4-flash": 64_000,
+    "deepseek/deepseek-v4-pro":   64_000,
+    "moonshotai/kimi-k2.6":      256_000,
+    "z-ai/glm-5.2":              128_000,
+    # Ollama
+    "qwen2.5:14b-instruct": 32_768,
+}
+
 
 def model_provider(model: str) -> str:
     """Devuelve el provider de un model id."""

@@ -103,6 +103,18 @@ Considerar primero: terminar items 4, 7, 15, 17-25, 30.
 
 ## Nuevas mejoras — items pendientes
 
+### 48. RAG: chat multi-búsqueda / dossier editable (Fase 2) — MEDIA prioridad
+
+La Fase 1 del chat con memoria (`2026-06-23`) ata el hilo a la **última búsqueda**
+(`_last_results`). La Fase 2 debería permitir:
+- Acumular papers de varias búsquedas en un "dossier" editable por el usuario.
+- Elegir explícitamente qué papers/chunks entran en el contexto del chat (incluir/excluir).
+- Persistir el dossier más allá de la sesión (JSON en `metadatos/rag_sessions/` o similar).
+- Continuar un hilo anterior o empezar varios hilos por proyecto.
+
+Motivo: evitar reenviar todos los chunks de una búsqueda amplia y dar control al
+usuario sobre el contexto, reduciendo coste y alucinaciones.
+
 ### 18. Carpeta de cuarentena — MEDIA prioridad (parcialmente cubierto)
 
 Crear `/Volumes/research/quarantine/` para documentos dudosos:
