@@ -368,6 +368,40 @@ Recuerda: cita con [N] junto a cada dato; sin sección de Referencias."""
 # y el filtro paper_id de passes_filters (no reimplementa el retrieval).
 # ---------------------------------------------------------------------------
 
+def _retrieve_paper_deepen_results(query, paper_ids, project, phase, embed_model, top_k):
+    """Re-consulta FAISS restringida a un conjunto de paper_id con top_k ampliado.
+
+    Devuelve una lista de tuplas ``(score, idx, m)`` con los chunks recuperados,
+    o ``None`` si no se pudo cargar el índice o no hay paper_ids.
+    """
+    _ip = CATEGORIAS_DIR / project / "embeddings" / phase / "index.faiss"
+    _im = _ip.stat().st_mtime if _ip.exists() else 0.0
+    p_index, p_meta, _p_cfg = load_index(project, phase, _im)
+    if p_index is None:
+        st.error("No se pudo recargar el índice para profundizar.")
+        return None
+    paper_set = set(paper_ids)
+    if not paper_set:
+        st.warning("No hay paper_id rescatados sobre los que profundizar.")
+        return None
+    with st.spinner("Recuperando más fragmentos de esos papers…"):
+        client = get_ollama_client()
+        qv = embed_query(client, query, embed_model).reshape(1, -1)
+        pool = pool_size(int(top_k), p_index.ntotal, True)
+        d_idx, dist_map = dense_rank(p_index, qv, pool)
+        results = []
+        for idx in d_idx:
+            if idx >= len(p_meta):
+                continue
+            m = p_meta[idx]
+            if not passes_filters(m, paper=paper_set):
+                continue
+            results.append((dist_map[idx], idx, m))
+            if len(results) >= int(top_k):
+                break
+    return results
+
+
 def _run_premium_query():
     """Ejecuta la consulta de pago sobre los artículos ya rescatados.
 
@@ -401,33 +435,12 @@ def _run_premium_query():
     is_deepen = mode == "Profundizar en estos papers"
     if is_deepen:
         # Modo B: re-consultar FAISS restringido a los paper_id rescatados con un
-        # top_k mayor. Reutiliza el índice del proyecto/fase de la consulta previa
-        # y el filtro paper_id existente (passes_filters con un set de paper_id).
-        _ip = CATEGORIAS_DIR / prev_project / "embeddings" / prev_phase / "index.faiss"
-        _im = _ip.stat().st_mtime if _ip.exists() else 0.0
-        p_index, p_meta, _p_cfg = load_index(prev_project, prev_phase, _im)
-        if p_index is None:
-            st.error("No se pudo recargar el índice para profundizar.")
+        # top_k mayor. Reutiliza el helper compartido con el chat premium.
+        results = _retrieve_paper_deepen_results(
+            prev_query, prev_papers, prev_project, prev_phase, prev_embed, top_k_premium,
+        )
+        if results is None:
             return
-        paper_set = set(prev_papers)
-        if not paper_set:
-            st.warning("No hay paper_id rescatados sobre los que profundizar.")
-            return
-        with st.spinner("Recuperando más fragmentos de esos papers…"):
-            client = get_ollama_client()
-            qv = embed_query(client, prev_query, prev_embed).reshape(1, -1)
-            pool = pool_size(int(top_k_premium), p_index.ntotal, True)
-            d_idx, dist_map = dense_rank(p_index, qv, pool)
-            results = []
-            for idx in d_idx:
-                if idx >= len(p_meta):
-                    continue
-                m = p_meta[idx]
-                if not passes_filters(m, paper=paper_set):
-                    continue
-                results.append((dist_map[idx], idx, m))
-                if len(results) >= int(top_k_premium):
-                    break
         mode_key, mode_label = "premium_deepen", "profundizar en estos papers"
     else:
         # Modo A: exactamente los mismos chunks de la consulta gratuita. No toca FAISS.
@@ -493,11 +506,13 @@ def _estimate_premium_chat_tokens(chunks, history, query, max_out):
     return input_tk + max_out
 
 
-def _run_premium_chat():
+def _run_premium_chat(results):
     """Ejecuta un turno del chat premium con memoria.
 
-    Reutiliza los chunks de la última búsqueda, envía el historial completo más
-    la nueva pregunta, acumula el coste en session_state y registra el turno con
+    ``results`` es la lista de tuplas ``(score, idx, m)`` que se usará como
+    contexto (ya sean los chunks fijos de la búsqueda gratuita o los
+    re-recuperados en Modo B). Envía el historial completo más la nueva
+    pregunta, acumula el coste en session_state y registra el turno con
     mode="premium_chat".
     """
     provider = st.session_state.get("_premium_chat_provider")
@@ -505,7 +520,6 @@ def _run_premium_chat():
     max_out  = st.session_state.get("_premium_chat_maxout", 1024)
     question = st.session_state.pop("_premium_chat_question", "")
 
-    prev_results = st.session_state.get("_last_results", [])
     prev_project = st.session_state.get("_last_project", "")
     history      = list(st.session_state.get("_premium_chat_history", []))
 
@@ -514,15 +528,13 @@ def _run_premium_chat():
     if not model or not provider:
         st.error("Falta seleccionar provider/modelo de pago.")
         return
+    if not results:
+        st.warning("No hay fragmentos disponibles para el chat premium.")
+        return
 
     _mj = CATEGORIAS_DIR / prev_project / "metadata" / "papers_metadata.jsonl"
     _mm = _mj.stat().st_mtime if _mj.exists() else 0.0
     papers_meta = load_papers_meta(prev_project, _mm)
-
-    results = [(d["score"], 0, d["m"]) for d in prev_results]
-    if not results:
-        st.warning("No hay fragmentos disponibles para el chat premium.")
-        return
 
     st.markdown("**Generando respuesta del chat…**")
     out_box = st.empty()
@@ -571,6 +583,19 @@ def _run_premium_chat():
     st.rerun()
 
 
+def _reset_premium_chat():
+    """Callback del botón '🗑 Nuevo hilo' del chat premium."""
+    st.session_state["_premium_chat_history"] = []
+    st.session_state["_premium_chat_cost"] = 0.0
+    st.session_state["_premium_chat_mode"] = "Fragmentos recuperados"
+    st.session_state["_premium_chat_topk"] = 15
+    # Resetear también las claves de los widgets para que se redibujen con valores por defecto.
+    st.session_state["premium_chat_mode"] = "Fragmentos recuperados"
+    st.session_state["premium_chat_topk"] = 15
+    st.session_state.pop("_premium_chat_last_cost", None)
+    st.session_state.pop("_premium_chat_last_info", None)
+
+
 def _submit_premium_chat():
     """Callback del botón 'Preguntar' del chat premium.
 
@@ -595,10 +620,15 @@ def _submit_premium_chat():
     if not model or not provider:
         return
 
+    chat_mode = st.session_state.get("premium_chat_mode", "Fragmentos recuperados")
+    chat_topk = st.session_state.get("premium_chat_topk", 15)
+
     st.session_state["_premium_chat_question"] = question
     st.session_state["_premium_chat_provider"] = provider
     st.session_state["_premium_chat_model"]    = model
     st.session_state["_premium_chat_maxout"]   = max_out
+    st.session_state["_premium_chat_mode"]     = chat_mode
+    st.session_state["_premium_chat_topk"]     = chat_topk
     st.session_state["_do_premium_chat"]       = True
     st.session_state["premium_chat_input"]     = ""
 
@@ -637,8 +667,27 @@ def render_premium_block():
 
     # Handler del flag: corre tras el rerun que dispara el botón "Preguntar" del chat.
     if st.session_state.pop("_do_premium_chat", False):
-        _run_premium_chat()
-        return  # _run_premium_chat hace st.rerun() al terminar correctamente
+        chat_mode = st.session_state.get("_premium_chat_mode", "Fragmentos recuperados")
+        chat_topk = st.session_state.get("_premium_chat_topk", 15)
+        prev_results = st.session_state.get("_last_results", [])
+        prev_papers  = st.session_state.get("_last_retrieved_papers", [])
+        prev_project = st.session_state.get("_last_project", "")
+        prev_phase   = st.session_state.get("_last_phase", "")
+        prev_embed   = st.session_state.get("_last_embed_model", OLLAMA_MODEL_EMBED)
+        question     = st.session_state.get("_premium_chat_question", "")
+
+        if chat_mode == "Papers completos":
+            results = _retrieve_paper_deepen_results(
+                question, prev_papers, prev_project, prev_phase, prev_embed, chat_topk,
+            )
+        else:
+            results = [(d["score"], 0, d["m"]) for d in prev_results]
+
+        if not results:
+            st.warning("No hay fragmentos disponibles para el chat premium.")
+        else:
+            _run_premium_chat(results)
+        return
 
     # Resultado premium persistido (sobrevive a reruns posteriores). Se muestra
     # junto a la respuesta gratuita, sin sobrescribirla.
@@ -731,19 +780,54 @@ def render_premium_block():
     # ── Chat con memoria sobre los papers rescatados ──
     st.divider()
     st.subheader("💬 Chat con memoria sobre estos papers")
+
+    # Inicializar configuración por sesión del chat.
+    if "_premium_chat_mode" not in st.session_state:
+        st.session_state["_premium_chat_mode"] = "Fragmentos recuperados"
+    if "_premium_chat_topk" not in st.session_state:
+        st.session_state["_premium_chat_topk"] = 15
+
     chat_history = st.session_state.get("_premium_chat_history", [])
     chat_cost    = st.session_state.get("_premium_chat_cost", 0.0)
+
+    # Selector de modo del chat (por sesión).
+    chat_mode = st.radio(
+        "Modo del chat",
+        ["Fragmentos recuperados", "Papers completos"],
+        key="premium_chat_mode",
+        help="A — usa los chunks de la búsqueda gratuita (rápido). "
+             "B — re-consulta FAISS sobre los papers rescatados con top-k ampliado (más contexto).",
+    )
+    chat_topk = None
+    if chat_mode == "Papers completos":
+        chat_topk = st.slider(
+            "Top-k ampliado (fragmentos por turno)",
+            8, 30, 15, key="premium_chat_topk",
+        )
 
     for turn in chat_history:
         with st.chat_message(turn["role"]):
             st.markdown(turn["content"])
 
-    # Aviso de contexto largo (estimación chars/4).
+    # Aviso de contexto largo (estimación chars/4). En Modo B se escala la
+    # estimación según el top-k elegido.
     _chat_input_val = st.session_state.get("premium_chat_input", "")
     _window_limit = LLM_CONTEXT_WINDOWS.get(p_model, 128_000) if p_model else 128_000
-    _estimated_tk = _estimate_premium_chat_tokens(
-        [d["m"] for d in prev_results], chat_history, _chat_input_val, p_maxout or 1024,
-    )
+    _n_est = len(prev_results)
+    if chat_mode == "Papers completos" and chat_topk:
+        _n_est = max(_n_est, chat_topk)
+    _est_chunks = [d["m"] for d in prev_results[:_n_est]]
+    # Si el modo B pide más chunks de los que tenemos, escalamos proporcionalmente.
+    if chat_mode == "Papers completos" and chat_topk and len(prev_results) < chat_topk:
+        _scale = chat_topk / max(len(prev_results), 1)
+        _context_chars = len(_build_context_text([d["m"] for d in prev_results])) * _scale
+        _overhead = 500
+        _history_chars = sum(len(t.get("content", "")) for t in chat_history)
+        _estimated_tk = (_overhead + int(_context_chars) + _history_chars + len(_chat_input_val)) // 4 + (p_maxout or 1024)
+    else:
+        _estimated_tk = _estimate_premium_chat_tokens(
+            _est_chunks, chat_history, _chat_input_val, p_maxout or 1024,
+        )
     if _estimated_tk > 0.8 * _window_limit:
         st.warning(
             "La conversación es larga; considera empezar un hilo nuevo o reducir el conjunto. "
@@ -760,12 +844,9 @@ def render_premium_block():
     with col_chat2:
         st.write("")
         st.write("")
-        if st.button("🗑 Nuevo hilo", key="premium_chat_reset"):
-            st.session_state["_premium_chat_history"] = []
-            st.session_state["_premium_chat_cost"] = 0.0
-            st.session_state.pop("_premium_chat_last_cost", None)
-            st.session_state.pop("_premium_chat_last_info", None)
-            st.rerun()
+        # on_click permite resetear las claves de los widgets sin violar la regla
+        # de modificación post-instantiación de Streamlit.
+        st.button("🗑 Nuevo hilo", key="premium_chat_reset", on_click=_reset_premium_chat)
 
     # on_click ejecuta el callback ANTES de reinstanciar el widget de entrada,
     # evitando StreamlitAPIException al limpiar la clave del input.
@@ -1146,6 +1227,8 @@ st.session_state.pop("_premium_chat_history", None)
 st.session_state.pop("_premium_chat_cost", None)
 st.session_state.pop("_premium_chat_last_cost", None)
 st.session_state.pop("_premium_chat_last_info", None)
+st.session_state.pop("_premium_chat_mode", None)
+st.session_state.pop("_premium_chat_topk", None)
 
 # ---------------------------------------------------------------------------
 # Síntesis
