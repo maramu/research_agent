@@ -26,8 +26,11 @@ Notion y búsqueda de noticias.
 | Modelo | `qwen3:8b-hermes` (Modelfile derivado, num_ctx 64000, thinking OFF) |
 | Config | `~/.hermes/config.yaml` (provider custom:ollama-local, context 64k) |
 | Provider opcional | OpenRouter (selección manual para consultas potentes) |
+| Provider pago activo | Anthropic (`claude-haiku-4-5` / `claude-sonnet-4-6`) |
+| Web search | Tavily (noticias y búsqueda web) |
+| Keep-warm | Cron `*/8 9-18 * * 1-5` en pciq22 — `hermes_keepwarm.sh` |
 | Logs | `~/Library/Logs/hermes/gateway.{log,err.log}` (cuando el gateway esté activo) |
-| Estado | Validado de punta a punta vía Discord (modelo `qwen3:8b-hermes`, respuesta en español sin thinking). Web search con Tavily operativo (verificado con búsqueda de noticias real). |
+| Estado | ✅ Discord operativo · ✅ Anthropic provider · ✅ Tavily web search · ✅ Keep-warm cron (9:00–18:00 L-V) · ⏳ MCPs pendientes · ⏳ LaunchAgent 24/7 pendiente |
 | Control | Discord gateway 24/7 vía LaunchAgent `ai.hermes.gateway` (creado por el propio instalador de Hermes; se gestiona con `hermes gateway start\|stop\|restart`, **NO** con el `com.hermes.gateway` manual que proponía la guía). |
 | Acceso restringido | `DISCORD_ALLOWED_USERS` = solo el User ID propio (en `~/.hermes/config.yaml` y `~/.hermes/.env`). |
 | Home channel | Fijado con `/sethome` a un Channel ID válido (entrega de crons y mensajes proactivos). |
@@ -36,10 +39,11 @@ Notion y búsqueda de noticias.
 **Nota RAM:** `qwen3:8b-hermes` (~8.7 GB) y `qwen2.5:14b-instruct` (~12 GB) no
 coexisten residentes en 24 GB. `OLLAMA_KEEP_ALIVE=5m` en el plist de Ollama asegura
 que se turnan. La ingesta Scopus (lunes 04:00) corre antes del keep-warm de Hermes
-(pendiente de activar, horario 9:00–18:00).
+(activo, cron 9:00–18:00 L-V).
 
-**Pendiente:** MCPs (Notion, Google Calendar, Gmail), keep-warm cron, seguridad
-(desactivar herramientas no usadas: terminal/code_execution/browser).
+**Pendiente:** MCPs (Notion OAuth, Google Calendar + Gmail vía GCP proyecto
+`hermes-pciq22`), LaunchAgent 24/7 (`com.hermes.gateway.plist`), seguridad
+(desactivar `terminal`/`code_execution`/`browser` con `hermes tools`).
 
 ## Modelos Ollama disponibles
 

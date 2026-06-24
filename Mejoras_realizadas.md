@@ -3,6 +3,24 @@
 
 ---
 
+## Sesión 2026-06-24 — Hermes Agent: Discord, Anthropic, Tavily, keep-warm
+
+- **Discord** operativo: bot "Hermes Bot" online, responde por DM y en canal `#general`.
+  `DISCORD_BOT_TOKEN` + `DISCORD_ALLOWED_USERS` en `~/.hermes/.env`.
+- **Anthropic** como provider de pago: `ANTHROPIC_API_KEY` en `.env`; actualmente
+  default de facto por velocidad frente al modelo local.
+- **Tavily** web search: `TAVILY_API_KEY` en `.env`; Hermes puede buscar noticias.
+- **Keep-warm cron** activo: `~/hermes_keepwarm.sh` (curl a `/api/chat` con
+  `keep_alive=10m`, `num_predict=1`) programado `*/8 9-18 * * 1-5` en crontab de
+  martinramirez en pciq22. Mantiene `qwen3:8b-hermes` caliente en horario laboral sin
+  tocar el keep_alive global (que protege la RAM del RAG).
+- **Fix compresión**: `auxiliary.compression` en `~/.hermes/config.yaml` fijado a
+  `provider: custom:ollama-local` + `context_length: 64000` para evitar el ValueError
+  de "context window 40,960 < 64,000 mínimo".
+- **Pendiente:** MCPs (Notion, Calendar, Gmail), LaunchAgent 24/7, seguridad.
+
+---
+
 ## Sesión 2026-06-23
 
 ### Hermes Agent: Discord operativo + canales temáticos (sin commits de pipeline)

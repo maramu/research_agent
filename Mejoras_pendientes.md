@@ -286,6 +286,12 @@ Pendiente de completar desde la sesión 2026-06-23:
       proyecto `hermes-pciq22`, tipo "App de escritorio").
 - [x] ~~Web search: Tavily API key en `.env`, `hermes config set web.backend tavily`.~~
       — ✅ **HECHO 2026-06-23**. Operativo, verificado con búsqueda de noticias real.
-- [ ] Keep-warm cron: `~/hermes_keepwarm.sh` cada 8 min, lunes–viernes 9:00–18:00.
+- [x] ~~Keep-warm cron: `~/hermes_keepwarm.sh` cada 8 min, lunes–viernes 9:00–18:00.~~
+      — ✅ **HECHO 2026-06-24**. `*/8 9-18 * * 1-5` en crontab de pciq22; `keep_alive=10m`,
+      `num_predict=1` vía API nativa de Ollama (sin tocar el keep_alive global del RAG).
 - [ ] Seguridad: desactivar `terminal`, `code_execution` y `browser` con `hermes tools`.
 - [ ] Aplicar hora 04:00 en plist instalado de la ingesta (git pull + cp + launchctl en pciq22).
+
+**Progreso 2026-06-24:** Discord operativo, Anthropic como provider principal
+(velocidad > local para uso cotidiano), Tavily activo, keep-warm cron en marcha.
+Siguiente paso: MCPs (Notion primero, luego Calendar + Gmail).
