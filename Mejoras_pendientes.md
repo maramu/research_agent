@@ -1,7 +1,7 @@
 # Mejoras pendientes — research_agent
 > Backlog vivo. Histórico de lo hecho: Mejoras_realizadas.md · Estado/arquitectura: ESTADO.md
 
-## Orden de prioridad (revisión 2026-06-23)
+## Orden de prioridad (revisión 2026-06-25)
 1. ~~`detect_affected_categories` con `normalize_stem`~~ — ✅ **COMPLETADO 2026-06-13** (incluido en puerta de dedup por DOI).
 2. Item 37 — golden Q&A.
 3. Item 36 — idempotencia.
@@ -9,7 +9,7 @@
 5. Item 45 — consolidar utilidades de texto duplicadas pdf_utils↔1_rename. **Nota 2026-06-13:** el trabajo de hoy sobre DOIs tocó ambos ficheros (`normalize_doi`, `normalize_stem`, lookups por stem/título en `doi_manual`). Revisar si introdujo nueva divergencia antes de consolidar.
 6. ~~Item 41 — índice viejo all__bge-m3.~~ ✅ COMPLETADO 2026-06-16.
 7. Item 35 — OCR (si hay escaneados). Item 31 — MVP libros, tras el 37.
-- Item 49 — completar Hermes Agent (Discord ✅ y Tavily ✅ hechos 2026-06-23; pendiente MCPs, keep-warm, hardening).
+- ~~Item 49 — completar Hermes Agent (Discord + MCPs)~~ — ✅ **MAYORMENTE COMPLETADO 2026-06-25** (operativo 24/7 con Notion/Calendar/Gmail/Tavily; residuales: override modelo local para Gmail y aplicar plist ingesta 04:00 en pciq22).
 - ~~Timeout job semanal: subir `SCOPUS_TIMEOUT` de 2700 a 5400 (45→90 min)~~ — ✅ **COMPLETADO 2026-06-15** — `run_weekly_scopus.py`: `SCOPUS_TIMEOUT = 5400`; `WEEKLY_CATEGORIES` ampliada con `anoxic_biogas_biodesulfurization`.
 
 ## Hallazgos pendientes (revisión 2026-06-12)
@@ -271,27 +271,24 @@ ollama rm gemma3:4b qwen3:14b
 Reversible con `ollama pull`. Actualizar la sección "Modelos Ollama disponibles"
 de `ESTADO.md` tras ejecutar.
 
-### 49. Hermes Agent — completar infraestructura en pciq22 — MEDIA prioridad
+### 49. Hermes Agent — pendiente residual — BAJA prioridad
 
-Pendiente de completar desde la sesión 2026-06-23:
+**Estado 2026-06-25:** infraestructura completa y operativa. Hermes funciona 24/7
+desde Discord con Notion + Google Calendar + Gmail + Tavily, sobre OpenRouter
+(`deepseek/deepseek-v4-flash`) como default. Detalles en `ESTADO.md` →
+subsección "Hermes Agent (productividad personal)".
 
-- [x] ~~Discord: crear bot, token, Message Content Intent ON, invitar a servidor,
-      `DISCORD_BOT_TOKEN` + `DISCORD_ALLOWED_USERS` en `~/.hermes/.env`,
-      `hermes gateway` + LaunchAgent~~ — ✅ **HECHO 2026-06-23**. Validado por DM y en
-      canales; intents Message Content + Server Members ON; gateway 24/7 vía LaunchAgent
-      `ai.hermes.gateway` (del instalador, gestionado con `hermes gateway`, **no** el
-      `com.hermes.gateway` manual); tres canales temáticos en `free_response_channels`
-      (contexto separado). Ver Mejoras_realizadas.md.
-- [ ] MCPs: Notion (OAuth directo), Google Calendar + Gmail (cliente OAuth en GCP
-      proyecto `hermes-pciq22`, tipo "App de escritorio").
-- [x] ~~Web search: Tavily API key en `.env`, `hermes config set web.backend tavily`.~~
-      — ✅ **HECHO 2026-06-23**. Operativo, verificado con búsqueda de noticias real.
-- [x] ~~Keep-warm cron: `~/hermes_keepwarm.sh` cada 8 min, lunes–viernes 9:00–18:00.~~
-      — ✅ **HECHO 2026-06-24**. `*/8 9-18 * * 1-5` en crontab de pciq22; `keep_alive=10m`,
-      `num_predict=1` vía API nativa de Ollama (sin tocar el keep_alive global del RAG).
-- [ ] Seguridad: desactivar `terminal`, `code_execution` y `browser` con `hermes tools`.
-- [ ] Aplicar hora 04:00 en plist instalado de la ingesta (git pull + cp + launchctl en pciq22).
+Histórico de completados:
+- [x] Discord: bot, token, intents, invitación, gateway, **LaunchAgent 24/7**.
+- [x] MCPs: Notion, Google Calendar, Gmail (instalados y validados desde Discord).
+- [x] Web search: Tavily.
+- [x] Keep-warm cron del modelo local.
+- [x] Seguridad: terminal/code_execution/browser/computer_use desactivados.
 
-**Progreso 2026-06-24:** Discord operativo, Anthropic como provider principal
-(velocidad > local para uso cotidiano), Tavily activo, keep-warm cron en marcha.
-Siguiente paso: MCPs (Notion primero, luego Calendar + Gmail).
+Residuales (no urgente):
+- [ ] Override por MCP para que Gmail use automáticamente `qwen3:8b-hermes` local
+      (privacidad correo UCA). Mientras tanto: cambio manual con `/model` antes
+      de consultas sensibles.
+- [ ] Aplicar plist ingesta 04:00 en pciq22 (commit en repo hecho; falta
+      `git pull` + `cp deployment/... ~/Library/LaunchAgents/` +
+      `launchctl bootout/bootstrap`).

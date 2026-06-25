@@ -23,27 +23,33 @@ Notion y búsqueda de noticias.
 | Componente | Detalle |
 |---|---|
 | Instalación | `~/.hermes/` (install.sh oficial, aislado de venv rag_papers) |
-| Modelo | `qwen3:8b-hermes` (Modelfile derivado, num_ctx 64000, thinking OFF) |
-| Config | `~/.hermes/config.yaml` (provider custom:ollama-local, context 64k) |
-| Provider opcional | OpenRouter (selección manual para consultas potentes) |
-| Provider pago activo | Anthropic (`claude-haiku-4-5` / `claude-sonnet-4-6`) |
-| Web search | Tavily (noticias y búsqueda web) |
-| Keep-warm | Cron `*/8 9-18 * * 1-5` en pciq22 — `hermes_keepwarm.sh` |
-| Logs | `~/Library/Logs/hermes/gateway.{log,err.log}` (cuando el gateway esté activo) |
-| Estado | ✅ Discord operativo · ✅ Anthropic provider · ✅ Tavily web search · ✅ Keep-warm cron (9:00–18:00 L-V) · ⏳ MCPs pendientes · ⏳ LaunchAgent 24/7 pendiente |
-| Control | Discord gateway 24/7 vía LaunchAgent `ai.hermes.gateway` (creado por el propio instalador de Hermes; se gestiona con `hermes gateway start\|stop\|restart`, **NO** con el `com.hermes.gateway` manual que proponía la guía). |
+| Provider default | **OpenRouter** (`deepseek/deepseek-v4-flash`) — barato y bueno en tool-calling |
+| Provider alternativos | Anthropic (puntual), Nous Portal (dormido), ollama-local (`qwen3:8b-hermes`, privado) |
+| Compresión auxiliar | OpenRouter + `google/gemini-2.5-flash` (1M ctx, ~10x más barato que Haiku) |
+| MCP Notion | 20 tools (HTTP OAuth, toolset `mcp-notion`) |
+| MCP Google Calendar | 17 tools (stdio, toolset `mcp-google-calendar`) |
+| MCP Gmail | 64 tools (stdio, toolset `mcp-gmail`) |
+| Web search | Tavily (`TAVILY_API_KEY` en `.env`) |
+| Keep-warm local | Cron `*/8 8-19 * * 1-5` — `~/hermes_keepwarm.sh` |
+| Seguridad | `terminal`/`code_execution`/`browser`/`computer_use` desactivados; aprobación manual para acciones destructivas |
+| Gateway 24/7 | `com.hermes.gateway.plist` (LaunchAgent activo, `KeepAlive: true`) |
+| Logs | `~/.hermes/logs/{gateway,agent,errors}.log` |
+| Estado | ✅ Operativo desde Discord 24/7 — agenda, correo, Notion, noticias |
+| Control | Discord gateway 24/7 vía LaunchAgent `com.hermes.gateway.plist`; se gestiona con `launchctl bootout/bootstrap`. |
 | Acceso restringido | `DISCORD_ALLOWED_USERS` = solo el User ID propio (en `~/.hermes/config.yaml` y `~/.hermes/.env`). |
 | Home channel | Fijado con `/sethome` a un Channel ID válido (entrega de crons y mensajes proactivos). |
 | Conversaciones separadas | Tres canales temáticos en el servidor Hermes — `docencia`, `investigacion`, `noticias` — en `discord.free_response_channels` (responden sin @mención; contexto independiente por canal). Resto de canales siguen `require_mention: true`. |
 
 **Nota RAM:** `qwen3:8b-hermes` (~8.7 GB) y `qwen2.5:14b-instruct` (~12 GB) no
 coexisten residentes en 24 GB. `OLLAMA_KEEP_ALIVE=5m` en el plist de Ollama asegura
-que se turnan. La ingesta Scopus (lunes 04:00) corre antes del keep-warm de Hermes
-(activo, cron 9:00–18:00 L-V).
+que se turnan. La ingesta Scopus (lunes 04:00 cuando se aplique el plist en pciq22)
+corre antes del keep-warm de Hermes (cron 8:00–19:00 L-V).
 
-**Pendiente:** MCPs (Notion OAuth, Google Calendar + Gmail vía GCP proyecto
-`hermes-pciq22`), LaunchAgent 24/7 (`com.hermes.gateway.plist`), seguridad
-(desactivar `terminal`/`code_execution`/`browser` con `hermes tools`).
+**Pendiente residual:**
+- Modelo local automático para Gmail (privacidad correo UCA) — override por MCP no
+  configurado; por ahora cambio manual con `/model` antes de consultas sensibles.
+- Aplicar plist ingesta 04:00 en pciq22 (commit en repo hecho; falta
+  `git pull` + `cp` + `launchctl bootout/bootstrap` en pciq22).
 
 ## Modelos Ollama disponibles
 

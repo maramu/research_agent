@@ -3,6 +3,64 @@
 
 ---
 
+## Sesión 2026-06-25 — Hermes Agent: infraestructura completa (Discord 24/7, MCPs, providers limpios)
+
+**Cierre de la infraestructura de Hermes en pciq22** (item 49 prácticamente
+completo, salvo dos sub-tareas residuales).
+
+**LaunchAgent 24/7:**
+- Plist `com.hermes.gateway.plist` creado y cargado. Hermes sobrevive a reinicios y
+  se relanza si cae.
+- Comando 24/7: `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.hermes.gateway.plist`.
+- Logs reales: `~/.hermes/logs/gateway.log` (Hermes los gestiona internamente; el
+  plist apunta a `~/Library/Logs/hermes/` pero esa ruta queda vacía — informativo).
+
+**MCPs instalados y validados (vía Discord):**
+- **Notion** (HTTP): 20 tools, OAuth completado **desde el navegador de pciq22**
+  (callback OAuth a `127.0.0.1:<puerto>` no funciona vía SSH/remoto). Toolset
+  `mcp-notion` en `config.yaml`.
+- **Google Calendar** (stdio): 17 tools, toolset `mcp-google-calendar`.
+- **Gmail** (stdio): 64 tools, toolset `mcp-gmail`.
+
+**Providers limpios (4 sin duplicados):**
+- **OpenRouter (builtin, default)**: provider principal con
+  `deepseek/deepseek-v4-flash` por coste/calidad. `OPENROUTER_API_KEY` en `.env`.
+  Anthropic Sonnet 4.6 resultó caro (~20 USD en una sesión por sesiones largas que
+  disparaban compresión cara) — descartado como default.
+- **Anthropic**: API key en `.env`; disponible para consultas puntuales potentes,
+  no como default.
+- **Nous Portal**: logueado pero dormido.
+- **ollama-local**: `qwen3:8b-hermes` para tareas locales/privadas.
+
+**Compresión auxiliar barata:** `auxiliary.compression` con OpenRouter +
+`google/gemini-2.5-flash` (~10x más barato que Haiku), `context_length: 1000000`.
+Decisivo para no quemar crédito en sesiones largas.
+
+**Otros:**
+- Tavily web search activo (`TAVILY_API_KEY` en `.env`).
+- Keep-warm cron `*/8 8-19 * * 1-5` (adelantado a las 8:00 para cubrir arranque
+  mañanero).
+- Seguridad: `terminal`, `code_execution`, `browser`, `computer_use` desactivados
+  vía `hermes tools`. Activos solo los necesarios para productividad
+  (web/memory/file/cronjob/skills/todo/etc.).
+
+**Fixes durante la sesión (no van al repo, solo memoria):**
+- `model.base_url` provocaba que TODAS las llamadas fueran a `localhost:11434/v1`
+  ignorando el provider. Eliminado del bloque `model:`.
+- `auxiliary.compression` se reseteaba a `provider: auto` disparando errores de
+  context window <64K. Fijado a OpenRouter+Gemini.
+- OpenRouter aparecía duplicado en `/model`. Borrado el custom; se usa el builtin
+  que sí lee `OPENROUTER_API_KEY` correctamente.
+- Reset desde Discord (`/reset`) revierte al default del config, no al modelo
+  manual seleccionado — comportamiento conocido.
+
+**Pendiente residual (no urgente):**
+- Modelo local para Gmail vía override por MCP (privacidad correo UCA): por ahora,
+  cambio manual con `/model` antes de consultas sensibles.
+- Aplicar plist 04:00 en pciq22 (`launchctl bootout/bootstrap` tras `git pull`).
+
+---
+
 ## Sesión 2026-06-24 — Hermes Agent: Discord, Anthropic, Tavily, keep-warm
 
 - **Discord** operativo: bot "Hermes Bot" online, responde por DM y en canal `#general`.
