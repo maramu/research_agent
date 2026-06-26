@@ -3,6 +3,44 @@
 
 ---
 
+## Sesión 2026-06-26 — Hermes: descarte modelo local, Gemini 2.5 Flash como default, limpieza Ollama
+
+**Decisión final sobre modelo de Hermes:** `qwen3:8b` descartado definitivamente
+para uso con MCPs en Hermes. Con 101 tools activas (Gmail 64, Calendar 17, Notion 20),
+el modelo inventa herramientas inexistentes incluso filtrando Gmail a 4-5 tools.
+No es un problema de configuración — es una limitación de capacidad del modelo 8B
+para tool-calling complejo con esquemas MCP.
+
+**Nuevo provider default: `google/gemini-2.5-flash` vía OpenRouter.**
+- 1M tokens de contexto — las 101 tools no afectan al rendimiento.
+- $0.30/M input, $2.50/M output — barato para uso cotidiano.
+- Datos de Gmail ya están en Google → sin exposición adicional.
+- Buen tool-calling con MCPs validado en sesión.
+- `model.default: google/gemini-2.5-flash`, `provider: openrouter`,
+  `context_length: 1000000` en `~/.hermes/config.yaml`.
+
+**Simplificación de Hermes (modelo local eliminado):**
+- `ollama rm qwen3:8b-hermes` — modelo derivado borrado.
+- Crontab vaciado — keep-warm cron eliminado (ya no hay modelo local que calentar).
+- Bloque `custom_providers` eliminado de `config.yaml` — `ollama-local` ya no
+  aparece en el selector de `/model`.
+- `~/hermes_keepwarm.sh` obsoleto (cron vacío).
+
+**Limpieza Ollama — item 46 cerrado:**
+Modelos borrados: `gemma3:4b`, `qwen3:14b`, `qwen3:8b-hermes`, `qwen3:8b`,
+`nomic-embed-text` (y `mxbai-embed-large` si aplica).
+Modelos activos en pciq22: `qwen2.5:14b-instruct` (~9 GB, RAG síntesis) +
+`bge-m3` (~1.2 GB, embeddings FAISS). RAM unificada liberada: ~19+ GB.
+
+**Problema recurrente documentado (Gmail MCP):**
+`@shinzolabs/gmail-mcp` tiene el puerto 3000 hardcodeado en Express. Cuando una
+instancia zombie queda en ese puerto, el siguiente arranque del gateway falla en
+bucle (`EADDRINUSE`). Solución permanente: wrapper script
+`~/.hermes/scripts/gmail-mcp-wrapper.sh` que mata el proceso en el puerto antes de
+arrancar. Puerto cambiado a 3001 vía `PORT: '3001'` en env; `restartPolicy: 'never'`
+para evitar reinicios en bucle. Fix rápido si vuelve a pasar:
+`pkill -9 -f "gmail-mcp" && hermes gateway restart`.
+
 ## Sesión 2026-06-25 — Hermes Agent: infraestructura completa (Discord 24/7, MCPs, providers limpios)
 
 **Cierre de la infraestructura de Hermes en pciq22** (item 49 prácticamente

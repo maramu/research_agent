@@ -23,14 +23,14 @@ Notion y búsqueda de noticias.
 | Componente | Detalle |
 |---|---|
 | Instalación | `~/.hermes/` (install.sh oficial, aislado de venv rag_papers) |
-| Provider default | **OpenRouter** (`deepseek/deepseek-v4-flash`) — barato y bueno en tool-calling |
-| Provider alternativos | Anthropic (puntual), Nous Portal (dormido), ollama-local (`qwen3:8b-hermes`, privado) |
+| Provider default | **OpenRouter** (`google/gemini-2.5-flash`) — 1M ctx, barato, datos Gmail ya en Google |
+| Provider alternativos | Anthropic (puntual), Nous Portal (dormido), DeepSeek V4 Flash (disponible vía OpenRouter) |
 | Compresión auxiliar | OpenRouter + `google/gemini-2.5-flash` (1M ctx, ~10x más barato que Haiku) |
 | MCP Notion | 20 tools (HTTP OAuth, toolset `mcp-notion`) |
 | MCP Google Calendar | 17 tools (stdio, toolset `mcp-google-calendar`) |
 | MCP Gmail | 64 tools (stdio, toolset `mcp-gmail`) |
 | Web search | Tavily (`TAVILY_API_KEY` en `.env`) |
-| Keep-warm local | Cron `*/8 8-19 * * 1-5` — `~/hermes_keepwarm.sh` |
+| Keep-warm local | ~~Eliminado~~ — modelo local descartado para Hermes (qwen3:8b no viable con MCPs) |
 | Seguridad | `terminal`/`code_execution`/`browser`/`computer_use` desactivados; aprobación manual para acciones destructivas |
 | Gateway 24/7 | `com.hermes.gateway.plist` (LaunchAgent activo, `KeepAlive: true`) |
 | Logs | `~/.hermes/logs/{gateway,agent,errors}.log` |
@@ -40,26 +40,25 @@ Notion y búsqueda de noticias.
 | Home channel | Fijado con `/sethome` a un Channel ID válido (entrega de crons y mensajes proactivos). |
 | Conversaciones separadas | Tres canales temáticos en el servidor Hermes — `docencia`, `investigacion`, `noticias` — en `discord.free_response_channels` (responden sin @mención; contexto independiente por canal). Resto de canales siguen `require_mention: true`. |
 
-**Nota RAM:** `qwen3:8b-hermes` (~8.7 GB) y `qwen2.5:14b-instruct` (~12 GB) no
-coexisten residentes en 24 GB. `OLLAMA_KEEP_ALIVE=5m` en el plist de Ollama asegura
-que se turnan. La ingesta Scopus (lunes 04:00 cuando se aplique el plist en pciq22)
-corre antes del keep-warm de Hermes (cron 8:00–19:00 L-V).
+**Nota RAM:** con la eliminación del modelo local de Hermes, Ollama solo gestiona
+`qwen2.5:14b-instruct` (~9 GB) para síntesis RAG y `bge-m3` (~1.2 GB) para
+embeddings. Sin competencia de RAM entre Hermes y el RAG. `OLLAMA_KEEP_ALIVE=5m`
+en el plist de Ollama se mantiene como buena práctica.
 
 **Pendiente residual:**
-- Modelo local automático para Gmail (privacidad correo UCA) — override por MCP no
-  configurado; por ahora cambio manual con `/model` antes de consultas sensibles.
 - Aplicar plist ingesta 04:00 en pciq22 (commit en repo hecho; falta
   `git pull` + `cp` + `launchctl bootout/bootstrap` en pciq22).
+- Gmail MCP: si aparece error `EADDRINUSE` en `~/.hermes/logs/mcp-stderr.log`,
+  ejecutar `pkill -9 -f "gmail-mcp" && hermes gateway restart`.
 
 ## Modelos Ollama disponibles
 
-- `qwen2.5:14b-instruct` — síntesis RAG (modelo de producción, ~12 GB)
-- `qwen3:8b` — base del modelo de Hermes (NO borrar — ver item 46 actualizado)
-- `qwen3:8b-hermes` — Hermes Agent (Modelfile derivado de qwen3:8b, num_ctx 64000, ~8.7 GB GPU)
-- `qwen3:14b` — resúmenes detallados (candidato a `ollama rm` — ver item 46)
-- `gemma3:4b` — cribado rápido (candidato a `ollama rm` — ver item 46)
-- ~~`nomic-embed-text`~~ — embeddings FAISS (768 dims) — **retirado**, reemplazado por bge-m3
+- `qwen2.5:14b-instruct` — síntesis RAG (modelo de producción, ~9 GB)
 - `bge-m3` — embeddings FAISS (8192 ctx, 1024 dims, multilingüe) — **modelo de producción**
+
+Borrados en sesión 2026-06-26 (item 46 cerrado):
+~~`qwen3:8b-hermes`~~ · ~~`qwen3:8b`~~ · ~~`qwen3:14b`~~ · ~~`gemma3:4b`~~ ·
+~~`nomic-embed-text`~~ · ~~`mxbai-embed-large`~~ (si aplica)
 
 ## Estructura NAS
 

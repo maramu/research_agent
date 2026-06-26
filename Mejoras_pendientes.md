@@ -255,21 +255,13 @@ largo Scopus en descarga)~~ ✅ CUBIERTO 2026-06-13 (renombrado por DOI antes de
 passes_filters). Más: detect_affected_categories con _norm ✅; filtro de activas en run_scopus para
 categorías explícitas; sort_keys=True en promote_adhoc_to_category.
 
-### 46. Borrar modelos Ollama obsoletos en pciq22 — BAJA prioridad
+### ~~46. Borrar modelos Ollama obsoletos en pciq22~~ — ✅ COMPLETADO 2026-06-26
 
-`qwen3:8b` **ya no es candidato a borrado**: es la base del modelo `qwen3:8b-hermes`
-de Hermes Agent (2026-06-23). **No ejecutar `ollama rm qwen3:8b`.**
+Todos los modelos candidatos borrados. También se borró `qwen3:8b` (ya no es base
+de Hermes — modelo local descartado) y `nomic-embed-text` (reemplazado por bge-m3).
 
-Candidatos actuales a liberar cuando se confirme que no se necesitan:
-- `gemma3:4b` (~2.5 GB) — retirado del selector RAG
-- `qwen3:14b` (~8 GB) — retirado del selector RAG
-
-```bash
-ollama rm gemma3:4b qwen3:14b
-```
-
-Reversible con `ollama pull`. Actualizar la sección "Modelos Ollama disponibles"
-de `ESTADO.md` tras ejecutar.
+Modelos activos en pciq22: `qwen2.5:14b-instruct` (RAG síntesis) + `bge-m3`
+(embeddings). RAM liberada: ~19+ GB.
 
 ### 49. Hermes Agent — pendiente residual — BAJA prioridad
 
@@ -285,10 +277,13 @@ Histórico de completados:
 - [x] Keep-warm cron del modelo local.
 - [x] Seguridad: terminal/code_execution/browser/computer_use desactivados.
 
-Residuales (no urgente):
-- [ ] Override por MCP para que Gmail use automáticamente `qwen3:8b-hermes` local
-      (privacidad correo UCA). Mientras tanto: cambio manual con `/model` antes
-      de consultas sensibles.
+Residuales:
+- ~~Override por MCP para Gmail con modelo local~~ — **DESCARTADO**: `qwen3:8b`
+  no es viable para tool-calling con MCPs de Hermes. Gmail usa Gemini 2.5 Flash
+  vía OpenRouter (datos ya en Google, sin exposición adicional). Decisión: aceptada.
 - [ ] Aplicar plist ingesta 04:00 en pciq22 (commit en repo hecho; falta
       `git pull` + `cp deployment/... ~/Library/LaunchAgents/` +
       `launchctl bootout/bootstrap`).
+
+**Progreso 2026-06-26:** modelo local descartado, Gemini 2.5 Flash como default,
+limpieza Ollama completa. Solo queda el plist de la ingesta como residual real.
