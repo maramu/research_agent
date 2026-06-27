@@ -26,16 +26,18 @@ Notion y búsqueda de noticias.
 | Provider default | **OpenRouter** (`google/gemini-2.5-flash`) — 1M ctx, barato, datos Gmail ya en Google |
 | Provider alternativos | Anthropic (puntual), Nous Portal (dormido), DeepSeek V4 Flash (disponible vía OpenRouter) |
 | Compresión auxiliar | OpenRouter + `google/gemini-2.5-flash` (1M ctx, ~10x más barato que Haiku) |
+| `context_length` / `num_ctx` | 64000 (mínimo duro de Hermes; 32000 lanza `ValueError`) |
 | MCP Notion | 20 tools (HTTP OAuth, toolset `mcp-notion`) |
 | MCP Google Calendar | 17 tools (stdio, toolset `mcp-google-calendar`) |
-| MCP Gmail | 64 tools (stdio, toolset `mcp-gmail`) |
+| MCP Gmail | 64 tools (stdio, toolset `mcp-gmail`); whitelist `tools.include` = 7 tools solo lectura + draft (`get_label`, `list_labels`, `list_messages`, `get_message`, `list_threads`, `get_thread`, `create_draft`) — sin send/delete/trash/config |
+| SOUL.md | `~/.hermes/SOUL.md` (auto-inyectado) con "Reglas de Gmail" (get_label sobre UNREAD; maxResults siempre; nunca includeBodyHtml) |
 | Web search | Tavily (`TAVILY_API_KEY` en `.env`) |
 | Keep-warm local | ~~Eliminado~~ — modelo local descartado para Hermes (qwen3:8b no viable con MCPs) |
-| Seguridad | `terminal`/`code_execution`/`browser`/`computer_use` desactivados; aprobación manual para acciones destructivas |
-| Gateway 24/7 | `com.hermes.gateway.plist` (LaunchAgent activo, `KeepAlive: true`) |
+| Seguridad | `terminal`/`code_execution`/`browser`/`computer_use` desactivados en ambas plataformas (gestión por plataforma vía `hermes tools`); aprobación manual para acciones destructivas |
+| Gateway 24/7 | `ai.hermes.gateway` (LaunchAgent único supervisado, `KeepAlive: true`); existe `com.hermes.gateway.plist` inerte pendiente de archivar |
 | Logs | `~/.hermes/logs/{gateway,agent,errors}.log` |
 | Estado | ✅ Operativo desde Discord 24/7 — agenda, correo, Notion, noticias |
-| Control | Discord gateway 24/7 vía LaunchAgent `com.hermes.gateway.plist`; se gestiona con `launchctl bootout/bootstrap`. |
+| Control | Discord gateway 24/7 vía LaunchAgent `ai.hermes.gateway`; se gestiona con `launchctl bootout/bootstrap`. |
 | Acceso restringido | `DISCORD_ALLOWED_USERS` = solo el User ID propio (en `~/.hermes/config.yaml` y `~/.hermes/.env`). |
 | Home channel | Fijado con `/sethome` a un Channel ID válido (entrega de crons y mensajes proactivos). |
 | Conversaciones separadas | Tres canales temáticos en el servidor Hermes — `docencia`, `investigacion`, `noticias` — en `discord.free_response_channels` (responden sin @mención; contexto independiente por canal). Resto de canales siguen `require_mention: true`. |
@@ -44,6 +46,12 @@ Notion y búsqueda de noticias.
 `qwen2.5:14b-instruct` (~9 GB) para síntesis RAG y `bge-m3` (~1.2 GB) para
 embeddings. Sin competencia de RAM entre Hermes y el RAG. `OLLAMA_KEEP_ALIVE=5m`
 en el plist de Ollama se mantiene como buena práctica.
+
+**Limitación conocida:** tool-calling local de Gmail no fiable vía Hermes; causa
+localizada en el envoltorio de deferred tools de Hermes (esquema pesado + deferred
+tools que `qwen3:14b` no resuelve), NO en Ollama ni en el modelo (ambos exonerados
+por `curl` decisivo a `/v1`). En investigación — ver `Mejoras_pendientes.md` →
+item 49.
 
 **Pendiente residual:**
 - Aplicar plist ingesta 04:00 en pciq22 (commit en repo hecho; falta

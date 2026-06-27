@@ -278,12 +278,35 @@ Histórico de completados:
 - [x] Seguridad: terminal/code_execution/browser/computer_use desactivados.
 
 Residuales:
-- ~~Override por MCP para Gmail con modelo local~~ — **DESCARTADO**: `qwen3:8b`
-  no es viable para tool-calling con MCPs de Hermes. Gmail usa Gemini 2.5 Flash
-  vía OpenRouter (datos ya en Google, sin exposición adicional). Decisión: aceptada.
+- [ ] **Override Gmail con modelo local** — reabierto 2026-06-27/28 con `qwen3:14b`
+      (el descarte de `qwen3:8b` del 2026-06-26 ya no aplica). Estado: **BLOQUEADO**,
+      causa LOCALIZADA en Hermes (NO en Ollama ni en el modelo). Prueba decisiva por
+      `curl` a `/v1/chat/completions` (1 tool, esquema mínimo, 147 tokens): tool-call
+      perfecta → `/v1` de Ollama y modelo OK, **Ollama 0.30.7 EXONERADO, no
+      actualizar**. Vía Hermes (~14.325 tokens: SOUL.md + todos los toolsets +
+      deferred tools) falla con `tool_call requires a 'name' argument` y pista
+      `'himalaya' is not a deferrable tool` → el ENVOLTORIO de deferred tools de
+      Hermes es lo que `qwen3:14b` no resuelve. Próximos pasos (terreno Hermes):
+      1. Desactivar toolsets no esenciales en la sesión Gmail para adelgazar el
+         esquema.
+      2. Buscar opción para exponer tools directas en vez de deferred (revisar
+         `deferred_tools` / `tool_gateway` / `tool_use_enforcement` en config).
+      3. Si no basta, alternativa de fondo: provider de pago solo-Gmail [choca con
+         privacidad correo UCA] / Composio [tercero hospedado] / modelo mayor.
+- [ ] Archivar el plist `com.hermes.gateway` (inerte) para que no arranque al login;
+      gateway válido = `ai.hermes.gateway`.
+- [ ] Evaluar pin de versión del MCP Homebrew `@shinzolabs/gmail-mcp` (autoupdate de
+      Homebrew → riesgo de drift de esquema/nombres que rompa la whitelist).
+- [ ] Migración config v30→31 pendiente (con backup, fuera de sesión).
 - [ ] Aplicar plist ingesta 04:00 en pciq22 (commit en repo hecho; falta
       `git pull` + `cp deployment/... ~/Library/LaunchAgents/` +
       `launchctl bootout/bootstrap`).
 
 **Progreso 2026-06-26:** modelo local descartado, Gemini 2.5 Flash como default,
 limpieza Ollama completa. Solo queda el plist de la ingesta como residual real.
+
+**Progreso 2026-06-27/28:** reabierto el override local con `qwen3:14b`. Saneados
+Modelfile (thinking), whitelist Gmail (7 tools), SOUL.md, `context_length`/`num_ctx`
+(64000) y doble-gateway. Tool-calling local de Gmail BLOQUEADO; causa localizada en
+el envoltorio de deferred tools de Hermes (Ollama y modelo exonerados por `curl`
+decisivo). Detalle en `Mejoras_realizadas.md` → sesión 2026-06-27/28.
