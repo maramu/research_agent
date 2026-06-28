@@ -23,7 +23,7 @@ Notion y búsqueda de noticias.
 | Componente | Detalle |
 |---|---|
 | Instalación | `~/.hermes/` (install.sh oficial, aislado de venv rag_papers) |
-| Provider default | **OpenRouter** (`google/gemini-2.5-flash`) — 1M ctx, barato, datos Gmail ya en Google |
+| Provider default | **OpenRouter** (`google/gemini-3.5-flash`) — 1M ctx, barato, datos Gmail ya en Google; Gmail funcional vía OpenRouter (validado en Discord) |
 | Provider alternativos | Anthropic (puntual), Nous Portal (dormido), DeepSeek V4 Flash (disponible vía OpenRouter) |
 | Compresión auxiliar | OpenRouter + `google/gemini-2.5-flash` (1M ctx, ~10x más barato que Haiku) |
 | `context_length` / `num_ctx` | 64000 (mínimo duro de Hermes; 32000 lanza `ValueError`) |
@@ -47,25 +47,32 @@ Notion y búsqueda de noticias.
 embeddings. Sin competencia de RAM entre Hermes y el RAG. `OLLAMA_KEEP_ALIVE=5m`
 en el plist de Ollama se mantiene como buena práctica.
 
-**Limitación conocida (diagnóstico final):** el tool-calling local de Gmail falla
-porque la capa OpenAI-compatible `/v1` de Ollama NO reconstruye de forma fiable el
-bloque `<tool_call>` de qwen3 dentro del envoltorio de deferred-tools de Hermes. El
-error (`tool_call requires a 'name' argument`) es intermitente y aparece SOLO en la
-ruta completa Hermes→`/v1`. Exonerados por evidencia:
-- **(a) modelo `qwen3:14b-hermes`** — emite tool-call perfecta por API nativa
-  `/api/chat` (curl).
-- **(b) la propia capa `/v1` de Ollama con UNA tool de esquema mínimo** — también
-  devuelve tool-call correcta por curl.
-- **(c) el volumen de prompt** — adelgazando toolsets + MCP el prompt bajó de
-  ~14.300 a ~3.400 tokens y el fallo persistió idéntico.
-- **(d) `tool_use_enforcement: none`** — no lo resolvió.
+**Limitación conocida:** el tool-calling local de Gmail queda **en espera del fix de
+Rapid-MLX** (issues `#197`/`#344`, bug de streaming). Plan B probado (2026-06-28):
+Rapid-MLX 0.9.7 + `Qwen3.5-9B-4bit` resuelve el tool-calling en no-streaming (curl OK,
+exonera al modelo), pero en streaming NO promociona la tool-call a estructurado y
+Hermes —que fuerza streaming sin opción de desactivarlo— recibe respuesta vacía.
+Rapid-MLX instalado como LaunchAgent (`com.martin.rapidmlx`), parado o activo según
+RAM, listo para reactivar el día del fix upstream. Mientras tanto Hermes usa OpenRouter
+(Gmail funcional). Detalle en `Mejoras_realizadas.md` → sesión 2026-06-28 (cont.) y
+backlog item 49.
 
-Conclusión por eliminación: el responsable es el orquestador de tools de Hermes, sin
-opción de configuración que lo desactive. → Plan B en `Mejoras_pendientes.md` →
-item 49 (cambiar backend, no modelo: Rapid-MLX).
+> **Ollama 0.30.7 — NO actualizar** (su `/v1` funciona y v0.30.8 arrastra una fuga de
+> KV-cache MLX conocida, issue #16698). Diagnóstico previo (ruta Hermes→`/v1` de Ollama,
+> con modelo y Ollama exonerados por curl): `Mejoras_realizadas.md` → sesión 2026-06-27/28.
 
-> **Ollama 0.30.7 — NO actualizar** por este motivo (su `/v1` funciona); además
-> v0.30.8 arrastra una fuga de KV-cache MLX conocida (issue #16698).
+**Aprendizajes operativos Hermes:**
+1. **Config:** editar `config.yaml` SOLO con `hermes config set` / `hermes setup`,
+   NUNCA a mano (`sed`/edición manual erosiona y corrompe el fichero; una sesión llegó
+   a perder el bloque `mcp_servers` entero). Backup explícito antes de cualquier sesión
+   de cambios.
+2. **Toolsets:** mantener los toolsets internos de Hermes ACTIVOS — desactivarlos en
+   masa rompe el agente (son andamiaje del bucle de razonamiento, no opcionales). El
+   control fino de tools se hace por MCP con `tools.include` (p.ej. Gmail 7 tools), no
+   desactivando toolsets nativos.
+3. **Higiene de pruebas:** tras cualquier cambio de config → `gateway restart`; antes
+   de cada prueba limpia → `/reset` en Discord. Sin esto, los "funciona una vez y luego
+   no" (contexto contaminado / config vieja en memoria) hacen los resultados no fiables.
 
 **Pendiente residual:**
 - Aplicar plist ingesta 04:00 en pciq22 (commit en repo hecho; falta

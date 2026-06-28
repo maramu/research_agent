@@ -278,26 +278,30 @@ Histórico de completados:
 - [x] Seguridad: terminal/code_execution/browser/computer_use desactivados.
 
 Residuales:
-- [ ] **Override Gmail con modelo local** — **Estado:** tool-calling local de Gmail
-      **BLOQUEADO en el orquestador de Hermes** (capa `/v1` de Ollama + envoltorio
-      deferred-tools). Modelo (`qwen3:14b-hermes`, curl `/api/chat` OK) y Ollama
-      0.30.7 (curl `/v1` con tool mínima OK) **exonerados**. Diagnóstico cerrado:
-      ver `Mejoras_realizadas.md` → sesión 2026-06-27/28.
-  - **PLAN B definido — cambiar BACKEND, no modelo:** probar **Rapid-MLX**
-    (github.com/raullenchai/Rapid-MLX) como servidor `/v1` alternativo (afirma 17
-    parsers de tool-call, "100% tool calling", drop-in OpenAI, compatible Hermes),
-    en **PUERTO SEPARADO**, sin tocar el Ollama del RAG. Hipótesis: Rapid-MLX parsea
-    el formato tool-call de qwen3 donde la combinación Hermes + `/v1`-Ollama falla.
-    Si funciona, el `qwen3:14b` actual podría bastar (no requiere modelo nuevo).
-  - **Puente operativo mientras tanto:** correo NO sensible vía modelo de pago
-    OpenRouter (tool-calling fiable); correo sensible (datos de alumnado) esperar a
-    Rapid-MLX.
+- [ ] **Override Gmail con modelo local** — **Estado:** plan B (Rapid-MLX) **PROBADO y
+      bloqueado por un bug de streaming de Rapid-MLX 0.9.7** (issues **#197/#344**,
+      abiertos upstream). El modelo y el modo no-streaming OK (`tool_calls`
+      estructurado por curl); Hermes fuerza streaming, NO configurable → recibe
+      respuesta vacía. Diagnóstico completo en `Mejoras_realizadas.md` → sesión
+      2026-06-28 (cont.).
+  - **En espera del fix upstream:** suscrito a issues #197/#344 y a Releases del repo
+    `raullenchai/Rapid-MLX`. **Día del fix:** `uv tool upgrade rapid-mlx` + reapuntar
+    provider Hermes a `localhost:8000` + `bootstrap` del LaunchAgent
+    `com.martin.rapidmlx`. Todo lo demás ya montado.
+  - **Provider actual de Hermes:** OpenRouter (`google/gemini-3.5-flash`); Gmail
+    funcional vía OpenRouter (validado). Matiz privacidad: correo sensible (datos de
+    alumnado) pasa por OpenRouter — para esos casos esperar al tool-calling local.
+  - **Sub-items futuros:** probar **GPT-OSS 20B** o **Qwen3-Coder** en Rapid-MLX
+    (formato de tool-call distinto al XML de Qwen3.5; podría esquivar el bug de
+    streaming).
 - [ ] Archivar el plist `com.hermes.gateway.plist` (inerte) → `mv` a
       `~/.hermes/_plist_archive/` para que no arranque al login; gateway válido =
       `ai.hermes.gateway`.
 - [ ] Evaluar pin de versión del MCP Homebrew `@shinzolabs/gmail-mcp` (autoupdate de
       Homebrew → riesgo de drift de esquema/nombres que rompa la whitelist).
 - [ ] Migración config v30→31 pendiente (con backup, fuera de sesión).
+- [ ] **Hardening SSH en pciq22** (`PasswordAuthentication no`) — aviso del security
+      audit de Hermes; prioridad media si solo se accede por VPN.
 - [ ] Aplicar plist ingesta 04:00 en pciq22 (commit en repo hecho; falta
       `git pull` + `cp deployment/... ~/Library/LaunchAgents/` +
       `launchctl bootout/bootstrap`).
@@ -313,3 +317,12 @@ exonerados por eliminación (curl `/api/chat` OK, curl `/v1` con tool mínima OK
 prompt 3.400 vs 14.300 falla igual, `tool_use_enforcement: none` no ayuda). → Plan B:
 Rapid-MLX como backend alternativo. Detalle en `Mejoras_realizadas.md` → sesión
 2026-06-27/28.
+
+**Progreso 2026-06-28 (cont.):** plan B (Rapid-MLX 0.9.7 + `Qwen3.5-9B-4bit`,
+puerto 8000, LaunchAgent `com.martin.rapidmlx`) PROBADO: tool-calling en no-streaming
+OK (curl), funcionó una vez end-to-end. BLOQUEADO por bug de streaming de Rapid-MLX
+(issues #197/#344, abiertos): en streaming no promociona la tool-call a estructurado
+y Hermes —que fuerza streaming sin opción— recibe respuesta vacía. Vuelta a OpenRouter
+(`google/gemini-3.5-flash`); Rapid-MLX queda instalado a la espera del fix upstream.
+Incidente: `config.yaml` erosionado por ediciones `sed` (perdido `mcp_servers`),
+restaurado desde backup. Detalle en `Mejoras_realizadas.md` → sesión 2026-06-28 (cont.).

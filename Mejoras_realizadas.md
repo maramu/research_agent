@@ -3,6 +3,83 @@
 
 ---
 
+## Sesión 2026-06-28 (cont.) — Hermes: Plan B Rapid-MLX probado; bug de streaming; vuelta a OpenRouter
+
+**PLAN B EJECUTADO (Rapid-MLX como backend de tool-calling local):**
+- Instalado **Rapid-MLX 0.9.7** vía `uv tool install rapid-mlx` (entorno aislado, sin
+  tocar Ollama/RAG ni el venv del RAG). Modelo: `mlx-community/Qwen3.5-9B-4bit`
+  (~5-6 GB en disco, ~20 GB working set), servido en puerto 8000.
+- **VALIDADO tool-calling en NO-streaming:** `curl` a `/v1/chat/completions` devuelve
+  `tool_calls` estructurado perfecto (name + arguments). Confirma que el problema era
+  el parser de la capa `/v1` de Ollama, NO el modelo; Rapid-MLX lo resuelve en
+  no-streaming.
+- **Integración con Hermes:** provider custom "Rapid-MLX (Qwen3.5-9B)" creado vía
+  `hermes setup model` (`api_mode chat_completions`, `base_url localhost:8000/v1`,
+  `context_length 64000`). En esta versión de Hermes, `provider: custom` + `base_url`
+  en el bloque `model:` es válido (la regla previa "base_url nunca en `model:`" NO
+  aplica aquí).
+- **Funcionó UNA vez end-to-end** con whitelist mínima (solo Gmail; Notion + Calendar
+  desactivados para bajar del umbral de deferred-tools ~13.107 tokens): el 9B llamó
+  `get_label` y devolvió el conteo correcto.
+- **LaunchAgent creado:** `~/Library/LaunchAgents/com.martin.rapidmlx.plist`
+  (RunAtLoad, KeepAlive, host 127.0.0.1, puerto 8000, logs en
+  `~/rapidmlx.launchd.log`/`.err`).
+
+**BLOQUEANTE FINAL (bug de Rapid-MLX, no de la config):**
+- En modo **STREAMING**, Rapid-MLX 0.9.7 NO promociona las tool-calls a estructurado:
+  emite el XML `<tool_call><function=...><parameter=...>` como texto en `content`, con
+  `finish_reason=stop` y sin `tool_calls`. Confirmado idéntico con 3 parsers (`hermes`,
+  `qwen3_coder_xml`, `qwen3_xml`) — no es elección de parser.
+- Hermes SIEMPRE usa streaming (`chat_completion_stream_request`) y NO es configurable:
+  `extra_body: {stream: false}` en el provider es IGNORADO por el orquestador.
+- Resultado: Hermes recibe respuesta vacía (`Empty response no content or reasoning`)
+  y agota reintentos. Gmail no funciona vía Hermes + Rapid-MLX hoy.
+- Causa raíz = bugs **ABIERTOS** del repo `raullenchai/Rapid-MLX`: **#197** (OutputRouter
+  drops partial tool calls when stream ends mid-tool-call) y **#344** (port tool_call
+  promotion to think_parser). No está en nuestra mano; esperar fix upstream.
+
+**DECISIÓN:** volver a **OpenRouter** como provider de Hermes (modelo
+`google/gemini-3.5-flash`). El tool-calling de Gmail vía OpenRouter funciona
+end-to-end (validado en Discord). El servicio Rapid-MLX (LaunchAgent) queda instalado;
+puede pararse para liberar RAM, reactivable con un `bootstrap` el día del fix.
+
+**INCIDENTE de config (importante):**
+- Múltiples ediciones manuales con `sed` durante la sesión erosionaron `config.yaml`
+  hasta perder el bloque `mcp_servers` ENTERO (Gmail/Notion/Calendar) — `hermes mcp
+  test gmail` → "Server not found". El fichero pasó de ~19 KB a ~14 KB.
+- **RESTAURADO** desde backup `config.yaml.PRERAPIDMLX.20260628_150437` (19 KB, íntegro,
+  con todos los MCP) y reaplicado OpenRouter con `hermes config set` (no edición
+  manual).
+- Tras restaurar, conflicto de puerto 3000 del MCP Gmail (`ClosedResourceError`)
+  resuelto con `pkill -9 -f gmail-mcp` + kill puertos 3000-3002 (uno a uno: la sintaxis
+  `lsof -ti :3000 :3001 :3002` no funciona en lsof 4.91) + `gateway restart`. Sistema
+  operativo de nuevo.
+
+**LECCIONES OPERATIVAS (importantes, corrigen supuestos previos):**
+1. **CONFIG:** para cambios en `config.yaml` de Hermes usar SIEMPRE `hermes config set`
+   / `hermes setup`, NUNCA `sed`/edición manual (corrompe/erosiona el fichero; ya van
+   varios `.corrupt` + esta pérdida de `mcp_servers`). Backup explícito antes de
+   cualquier sesión de cambios.
+2. **TOOLSETS:** CORRECCIÓN sobre "adelgazar toolsets". Desactivar toolsets internos de
+   Hermes en masa (`web`/`skills`/`todo`/`memory`/`clarify`/`session_search`...) ROMPE
+   el funcionamiento del agente con OpenRouter (da error; se solucionó al
+   REACTIVARLOS). Algunos toolsets internos son andamiaje del bucle de razonamiento, no
+   opcionales como un MCP. Para uso normal: toolsets internos ACTIVOS; el control fino
+   de tools se hace con `tools.include` por MCP (p.ej. Gmail 7 tools), NO desactivando
+   toolsets nativos. El adelgazado en masa solo tuvo sentido como experimento puntual
+   para medir el umbral de deferred-tools, no como estado permanente.
+3. **ESTADOS TRANSITORIOS** ("funciona una vez y luego no"): patrón recurrente toda la
+   sesión. Causas: (a) contexto de Discord contaminado (el modelo arrastra mensajes
+   viejos y alucina — p.ej. "10 correos" reciclados de una sesión previa cuando los
+   reales eran 19/24); (b) gateway con config vieja en memoria (un cambio en el fichero
+   no surte efecto sin `gateway restart`, y a veces el restart no mataba el proceso
+   viejo por el LaunchAgent con KeepAlive); (c) estados intermedios durante edición.
+   REGLA: tras cambiar config → `gateway restart` siempre; antes de cada prueba limpia
+   → `/reset` en Discord. Sin esa higiene, una prueba puede pillar un estado bueno
+   transitorio y la siguiente fallar — los resultados no son fiables.
+
+---
+
 ## Sesión 2026-06-27/28 — Hermes: depuración tool-calling local de Gmail (diagnóstico cerrado, fix pendiente)
 
 **Resuelto:**
