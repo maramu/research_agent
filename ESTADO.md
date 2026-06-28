@@ -30,7 +30,7 @@ Notion y búsqueda de noticias.
 | MCP Notion | 20 tools (HTTP OAuth, toolset `mcp-notion`) |
 | MCP Google Calendar | 17 tools (stdio, toolset `mcp-google-calendar`) |
 | MCP Gmail | 64 tools (stdio, toolset `mcp-gmail`); whitelist `tools.include` = 7 tools solo lectura + draft (`get_label`, `list_labels`, `list_messages`, `get_message`, `list_threads`, `get_thread`, `create_draft`) — sin send/delete/trash/config |
-| SOUL.md | `~/.hermes/SOUL.md` (auto-inyectado) con "Reglas de Gmail" (get_label sobre UNREAD; maxResults siempre; nunca includeBodyHtml) |
+| SOUL.md | `~/.hermes/SOUL.md` (auto-inyectado) con "Reglas de Gmail" (contar con `get_label` y argumento `id: "UNREAD"` OBLIGATORIO; maxResults siempre; nunca includeBodyHtml) |
 | Web search | Tavily (`TAVILY_API_KEY` en `.env`) |
 | Keep-warm local | ~~Eliminado~~ — modelo local descartado para Hermes (qwen3:8b no viable con MCPs) |
 | Seguridad | `terminal`/`code_execution`/`browser`/`computer_use` desactivados en ambas plataformas (gestión por plataforma vía `hermes tools`); aprobación manual para acciones destructivas |
@@ -47,11 +47,25 @@ Notion y búsqueda de noticias.
 embeddings. Sin competencia de RAM entre Hermes y el RAG. `OLLAMA_KEEP_ALIVE=5m`
 en el plist de Ollama se mantiene como buena práctica.
 
-**Limitación conocida:** tool-calling local de Gmail no fiable vía Hermes; causa
-localizada en el envoltorio de deferred tools de Hermes (esquema pesado + deferred
-tools que `qwen3:14b` no resuelve), NO en Ollama ni en el modelo (ambos exonerados
-por `curl` decisivo a `/v1`). En investigación — ver `Mejoras_pendientes.md` →
-item 49.
+**Limitación conocida (diagnóstico final):** el tool-calling local de Gmail falla
+porque la capa OpenAI-compatible `/v1` de Ollama NO reconstruye de forma fiable el
+bloque `<tool_call>` de qwen3 dentro del envoltorio de deferred-tools de Hermes. El
+error (`tool_call requires a 'name' argument`) es intermitente y aparece SOLO en la
+ruta completa Hermes→`/v1`. Exonerados por evidencia:
+- **(a) modelo `qwen3:14b-hermes`** — emite tool-call perfecta por API nativa
+  `/api/chat` (curl).
+- **(b) la propia capa `/v1` de Ollama con UNA tool de esquema mínimo** — también
+  devuelve tool-call correcta por curl.
+- **(c) el volumen de prompt** — adelgazando toolsets + MCP el prompt bajó de
+  ~14.300 a ~3.400 tokens y el fallo persistió idéntico.
+- **(d) `tool_use_enforcement: none`** — no lo resolvió.
+
+Conclusión por eliminación: el responsable es el orquestador de tools de Hermes, sin
+opción de configuración que lo desactive. → Plan B en `Mejoras_pendientes.md` →
+item 49 (cambiar backend, no modelo: Rapid-MLX).
+
+> **Ollama 0.30.7 — NO actualizar** por este motivo (su `/v1` funciona); además
+> v0.30.8 arrastra una fuga de KV-cache MLX conocida (issue #16698).
 
 **Pendiente residual:**
 - Aplicar plist ingesta 04:00 en pciq22 (commit en repo hecho; falta

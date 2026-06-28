@@ -278,23 +278,23 @@ Histórico de completados:
 - [x] Seguridad: terminal/code_execution/browser/computer_use desactivados.
 
 Residuales:
-- [ ] **Override Gmail con modelo local** — reabierto 2026-06-27/28 con `qwen3:14b`
-      (el descarte de `qwen3:8b` del 2026-06-26 ya no aplica). Estado: **BLOQUEADO**,
-      causa LOCALIZADA en Hermes (NO en Ollama ni en el modelo). Prueba decisiva por
-      `curl` a `/v1/chat/completions` (1 tool, esquema mínimo, 147 tokens): tool-call
-      perfecta → `/v1` de Ollama y modelo OK, **Ollama 0.30.7 EXONERADO, no
-      actualizar**. Vía Hermes (~14.325 tokens: SOUL.md + todos los toolsets +
-      deferred tools) falla con `tool_call requires a 'name' argument` y pista
-      `'himalaya' is not a deferrable tool` → el ENVOLTORIO de deferred tools de
-      Hermes es lo que `qwen3:14b` no resuelve. Próximos pasos (terreno Hermes):
-      1. Desactivar toolsets no esenciales en la sesión Gmail para adelgazar el
-         esquema.
-      2. Buscar opción para exponer tools directas en vez de deferred (revisar
-         `deferred_tools` / `tool_gateway` / `tool_use_enforcement` en config).
-      3. Si no basta, alternativa de fondo: provider de pago solo-Gmail [choca con
-         privacidad correo UCA] / Composio [tercero hospedado] / modelo mayor.
-- [ ] Archivar el plist `com.hermes.gateway` (inerte) para que no arranque al login;
-      gateway válido = `ai.hermes.gateway`.
+- [ ] **Override Gmail con modelo local** — **Estado:** tool-calling local de Gmail
+      **BLOQUEADO en el orquestador de Hermes** (capa `/v1` de Ollama + envoltorio
+      deferred-tools). Modelo (`qwen3:14b-hermes`, curl `/api/chat` OK) y Ollama
+      0.30.7 (curl `/v1` con tool mínima OK) **exonerados**. Diagnóstico cerrado:
+      ver `Mejoras_realizadas.md` → sesión 2026-06-27/28.
+  - **PLAN B definido — cambiar BACKEND, no modelo:** probar **Rapid-MLX**
+    (github.com/raullenchai/Rapid-MLX) como servidor `/v1` alternativo (afirma 17
+    parsers de tool-call, "100% tool calling", drop-in OpenAI, compatible Hermes),
+    en **PUERTO SEPARADO**, sin tocar el Ollama del RAG. Hipótesis: Rapid-MLX parsea
+    el formato tool-call de qwen3 donde la combinación Hermes + `/v1`-Ollama falla.
+    Si funciona, el `qwen3:14b` actual podría bastar (no requiere modelo nuevo).
+  - **Puente operativo mientras tanto:** correo NO sensible vía modelo de pago
+    OpenRouter (tool-calling fiable); correo sensible (datos de alumnado) esperar a
+    Rapid-MLX.
+- [ ] Archivar el plist `com.hermes.gateway.plist` (inerte) → `mv` a
+      `~/.hermes/_plist_archive/` para que no arranque al login; gateway válido =
+      `ai.hermes.gateway`.
 - [ ] Evaluar pin de versión del MCP Homebrew `@shinzolabs/gmail-mcp` (autoupdate de
       Homebrew → riesgo de drift de esquema/nombres que rompa la whitelist).
 - [ ] Migración config v30→31 pendiente (con backup, fuera de sesión).
@@ -307,6 +307,9 @@ limpieza Ollama completa. Solo queda el plist de la ingesta como residual real.
 
 **Progreso 2026-06-27/28:** reabierto el override local con `qwen3:14b`. Saneados
 Modelfile (thinking), whitelist Gmail (7 tools), SOUL.md, `context_length`/`num_ctx`
-(64000) y doble-gateway. Tool-calling local de Gmail BLOQUEADO; causa localizada en
-el envoltorio de deferred tools de Hermes (Ollama y modelo exonerados por `curl`
-decisivo). Detalle en `Mejoras_realizadas.md` → sesión 2026-06-27/28.
+(64000) y doble-gateway. **Diagnóstico cerrado:** el tool-calling local de Gmail
+falla en la ruta Hermes→`/v1` de Ollama (envoltorio deferred-tools); modelo y Ollama
+exonerados por eliminación (curl `/api/chat` OK, curl `/v1` con tool mínima OK,
+prompt 3.400 vs 14.300 falla igual, `tool_use_enforcement: none` no ayuda). → Plan B:
+Rapid-MLX como backend alternativo. Detalle en `Mejoras_realizadas.md` → sesión
+2026-06-27/28.

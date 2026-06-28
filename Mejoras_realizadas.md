@@ -3,67 +3,47 @@
 
 ---
 
-## Sesión 2026-06-27/28 — Hermes Agent: tool-calling local de Gmail (parcialmente resuelto)
+## Sesión 2026-06-27/28 — Hermes: depuración tool-calling local de Gmail (diagnóstico cerrado, fix pendiente)
 
-Reapertura del override de Gmail con modelo local (que se había descartado el
-2026-06-26) probando ahora `qwen3:14b`. Mucho saneado de configuración e
-infraestructura; el tool-calling local de Gmail queda bloqueado por el envoltorio
-de tools de Hermes (esquema pesado + deferred tools), con Ollama y el modelo ya
-exonerados por prueba decisiva.
+**Resuelto:**
+- **Causa del "modelo sin thinking":** el Modelfile `qwen3:14b-hermes` se había
+  creado con `FROM <blob sha256>` en vez de `FROM qwen3:14b`, perdiendo la
+  capability thinking. Recreado con `FROM qwen3:14b` + `num_ctx 64000` +
+  `temperature 0.6`; verificado por API nativa que razona y emite tool-call correcta.
+- **`context_length` corregido:** estaba en 1000000 (Hermes nunca comprimía); fijado
+  a 64000. Nota: 32000 lanza `ValueError` (mínimo duro de Hermes = 64000). `num_ctx`
+  del modelo igualado a 64000.
+- **Doble-gateway resuelto:** `gateway restart` no mataba el viejo porque el
+  LaunchAgent (KeepAlive) lo resucitaba. Fix: `launchctl bootout` → matar →
+  `bootstrap` para gateway único supervisado. Detectado plist duplicado
+  `com.hermes.gateway` (inerte, pendiente archivar).
+- **MCP Gmail identificado:** `@shinzolabs/gmail-mcp` (Homebrew, 64 tools). Whitelist
+  `tools.include` corregida (3 typos que no cargaban: `list_label`→`list_labels`,
+  `get_messages`→`get_message`, `create_draf`→`create_draft`); 7 tools solo lectura +
+  draft.
+- **SOUL.md:** regla Gmail afinada (`get_label` con `id: "UNREAD"` obligatorio;
+  `maxResults` siempre; nunca `includeBodyHtml`).
+- **Seguridad verificada:** terminal/code_execution/browser/computer_use desactivados
+  en CLI y Discord (gestión por plataforma, no por `disabled_toolsets` global).
+- **Conteo de no leídos:** el valor "10" de las primeras pruebas era alucinación por
+  contexto contaminado (history=28); el real es 19 (confirmado en Gmail). Lección:
+  `/reset` entre tareas en sesiones locales largas.
 
-**RESUELTO esta sesión:**
-- **Causa raíz del thinking perdido:** el Modelfile `qwen3:14b-hermes` se había
-  creado con `FROM <blob sha256-a8cc…>` en vez de `FROM qwen3:14b`, perdiendo la
-  capability de thinking. Recreado con `FROM qwen3:14b` + `num_ctx 64000` +
-  `temperature 0.6`. Verificado por API nativa: el modelo razona y emite tool-call
-  bien formada.
-- **MCP de Gmail identificado:** `@shinzolabs/gmail-mcp` vía Homebrew
-  (`/opt/homebrew/bin/gmail-mcp`, 64 tools). AVISO: Homebrew autoactualiza → riesgo
-  de drift de esquema/nombres que rompa la whitelist; considerar pin de versión.
-- **Whitelist `tools.include`** (7 tools, solo lectura + draft): `get_label`,
-  `list_labels`, `list_messages`, `get_message`, `list_threads`, `get_thread`,
-  `create_draft`. Excluye por diseño TODO send/delete/trash/config (seguridad correo
-  UCA). Corregidos 3 typos que no cargaban: `list_label`→`list_labels`,
-  `get_messages`→`get_message`, `create_draf`→`create_draft`.
-- **SOUL.md** (`~/.hermes/SOUL.md`, auto-inyectado): añadida sección "Reglas de
-  Gmail" — contar con `get_label` sobre UNREAD; `maxResults` SIEMPRE en
-  `list_messages`; nunca `includeBodyHtml`.
-- **`model.context_length`:** estaba en 1000000 (Hermes nunca comprimía, threshold
-  0.75 sobre 1M) → corregido. NOTA: 32000 NO sirve (mínimo duro de Hermes = 64000,
-  lanza `ValueError`); valor correcto 64000. `num_ctx` del modelo igualado a 64000.
-- **Seguridad terminal verificada y CORRECTA:** Terminal/Code Execution/Browser/
-  Computer Use desactivados en AMBAS plataformas (Discord y CLI). La gestión es POR
-  PLATAFORMA (`hermes tools`), no por el `disabled_toolsets: []` /
-  `terminal.backend: local` del config crudo (eso despistó). La nota previa de
-  ESTADO era correcta para la superficie expuesta.
-- **Doble-gateway resuelto:** `hermes gateway restart` no mataba el proceso viejo
-  porque el LaunchAgent `ai.hermes.gateway` (KeepAlive) lo resucitaba. Fix:
-  `launchctl bootout` del agente → matar → `launchctl bootstrap` para un gateway
-  único supervisado.
-- **Plist duplicado detectado:** existen `ai.hermes.gateway.plist` (activo,
-  correcto) y `com.hermes.gateway.plist` (inerte). Pendiente archivar el `com.` para
-  que no arranque al login.
+**Diagnóstico cerrado (fix pendiente — plan B):**
+- El tool-calling local de Gmail falla en la ruta Hermes→`/v1` de Ollama (envoltorio
+  deferred-tools; error `tool_call requires a 'name' argument`, intermitente; una vez
+  asomó `get_label` real con error de args `-32602`). Descartado por eliminación:
+  modelo (curl `/api/chat` OK), `/v1` con tool mínima (curl OK), volumen de prompt
+  (3.400 vs 14.300, falla igual), `tool_use_enforcement: none`. → **Plan B: Rapid-MLX
+  como backend alternativo** (ver `Mejoras_pendientes.md` item 49).
 
-**BLOQUEANTE (sin resolver): tool-calling local de Gmail vía Hermes — causa
-LOCALIZADA en Hermes, NO en Ollama ni en el modelo.**
-- **Prueba decisiva** (`curl` a `/v1/chat/completions` con 1 tool, esquema mínimo,
-  147 tokens de prompt): el modelo emite tool-call PERFECTA
-  (`name=list_messages`, args correctos, `finish_reason=tool_calls`). El `/v1` de
-  Ollama y el modelo están BIEN. **Ollama 0.30.7 EXONERADO — no actualizar.**
-- **Vía Hermes** en cambio: prompt de ~14.325 tokens (SOUL.md + instrucciones +
-  esquemas de TODOS los toolsets activos + mecanismo de deferred-tools propio de
-  Hermes), y el modelo falla con `tool_call requires a 'name' argument`. Pista:
-  error `'himalaya' is not a deferrable tool` → Hermes envuelve las tools en un
-  meta-mecanismo de deferred tools que `qwen3:14b` no resuelve.
-- **Conclusión:** las tools "crudas" sí las maneja el 14B (curl ✓); el ENVOLTORIO
-  de Hermes (esquema pesado + deferred tools) no. `enable_thinking:false` no influye
-  (probado con reinicio).
-- **Próximos pasos (terreno Hermes):** (1) desactivar toolsets no esenciales en la
-  sesión Gmail para adelgazar el esquema; (2) buscar opción para exponer tools
-  directas en vez de deferred (revisar `deferred_tools` / `tool_gateway` /
-  `tool_use_enforcement` en config); (3) si no basta, alternativa de fondo: provider
-  de pago solo-Gmail [privacidad UCA] / Composio / modelo mayor. Ollama queda fuera
-  de sospecha.
+**Decisión de arquitectura (modelo único RAG+Hermes): DESCARTADO.** Qwen3.6-35B-A3B
+4-bit (~20 GB) no deja RAM para `bge-m3` en los 24 GB → rompería la convivencia con
+el RAG; además piensa por defecto (malo para el pipeline de citas, ya validado con
+`qwen2.5:14b`). El RAG mantiene `qwen2.5:14b-instruct` + `bge-m3` sin cambios. Un
+modelo mayor para Hermes, si hace falta tras Rapid-MLX, iría cargado bajo demanda
+(`KEEP_ALIVE` corto), nunca coresidente con el RAG. "Uno para todo" requeriría
+48-64 GB de RAM.
 
 ## Sesión 2026-06-26 — Hermes: descarte modelo local, Gemini 2.5 Flash como default, limpieza Ollama
 
