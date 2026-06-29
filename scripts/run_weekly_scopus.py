@@ -138,6 +138,7 @@ a  { color:#3182ce; }
 """
 
 
+# DEPRECATED — se usa build_html_single_cat() desde 2026-07-01
 def build_html(
     run_date: str,
     duration_s: float,
@@ -222,6 +223,152 @@ def build_html(
 </body></html>
 """
     return html
+
+def build_html_single_cat(
+    cat: str,
+    run_date: str,
+    duration_s: float,
+    overall_cat: str,
+    pdf_before: int,
+    pdf_after: int,
+    chunk_total: int | str,
+    pending_cat: list[dict],
+    log_path: str,
+    error_msg: str = "",
+) -> str:
+    icon = _status_icon(overall_cat)
+    status_class = {
+        "ok": "ok", "partial": "warn", "error": "error", "timeout": "warn",
+    }.get(overall_cat, "warn")
+
+    html = f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8"><style>{_CSS}</style></head>
+<body>
+<h2>📄 Ingesta Scopus semanal — {run_date} — {cat}</h2>
+<p>Duración: <strong>{duration_s:.1f}s</strong> &nbsp;|&nbsp;
+   Estado general: <span class="{status_class}">{icon} {overall_cat.upper()}</span></p>
+"""
+
+    if error_msg:
+        html += (
+            f'<p class="error">⛔ Error durante la ejecución: '
+            f"<code>{error_msg}</code></p>\n"
+        )
+
+    # ── Resultado ─────────────────────────────────────────────────────────
+    new_pdfs = pdf_after - pdf_before
+    pill = {"ok": "pill-ok", "error": "pill-err", "timeout": "pill-warn"}.get(overall_cat, "pill-warn")
+    chunks_display = chunk_total if overall_cat == "ok" else "—"
+
+    html += "<h3>📂 Resultado</h3>\n<table>\n"
+    html += (
+        "<tr><th>Categoría</th><th>Estado</th>"
+        "<th>PDFs nuevos</th><th>Chunks totales</th></tr>\n"
+    )
+    html += (
+        f"<tr><td>{cat}</td>"
+        f"<td><span class='{pill}'>{_status_icon(overall_cat)} {overall_cat}</span></td>"
+        f"<td>+{new_pdfs}</td>"
+        f"<td>{chunks_display}</td></tr>\n"
+    )
+    html += "</table>\n"
+
+    # ── DOIs pendientes de descarga ────────────────────────────────────────
+    html += "<h3>⬇️ DOIs pendientes de descarga</h3>\n"
+    if not pending_cat:
+        html += '<p class="ok">✅ Sin DOIs pendientes de descarga.</p>\n'
+    else:
+        html += f"<p>Total: <strong>{len(pending_cat)}</strong> DOI(s) con status <em>pending</em>.</p>\n"
+        html += (
+            "<table>\n<tr><th>Título</th><th>Año</th><th>Categoría</th>"
+            "<th>Motivo</th><th>Enlace</th></tr>\n"
+        )
+        for row in pending_cat:
+            title  = (row.get("title",    "") or "")[:60]
+            year   = row.get("year",      "")
+            cat_r  = row.get("category",  "")
+            reason = (row.get("reason",   "") or "")[:80]
+            url    = row.get("landing_url", "")
+            link   = f'<a href="{url}">🔗 ver</a>' if url else "—"
+            html += (
+                f"<tr><td>{title}</td><td>{year}</td><td>{cat_r}</td>"
+                f"<td><small>{reason}</small></td><td>{link}</td></tr>\n"
+            )
+        html += "</table>\n"
+
+    # ── Pie ───────────────────────────────────────────────────────────────
+    html += f"""
+<div class="footer">
+  <p>Host: <code>{socket.gethostname()}</code>
+     &nbsp;|&nbsp; Log: <code>{log_path}</code></p>
+  <p>Generado por <code>research_agent/scripts/run_weekly_scopus.py</code></p>
+</div>
+</body></html>
+"""
+    return html
+
+
+# ---------------------------------------------------------------------------
+# Per-category email dispatcher
+# ---------------------------------------------------------------------------
+
+def send_category_emails(
+    run_date: str,
+    duration_s: float,
+    overall: str,
+    pdf_diffs: dict[str, tuple[int, int]],
+    chunk_totals: dict[str, int],
+    cat_results: dict[str, dict],
+    pending: list[dict],
+    log_path: str,
+    error_msg: str = "",
+    dry_run: bool = False,
+) -> None:
+    log = logging.getLogger("weekly_scopus")
+    failed_htmls: list[str] = []
+
+    for cat in WEEKLY_CATEGORIES:
+        result = cat_results.get(cat, {})
+        overall_cat = result.get("status", "error")
+        before, after = pdf_diffs.get(cat, (0, 0))
+        new_pdfs = after - before
+        chunk_total: int | str = chunk_totals.get(cat, "—") if overall_cat == "ok" else "—"
+        pending_cat = [r for r in pending if r.get("category", "") == cat]
+
+        subject = (
+            f"[research_agent] {cat} — {run_date} — "
+            f"{new_pdfs} nuevos / {len(pending_cat)} pendientes"
+        )
+        html = build_html_single_cat(
+            cat=cat,
+            run_date=run_date,
+            duration_s=duration_s,
+            overall_cat=overall_cat,
+            pdf_before=before,
+            pdf_after=after,
+            chunk_total=chunk_total,
+            pending_cat=pending_cat,
+            log_path=log_path,
+            error_msg=error_msg,
+        )
+
+        if dry_run:
+            print(f"\n{'=' * 60}\n=== {cat} ===\n{'=' * 60}")
+            print(html)
+            continue
+
+        try:
+            send_email(subject, html)
+            log.info("Email enviado [%s] a %s", cat, SMTP_TO)
+        except Exception as exc:
+            log.error("ERROR enviando email [%s]: %s", cat, exc)
+            failed_htmls.append(f"<!-- === {cat} === -->\n{html}")
+
+    if failed_htmls:
+        fallback = Path("/tmp/research_agent_weekly_report.html")
+        fallback.write_text("\n".join(failed_htmls), encoding="utf-8")
+        log.error("HTML de categorías fallidas guardado en %s", fallback)
+
 
 # ---------------------------------------------------------------------------
 # Email
@@ -319,13 +466,7 @@ def main(dry_run: bool = False) -> None:
     # DOIs pendientes
     pending = _load_pending_dois()
 
-    total_new_pdfs = sum(v[1] - v[0] for v in pdf_diffs.values())
-    subject = (
-        f"[research_agent] Ingesta semanal {run_date} — "
-        f"{total_new_pdfs} nuevos / {len(pending)} pendientes"
-    )
-
-    html = build_html(
+    send_category_emails(
         run_date=run_date,
         duration_s=duration_s,
         overall=overall,
@@ -335,20 +476,12 @@ def main(dry_run: bool = False) -> None:
         pending=pending,
         log_path=log_path,
         error_msg=error_msg,
+        dry_run=dry_run,
     )
 
     if dry_run:
-        print(html)
         log.info("=== dry-run finalizado ===")
         return
-
-    try:
-        send_email(subject, html)
-        log.info("Email enviado a %s", SMTP_TO)
-    except Exception as exc:
-        fallback = Path("/tmp/research_agent_weekly_report.html")
-        fallback.write_text(html, encoding="utf-8")
-        log.error("ERROR enviando email: %s — HTML guardado en %s", exc, fallback)
 
     log.info(
         "=== run_weekly_scopus finalizado — estado: %s, duración: %.1fs ===",
