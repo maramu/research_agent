@@ -494,8 +494,8 @@ def check_google_aistudio_api(api_key: str) -> Tuple[bool, str]:
     """
     if not api_key:
         return False, "Introduce tu API key de Google AI Studio"
-    if not api_key.startswith("AI"):
-        return False, "Formato inesperado (se espera AIza...)"
+    if not (api_key.startswith("AIza") or api_key.startswith("AQ.")):
+        return False, "Formato inesperado (se espera AIza... o AQ....)"
     try:
         from openai import OpenAI
         client = OpenAI(
