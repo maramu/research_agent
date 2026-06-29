@@ -3,6 +3,27 @@
 
 ---
 
+## Hecho hoy (2026-07-01)
+
+### Emails independientes por categoría en ingesta semanal
+
+`scripts/run_weekly_scopus.py` — antes enviaba un único email consolidado con todas las categorías; ahora envía **un email por categoría**:
+- `build_html_single_cat()`: genera HTML para una sola categoría (tabla de 1 fila + DOIs pendientes filtrados por esa categoría).
+- `send_category_emails()`: itera sobre `WEEKLY_CATEGORIES`, construye subject individual (`[research_agent] {cat} — {fecha} — N nuevos / M pendientes`), envía cada email. Si falla alguno, loguea y continúa; HTMLs fallidos concatenados en `/tmp/research_agent_weekly_report.html`.
+- `main()` ya no llama a `send_email` directamente; delega a `send_category_emails()`.
+- `build_html()` marcada como `# DEPRECATED — se usa build_html_single_cat() desde 2026-07-01`.
+
+### Google AI Studio como provider gratuito en app pública
+
+Nuevo provider en `2_RAG.py` (solo app pública, 8502) para que los compañeros del grupo usen modelos Gemini gratuitos con su propia API key de Google AI Studio:
+- `app_utils.py`: `GOOGLE_AISTUDIO_MODELS = ["gemini-2.5-flash", "gemini-2.0-flash"]`, `check_google_aistudio_api(api_key)` (valida formato + `models.list()`, sin caché), ventanas de contexto 1M en `LLM_CONTEXT_WINDOWS`.
+- `2_RAG.py`: `get_google_aistudio_client(api_key)` — cliente OpenAI con `base_url` de Google AI Studio (sin `@st.cache_resource`, key por sesión). `stream_google_aistudio()` sigue el patrón de `stream_openrouter()` sin `extra_body`. Coste = 0.
+- UX: el campo de API key (`st.text_input`, type=password) solo aparece al seleccionar "Google AI Studio" como provider. Con "Ollama (local)" no pide nada. Enlace a `https://aistudio.google.com/apikey` en el help.
+- No aparece en la app privada (8501), que conserva Ollama/Anthropic/OpenAI/OpenRouter.
+- Sin persistencia de key entre sesiones (requeriría sistema de usuarios — posible iteración futura).
+
+---
+
 ## Sesión 2026-06-28 (cont.) — Hermes: Plan B Rapid-MLX probado; bug de streaming; vuelta a OpenRouter
 
 **PLAN B EJECUTADO (Rapid-MLX como backend de tool-calling local):**
