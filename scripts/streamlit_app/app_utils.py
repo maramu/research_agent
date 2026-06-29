@@ -105,6 +105,8 @@ OPENROUTER_MODELS = [
     "z-ai/glm-5.2",
 ]
 
+GOOGLE_AISTUDIO_MODELS = ["gemini-2.5-flash", "gemini-2.0-flash"]
+
 # ---------------------------------------------------------------------------
 # Pricing — USD por 1M tokens (input / output)
 #
@@ -148,6 +150,9 @@ LLM_CONTEXT_WINDOWS: Dict[str, int] = {
     "z-ai/glm-5.2":              128_000,
     # Ollama
     "qwen2.5:14b-instruct": 32_768,
+    # Google AI Studio
+    "gemini-2.5-flash": 1_000_000,
+    "gemini-2.0-flash": 1_000_000,
 }
 
 
@@ -480,6 +485,27 @@ def check_openrouter_api(timeout: float = 5.0) -> Tuple[bool, str]:
         return False, f"Timeout ({timeout}s)"
     except Exception as e:
         return False, f"Error: {e}"
+
+
+def check_google_aistudio_api(api_key: str) -> Tuple[bool, str]:
+    """Verifica la API key de Google AI Studio con una llamada ligera a models.list().
+
+    NO usa @st.cache_resource porque la key es personal y puede cambiar por sesión.
+    """
+    if not api_key:
+        return False, "Introduce tu API key de Google AI Studio"
+    if not api_key.startswith("AI"):
+        return False, "Formato inesperado (se espera AIza...)"
+    try:
+        from openai import OpenAI
+        client = OpenAI(
+            base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
+            api_key=api_key,
+        )
+        client.models.list()
+        return True, "OK"
+    except Exception as e:
+        return False, str(e)
 
 
 # ---------------------------------------------------------------------------

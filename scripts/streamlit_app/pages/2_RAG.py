@@ -38,6 +38,7 @@ for d in (str(STREAMLIT_APP_DIR), str(SCRIPTS_DIR)):
 from app_utils import (
     ANTHROPIC_MODELS, OPENAI_MODELS, OLLAMA_MODELS_LLM, OLLAMA_MODEL_EMBED,
     OPENROUTER_MODELS, OPENROUTER_API_KEY,
+    GOOGLE_AISTUDIO_MODELS, check_google_aistudio_api,
     OLLAMA_HOST, ANTHROPIC_API_KEY, OPENAI_API_KEY,
     CATEGORIAS_DIR, NAS_ROOT, LLM_PRICING, LLM_CONTEXT_WINDOWS,
     check_anthropic_api, check_nas, check_ollama, check_openai_api,
@@ -172,6 +173,14 @@ def get_openrouter_client():
             "HTTP-Referer": "https://github.com/maramu/research_agent",
             "X-Title": "research_agent RAG",
         },
+    )
+
+
+def get_google_aistudio_client(api_key: str):
+    from openai import OpenAI
+    return OpenAI(
+        base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
+        api_key=api_key,
     )
 
 
@@ -338,6 +347,24 @@ Recuerda: cita con [N] junto a cada dato; sin sección de Referencias."""
                 if _cost is not None:
                     usage_capture["cost_usd_override"] = float(_cost)
 
+    def stream_google_aistudio():
+        client = get_google_aistudio_client(st.session_state.get("_gai_api_key", ""))
+        gai_stream = client.chat.completions.create(
+            model=model,
+            messages=openai_messages,
+            max_tokens=max_output_tokens,
+            stream=True,
+            stream_options={"include_usage": True},
+        )
+        for chunk in gai_stream:
+            if chunk.choices and len(chunk.choices) > 0:
+                delta = chunk.choices[0].delta
+                if delta and delta.content:
+                    yield delta.content
+            if getattr(chunk, "usage", None):
+                usage_capture["input_tokens"]  = chunk.usage.prompt_tokens
+                usage_capture["output_tokens"] = chunk.usage.completion_tokens
+
     # Pintamos manualmente (no st.write_stream) para sustituir [N] por las
     # claves de cita una vez completada la generación.
     _raw_chunks = []
@@ -355,6 +382,8 @@ Recuerda: cita con [N] junto a cada dato; sin sección de Referencias."""
         _render(stream_openai())
     elif provider == "OpenRouter":
         _render(stream_openrouter())
+    elif provider == "Google AI Studio":
+        _render(stream_google_aistudio())
 
     raw_md    = "".join(_raw_chunks)
     answer_md = apply_citations(raw_md, cite_map)
@@ -1029,7 +1058,7 @@ with st.sidebar:
 
     if do_synth:
         _provider_options = (
-            ["Ollama (local)"]
+            ["Ollama (local)", "Google AI Studio"]
             if is_public_app()
             else ["Ollama (local)", "Anthropic (Claude)", "OpenAI (GPT)", "OpenRouter"]
         )
@@ -1037,6 +1066,24 @@ with st.sidebar:
 
         if provider == "Ollama (local)":
             synth_model = st.selectbox("Modelo", options=OLLAMA_MODELS_LLM, index=0)
+        elif provider == "Google AI Studio":
+            _gai_key = st.text_input(
+                "🔑 API Key de Google AI Studio",
+                type="password",
+                help="Consíguela gratis en https://aistudio.google.com/apikey",
+                key="gai_api_key",
+            )
+            if _gai_key:
+                gai_ok, gai_msg = check_google_aistudio_api(_gai_key)
+                if not gai_ok:
+                    st.error(f"Google AI Studio: {gai_msg}")
+                    synth_model = None
+                else:
+                    synth_model = st.selectbox("Modelo", options=GOOGLE_AISTUDIO_MODELS, index=0)
+                    st.session_state["_gai_api_key"] = _gai_key
+            else:
+                st.info("Introduce tu API key para usar Google AI Studio (gratis).")
+                synth_model = None
         elif provider == "Anthropic (Claude)":
             ant_ok, ant_msg = check_anthropic_api()
             if not ant_ok:
@@ -1132,6 +1179,8 @@ if do_synth and synth_model:
         )
     elif provider == "OpenRouter":
         st.info("💰 **Coste**: se calcula tras la consulta (OpenRouter devuelve el coste real)")
+    elif provider == "Google AI Studio":
+        st.info("💰 **Coste**: gratis (Google AI Studio)")
     else:
         st.info("💰 **Coste**: gratis (Ollama local)")
 
