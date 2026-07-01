@@ -22,25 +22,49 @@ Notion y búsqueda de noticias.
 
 | Componente | Detalle |
 |---|---|
-| Instalación | `~/.hermes/` (install.sh oficial, aislado de venv rag_papers) |
+| Instalación | `~/.hermes/` (persistente, montado como `/opt/data` en el contenedor) — migrado de LaunchAgent nativo (install.sh) a **Docker Compose** el 2026-07-01 (imagen oficial `nousresearch/hermes-agent`, definido en `~/hermes-docker`, fuera de este repo) |
 | Provider default | **OpenRouter** (`google/gemini-3.5-flash`) — 1M ctx, barato, datos Gmail ya en Google; Gmail funcional vía OpenRouter (validado en Discord) |
-| Provider alternativos | Anthropic (puntual), Nous Portal (dormido), DeepSeek V4 Flash (disponible vía OpenRouter) |
+| Provider alternativos | Anthropic (puntual), Nous Portal (dormido), DeepSeek V4 Flash (disponible vía OpenRouter), `ollama-local` (`http://host.docker.internal:11434/v1`, accesible en red desde el contenedor Docker desde 2026-07-01) |
 | Compresión auxiliar | OpenRouter + `google/gemini-2.5-flash` (1M ctx, ~10x más barato que Haiku) |
 | `context_length` / `num_ctx` | 64000 (mínimo duro de Hermes; 32000 lanza `ValueError`) |
 | MCP Notion | 20 tools (HTTP OAuth, toolset `mcp-notion`) |
-| MCP Google Calendar | 17 tools (stdio, toolset `mcp-google-calendar`) |
-| MCP Gmail | 64 tools (stdio, toolset `mcp-gmail`); whitelist `tools.include` = 7 tools solo lectura + draft (`get_label`, `list_labels`, `list_messages`, `get_message`, `list_threads`, `get_thread`, `create_draft`) — sin send/delete/trash/config |
+| MCP Google Calendar | 17 tools (stdio, toolset `mcp-google-calendar`). Token persistente fijado a `/opt/data/google-calendar-tokens.json` vía `GOOGLE_CALENDAR_MCP_TOKEN_PATH` (2026-07-01; antes no persistía entre reinicios del contenedor). Re-auth OAuth vía Docker no funciona (`ERR_EMPTY_RESPONSE`, el callback solo escucha en el loopback interno del contenedor) — auth real con `npx @cocal/google-calendar-mcp auth` nativo en el host (pciq22, escritorio remoto) |
+| MCP Gmail | 64 tools (stdio, toolset `mcp-gmail`); whitelist `tools.include` = 7 tools solo lectura + draft (`get_label`, `list_labels`, `list_messages`, `get_message`, `list_threads`, `get_thread`, `create_draft`) — sin send/delete/trash/config. Wrapper `gmail-mcp-wrapper.sh` (dependía de `lsof`/`pkill`/binario Homebrew, no portable a Docker) sustituido el 2026-07-01 por `npx -y @shinzolabs/gmail-mcp` directo (mismo patrón que google-calendar) |
 | SOUL.md | `~/.hermes/SOUL.md` (auto-inyectado) con "Reglas de Gmail" (contar con `get_label` y argumento `id: "UNREAD"` OBLIGATORIO; maxResults siempre; nunca includeBodyHtml) |
 | Web search | Tavily (`TAVILY_API_KEY` en `.env`) |
 | Keep-warm local | ~~Eliminado~~ — modelo local descartado para Hermes (qwen3:8b no viable con MCPs) |
-| Seguridad | `terminal`/`code_execution`/`browser`/`computer_use` desactivados en ambas plataformas (gestión por plataforma vía `hermes tools`); aprobación manual para acciones destructivas |
-| Gateway 24/7 | `ai.hermes.gateway` (LaunchAgent único supervisado, `KeepAlive: true`); existe `com.hermes.gateway.plist` inerte pendiente de archivar |
+| Seguridad | `code_execution`/`browser`/`computer_use` desactivados; **`terminal` activado desde 2026-07-01** con `backend: docker` (sandbox vía contenedor hermano, `/var/run/docker.sock` montado) — `docker_volumes` restringido a `~/hermes_workspace:/workspace` (rw) + `~/.hermes/cache/documents:/output`; verificado que no ve nada fuera de `/workspace` (probado explícitamente contra `/Users/martinramirez/proyectos/research_agent`); aprobación manual para acciones destructivas |
+| Gateway 24/7 | **Docker Compose** (`~/hermes-docker`, imagen `nousresearch/hermes-agent`) desde 2026-07-01, reemplaza el LaunchAgent nativo; `ai.hermes.gateway` y `com.hermes.gateway.plist` (LaunchAgents nativos) ahora inertes — pendiente archivar tras verificar con `launchctl list \| grep hermes` que no sigan activos (riesgo de doble-gateway) |
 | Logs | `~/.hermes/logs/{gateway,agent,errors}.log` |
 | Estado | ✅ Operativo desde Discord 24/7 — agenda, correo, Notion, noticias |
 | Control | Discord gateway 24/7 vía LaunchAgent `ai.hermes.gateway`; se gestiona con `launchctl bootout/bootstrap`. |
 | Acceso restringido | `DISCORD_ALLOWED_USERS` = solo el User ID propio (en `~/.hermes/config.yaml` y `~/.hermes/.env`). |
 | Home channel | Fijado con `/sethome` a un Channel ID válido (entrega de crons y mensajes proactivos). |
 | Conversaciones separadas | Tres canales temáticos en el servidor Hermes — `docencia`, `investigacion`, `noticias` — en `discord.free_response_channels` (responden sin @mención; contexto independiente por canal). Resto de canales siguen `require_mention: true`. |
+
+**Migración a Docker (2026-07-01):** infraestructura de Hermes vive fuera de este
+repo (`~/.hermes` + `~/hermes-docker`). Detalle completo en `Mejoras_realizadas.md`
+→ sesión 2026-07-01.
+
+- **Bugs de config arreglados** en `~/.hermes/config.yaml`: YAML roto (falta `:` tras
+  `ollama-local`, caía a defaults en silencio); `custom_providers` en dict en vez de
+  lista (schema real: lista con clave `name:`); rutas de credenciales Gmail/Calendar
+  movidas de rutas absolutas del host a `/opt/data` (persistente).
+- **Docker Desktop:** `docker compose pull` fallaba por SSH (keychain, hooks de
+  Docker Scout — no `credsStore`). Resuelto con pull inicial vía escritorio remoto
+  (sesión interactiva con acceso al keychain).
+- **Verificado:** Gmail, Notion, Calendar operativos desde Discord; sandbox de
+  terminal aislado confirmado (no ve nada fuera de `/workspace`); Ollama accesible
+  en red vía `host.docker.internal`.
+- **Incidencia sin cerrar:** con `qwen3:14b-hermes` (fine-tune Nous, item 49) y
+  `context_length` 64000 confirmado, una pregunta que dispara tool
+  (`get_current_time`, "qué día es hoy") se queda colgada sin error visible ni
+  timeout — patrón distinto al bloqueo con error explícito ya documentado en el
+  item 49 (`tool_call requires a name argument`). Sin diagnosticar si es la misma
+  causa raíz manifestándose distinto en Docker o un problema nuevo de red (conexión
+  Docker↔`host.docker.internal` muerta en silencio). Próximo paso: reproducir con
+  `docker compose logs -f` en vivo + doble curl consecutivo directo a Ollama desde
+  dentro del contenedor para descartar la capa de red.
 
 **Nota RAM:** con la eliminación del modelo local de Hermes, Ollama solo gestiona
 `qwen2.5:14b-instruct` (~9 GB) para síntesis RAG y `bge-m3` (~1.2 GB) para
@@ -79,6 +103,12 @@ backlog item 49.
   `git pull` + `cp` + `launchctl bootout/bootstrap` en pciq22).
 - Gmail MCP: si aparece error `EADDRINUSE` en `~/.hermes/logs/mcp-stderr.log`,
   ejecutar `pkill -9 -f "gmail-mcp" && hermes gateway restart`.
+- Archivar `ai.hermes.gateway.plist` y `com.hermes.gateway.plist` (LaunchAgents
+  nativos, inertes tras la migración a Docker) — verificar primero con
+  `launchctl list | grep hermes` que no sigan activos (riesgo de doble-gateway
+  compitiendo por `~/.hermes`).
+- Diagnosticar cuelgue silencioso de `qwen3:14b-hermes` con tool-calling en Docker
+  (`get_current_time`) — ver "Migración a Docker" arriba.
 
 ## Modelos Ollama disponibles
 

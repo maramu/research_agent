@@ -3,6 +3,78 @@
 
 ---
 
+## Sesión 2026-07-01 — Hermes Agent: migración a Docker
+
+**Nota:** este trabajo vive fuera de este repo (`~/.hermes` + `~/hermes-docker`), no
+en `research_agent`. Se documenta aquí siguiendo la convención de sesiones de
+Hermes ya usada en este fichero (ver sesiones 2026-06-24 a 2026-06-28). Detalle en
+`ESTADO.md` → "Hermes Agent" y `Mejoras_pendientes.md` → item 49.
+
+**Migración de LaunchAgent nativo a Docker Compose:**
+- Imagen oficial `nousresearch/hermes-agent`. `~/.hermes` montado como `/opt/data`
+  (persistente).
+
+**Terminal reactivado (antes desactivado):**
+- Ahora `backend: docker` — sandbox vía contenedor hermano, usando
+  `/var/run/docker.sock` montado.
+- `docker_volumes` restringido a `~/hermes_workspace:/workspace` (rw) +
+  `~/.hermes/cache/documents:/output`.
+- Verificado: escribe dentro del scope; confirmado que NO ve nada fuera de
+  `/workspace` (probado explícitamente contra
+  `/Users/martinramirez/proyectos/research_agent`).
+
+**Bugs de config arreglados (todos en `~/.hermes/config.yaml`):**
+- YAML roto (faltaba `:` tras `ollama-local`) que tiraba toda la config a defaults
+  en silencio.
+- `custom_providers` en formato dict en vez de lista (schema real: lista con clave
+  `name:`).
+- Gmail MCP: el wrapper `gmail-mcp-wrapper.sh` dependía de `lsof`/`pkill`/binario
+  Homebrew, no portable a Docker. Sustituido por `npx -y @shinzolabs/gmail-mcp`
+  directo (mismo patrón que google-calendar).
+- Rutas de credenciales Gmail/Calendar cambiadas de rutas absolutas del host a
+  rutas dentro de `/opt/data` (persistente).
+
+**Google Calendar — token no persistía entre reinicios:**
+- Causa: `GOOGLE_CALENDAR_MCP_TOKEN_PATH` no estaba fijado. Fix: apuntarlo a
+  `/opt/data/google-calendar-tokens.json`.
+- La re-autenticación OAuth vía Docker (mapear puerto del callback) NO funcionó
+  (`ERR_EMPTY_RESPONSE`, el servidor de callback solo escucha en el loopback
+  interno del contenedor).
+- Solución real: correr `npx @cocal/google-calendar-mcp auth` nativamente en el
+  host (pciq22, escritorio remoto), apuntando al mismo path.
+
+**Ollama en red:**
+- `ollama-local` añadido a `custom_providers` apuntando a
+  `http://host.docker.internal:11434/v1` — Ollama accesible en red desde el
+  contenedor.
+
+**Docker Desktop:**
+- `docker compose pull` fallaba por SSH (error de keychain por hooks de Docker
+  Scout, no por `credsStore`). Resuelto haciendo el pull inicial vía escritorio
+  remoto (sesión interactiva con acceso al keychain).
+
+**Verificación final:** Gmail, Notion, Calendar operativos desde Discord. Terminal
+sandbox aislado y confirmado. Ollama accesible en red.
+
+**INCIDENCIA SIN CERRAR:** con `qwen3:14b-hermes` (fine-tune Nous para
+tool-calling, ya probado antes en item 49) y contexto correcto (64.000, confirmado
+en config), una pregunta que dispara una tool (`get_current_time`, "qué día es
+hoy") se quedó colgada sin error visible ni timeout — patrón DISTINTO al bloqueo
+con error explícito ya documentado en el item 49 (`tool_call requires a name
+argument`). Sin diagnosticar si es la misma causa raíz manifestándose distinto en
+Docker, o un problema nuevo de red (conexión mantenida Docker↔
+`host.docker.internal` muerta en silencio). Próximo paso pendiente: reproducir con
+`docker compose logs -f` en vivo + doble curl consecutivo directo a Ollama desde
+dentro del contenedor para descartar la capa de red.
+
+**Pendiente residual nuevo:** archivar `ai.hermes.gateway.plist` y
+`com.hermes.gateway.plist` (LaunchAgents nativos, ahora inertes tras la migración a
+Docker) — verificar primero con `launchctl list | grep hermes` si sigue activo,
+porque de estarlo hay riesgo real de doble-gateway compitiendo por `~/.hermes`
+otra vez.
+
+---
+
 ## Hecho hoy (2026-07-01)
 
 ### Emails independientes por categoría en ingesta semanal
@@ -21,6 +93,7 @@ Nuevo provider en `2_RAG.py` (solo app pública, 8502) para que los compañeros 
 - UX: el campo de API key (`st.text_input`, type=password) solo aparece al seleccionar "Google AI Studio" como provider. Con "Ollama (local)" no pide nada. Enlace a `https://aistudio.google.com/apikey` en el help.
 - No aparece en la app privada (8501), que conserva Ollama/Anthropic/OpenAI/OpenRouter.
 - Sin persistencia de key entre sesiones (requeriría sistema de usuarios — posible iteración futura).
+- Fix 2026-06-30 (`0ebfa96`): `check_google_aistudio_api` solo aceptaba prefijo `AIza`; algunas API keys de Google AI Studio usan prefijo `AQ.` — ampliado el check a `api_key.startswith("AIza") or api_key.startswith("AQ.")`.
 
 ---
 

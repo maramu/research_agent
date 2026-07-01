@@ -305,6 +305,15 @@ Residuales:
 - [ ] Aplicar plist ingesta 04:00 en pciq22 (commit en repo hecho; falta
       `git pull` + `cp deployment/... ~/Library/LaunchAgents/` +
       `launchctl bootout/bootstrap`).
+- [ ] Archivar `ai.hermes.gateway.plist` y `com.hermes.gateway.plist`
+      (LaunchAgents nativos, inertes tras la migración a Docker 2026-07-01) —
+      verificar primero con `launchctl list | grep hermes` que no sigan
+      activos (riesgo de doble-gateway compitiendo por `~/.hermes`).
+- [ ] Diagnosticar cuelgue sin error de `qwen3:14b-hermes` en Docker con
+      tool-calling (`get_current_time`, "qué día es hoy") — patrón distinto al
+      error explícito ya documentado arriba (`tool_call requires a name
+      argument`). Reproducir con `docker compose logs -f` + doble curl directo
+      a Ollama desde dentro del contenedor para descartar la capa de red.
 
 **Progreso 2026-06-26:** modelo local descartado, Gemini 2.5 Flash como default,
 limpieza Ollama completa. Solo queda el plist de la ingesta como residual real.
@@ -326,3 +335,17 @@ y Hermes —que fuerza streaming sin opción— recibe respuesta vacía. Vuelta 
 (`google/gemini-3.5-flash`); Rapid-MLX queda instalado a la espera del fix upstream.
 Incidente: `config.yaml` erosionado por ediciones `sed` (perdido `mcp_servers`),
 restaurado desde backup. Detalle en `Mejoras_realizadas.md` → sesión 2026-06-28 (cont.).
+
+**Progreso 2026-07-01:** migración completa de LaunchAgent nativo a **Docker
+Compose** (imagen oficial `nousresearch/hermes-agent`, `~/.hermes` montado como
+`/opt/data`). Terminal activado con sandbox `backend: docker` (contenedor hermano,
+scope verificado a `~/hermes_workspace` + `~/.hermes/cache/documents`). Config
+saneada (YAML roto, `custom_providers` dict→lista, wrapper Gmail no portable →
+`npx` directo, rutas Gmail/Calendar → `/opt/data`). Google Calendar: token fijado a
+`/opt/data/google-calendar-tokens.json`; re-auth OAuth vía Docker no funciona,
+hecha nativamente en el host. `ollama-local` accesible vía
+`host.docker.internal:11434`. Verificado Gmail/Notion/Calendar operativos desde
+Discord. Nueva incidencia sin cerrar: cuelgue silencioso de `qwen3:14b-hermes` con
+tool-calling en Docker (distinto del error ya documentado). Detalle en
+`Mejoras_realizadas.md` → sesión 2026-07-01 (fuera de este repo: `~/.hermes` +
+`~/hermes-docker`).
