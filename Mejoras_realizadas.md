@@ -3,6 +3,54 @@
 
 ---
 
+## Sesión 2026-07-01 (cont.) — Hermes Agent: auditoría de seguridad y pausa
+
+**Nota:** este trabajo vive fuera de este repo (`~/.hermes` + `~/hermes-docker`), no
+en `research_agent`. Continuación directa de la migración a Docker documentada
+justo debajo (misma sesión). Ver `ESTADO.md` → "Hermes Agent" (ahora marcado
+PAUSADO) y `Mejoras_pendientes.md` → item 49 → "REACTIVACIÓN".
+
+**Acciones de pausa aplicadas:**
+- `docker compose down` — contenedor parado y eliminado; config/estado
+  conservados en `~/.hermes` y `~/hermes-docker`.
+- Token OAuth de Google revocado en `myaccount.google.com/permissions` —
+  credencial invalidada; `credentials.json` sigue en disco pero ya no es válido.
+- Autorización Notion revocada (o confirmado que no había grant activo que
+  revocar).
+- LaunchAgents nativos archivados a `.disabled` para que no arranquen al login.
+- Tavily (API key de búsqueda web, no da acceso a datos propios): activa, sin
+  urgencia de rotar.
+
+**Hallazgos de la auditoría (motivo de la pausa):**
+
+1. **Token OAuth de Google sobreprivilegiado:** un único token compartido por
+   los MCP de Gmail y Calendar (`/opt/data/gmail-mcp/credentials.json`) con
+   scopes `gmail.modify`, `gmail.send`, calendar (completo r/w/delete), drive,
+   documents, spreadsheets, `contacts.readonly`. La whitelist de 7 tools de
+   Gmail limita lo que el LLM VE, no lo que el token PUEDE. Drive/Docs/Sheets
+   ni se usan funcionalmente: los arrastra el cliente OAuth del MCP de
+   Calendar (`@cocal/google-calendar-mcp`); el array `AUTH_SCOPES` de
+   `@shinzolabs/gmail-mcp` (`dist/oauth2.js`) solo pide scopes de Gmail
+   (`gmail.modify`, `gmail.compose`, `gmail.send`, `gmail.settings.basic`,
+   `gmail.settings.sharing`).
+2. **`/var/run/docker.sock` montado en el contenedor padre** (necesario para
+   `terminal.backend: docker`) = root de facto en el host. El padre corre como
+   root, sin `cap_drop`/`security_opt`/`read_only`, con `~/.hermes` montado rw,
+   y es quien ingiere contenido no confiable (emails, eventos, resultados
+   Tavily). Regresión neta de seguridad frente al setup nativo. Cadenas de
+   ataque: supply-chain vía `npx -y`, o inyección de prompt → reescritura de
+   config vía toolset file.
+3. **`tools.include: []`** en Calendar (17 tools, incl. `delete_event`) y
+   Notion (20 tools) = todas expuestas. Canal de exfiltración vía
+   `create_event` con invitado externo.
+
+**Nota:** la migración a Docker en sí (contenedor funcional, MCPs operativos,
+terminal sandbox aislado verificado, fix de persistencia del token de
+Calendar, fixes de config YAML) quedó **COMPLETADA y correcta**. La pausa es
+por credenciales/aislamiento, no por la migración.
+
+---
+
 ## Sesión 2026-07-01 — Hermes Agent: migración a Docker
 
 **Nota:** este trabajo vive fuera de este repo (`~/.hermes` + `~/hermes-docker`), no

@@ -17,6 +17,18 @@
 
 ### Hermes Agent (productividad personal)
 
+> 🔴 **PAUSADO (2026-07-01) — auditoría de seguridad.** Estado actual: **INERTE /
+> sin riesgo activo**. Contenedor parado y eliminado (`docker compose down`),
+> token OAuth de Google revocado, LaunchAgents nativos archivados a `.disabled`.
+> **NO reactivar con la configuración actual** — requisitos de reactivación en
+> `Mejoras_pendientes.md` → item 49 → "REACTIVACIÓN". Motivo: credenciales
+> sobreprivilegiadas y aislamiento insuficiente del contenedor (no fallos de la
+> migración a Docker, que quedó técnicamente correcta). Detalle completo en
+> `Mejoras_realizadas.md` → sesión 2026-07-01 (cont.).
+>
+> La tabla siguiente queda como **referencia histórica** de la configuración
+> operativa previa a la pausa.
+
 Instalado en pciq22, independiente del pipeline RAG. Gestiona agenda, correo,
 Notion y búsqueda de noticias.
 
@@ -36,7 +48,7 @@ Notion y búsqueda de noticias.
 | Seguridad | `code_execution`/`browser`/`computer_use` desactivados; **`terminal` activado desde 2026-07-01** con `backend: docker` (sandbox vía contenedor hermano, `/var/run/docker.sock` montado) — `docker_volumes` restringido a `~/hermes_workspace:/workspace` (rw) + `~/.hermes/cache/documents:/output`; verificado que no ve nada fuera de `/workspace` (probado explícitamente contra `/Users/martinramirez/proyectos/research_agent`); aprobación manual para acciones destructivas |
 | Gateway 24/7 | **Docker Compose** (`~/hermes-docker`, imagen `nousresearch/hermes-agent`) desde 2026-07-01, reemplaza el LaunchAgent nativo; `ai.hermes.gateway` y `com.hermes.gateway.plist` (LaunchAgents nativos) ahora inertes — pendiente archivar tras verificar con `launchctl list \| grep hermes` que no sigan activos (riesgo de doble-gateway) |
 | Logs | `~/.hermes/logs/{gateway,agent,errors}.log` |
-| Estado | ✅ Operativo desde Discord 24/7 — agenda, correo, Notion, noticias |
+| Estado | 🔴 PAUSADO 2026-07-01 (auditoría de seguridad) — hasta esa fecha: ✅ operativo desde Discord 24/7 — agenda, correo, Notion, noticias |
 | Control | Discord gateway 24/7 vía LaunchAgent `ai.hermes.gateway`; se gestiona con `launchctl bootout/bootstrap`. |
 | Acceso restringido | `DISCORD_ALLOWED_USERS` = solo el User ID propio (en `~/.hermes/config.yaml` y `~/.hermes/.env`). |
 | Home channel | Fijado con `/sethome` a un Channel ID válido (entrega de crons y mensajes proactivos). |

@@ -270,6 +270,34 @@ desde Discord con Notion + Google Calendar + Gmail + Tavily, sobre OpenRouter
 (`deepseek/deepseek-v4-flash`) como default. Detalles en `ESTADO.md` →
 subsección "Hermes Agent (productividad personal)".
 
+**🔴 Estado 2026-07-01 (cont.): PAUSADO por auditoría de seguridad** —
+contenedor parado, token OAuth de Google revocado, autorización Notion
+revocada, LaunchAgents nativos archivados. Detalle de hallazgos en
+`Mejoras_realizadas.md` → sesión 2026-07-01 (cont.). Los residuales de más
+abajo relacionados con arrancar/mantener el servicio (plist de ingesta,
+archivar plists nativos, etc.) quedan **en pausa** mientras Hermes esté
+parado — no son pendientes activos hasta la reactivación.
+
+#### REACTIVACIÓN — requisitos obligatorios antes de volver a levantar Hermes
+
+**No reactivar con la configuración actual.** Checklist mínimo:
+
+- [ ] Re-autenticar Google con scopes MÍNIMOS: Gmail → `gmail.readonly` +
+      `gmail.compose`; Calendar → `calendar.readonly` (o `calendar.events` si
+      se quiere crear/editar). Editar los arrays `AUTH_SCOPES` de ambos
+      paquetes MCP y **fijar versión** (instalación estable en `/opt/data`, no
+      `npx -y` efímero que sobrescribe las ediciones — cierra también el
+      pendiente ya existente del pin de versión de `@shinzolabs/gmail-mcp`,
+      ver residual más abajo).
+- [ ] Quitar el mount directo de `docker.sock`. Si se conserva terminal
+      sandboxed (opción elegida antes de pausar): meter
+      `docker-socket-proxy` (`tecnativa/docker-socket-proxy`) limitando la
+      API Docker a create/start/stop, sin Privileged ni Binds arbitrarios.
+- [ ] Endurecer el contenedor padre: `cap_drop`, `security_opt
+      no-new-privileges`, `read_only` donde se pueda, y no montar `~/.hermes`
+      entero en rw.
+- [ ] `tools.include` explícito de solo-lectura para Calendar y Notion.
+
 Histórico de completados:
 - [x] Discord: bot, token, intents, invitación, gateway, **LaunchAgent 24/7**.
 - [x] MCPs: Notion, Google Calendar, Gmail (instalados y validados desde Discord).
@@ -294,21 +322,24 @@ Residuales:
   - **Sub-items futuros:** probar **GPT-OSS 20B** o **Qwen3-Coder** en Rapid-MLX
     (formato de tool-call distinto al XML de Qwen3.5; podría esquivar el bug de
     streaming).
-- [ ] Archivar el plist `com.hermes.gateway.plist` (inerte) → `mv` a
-      `~/.hermes/_plist_archive/` para que no arranque al login; gateway válido =
-      `ai.hermes.gateway`.
+- [~] *(en pausa mientras Hermes esté parado)* Archivar el plist
+      `com.hermes.gateway.plist` (inerte) → `mv` a `~/.hermes/_plist_archive/`
+      para que no arranque al login; gateway válido = `ai.hermes.gateway`.
 - [ ] Evaluar pin de versión del MCP Homebrew `@shinzolabs/gmail-mcp` (autoupdate de
       Homebrew → riesgo de drift de esquema/nombres que rompa la whitelist).
 - [ ] Migración config v30→31 pendiente (con backup, fuera de sesión).
 - [ ] **Hardening SSH en pciq22** (`PasswordAuthentication no`) — aviso del security
       audit de Hermes; prioridad media si solo se accede por VPN.
-- [ ] Aplicar plist ingesta 04:00 en pciq22 (commit en repo hecho; falta
-      `git pull` + `cp deployment/... ~/Library/LaunchAgents/` +
+- [~] *(en pausa mientras Hermes esté parado)* Aplicar plist ingesta 04:00 en
+      pciq22 (commit en repo hecho; falta `git pull` + `cp deployment/... ~/Library/LaunchAgents/` +
       `launchctl bootout/bootstrap`).
-- [ ] Archivar `ai.hermes.gateway.plist` y `com.hermes.gateway.plist`
-      (LaunchAgents nativos, inertes tras la migración a Docker 2026-07-01) —
-      verificar primero con `launchctl list | grep hermes` que no sigan
-      activos (riesgo de doble-gateway compitiendo por `~/.hermes`).
+- [~] *(en pausa mientras Hermes esté parado)* Archivar `ai.hermes.gateway.plist`
+      y `com.hermes.gateway.plist` (LaunchAgents nativos, inertes tras la
+      migración a Docker 2026-07-01) — verificar primero con `launchctl list |
+      grep hermes` que no sigan activos (riesgo de doble-gateway compitiendo
+      por `~/.hermes`). Nota: ya archivados a `.disabled` como parte de las
+      acciones de pausa del 2026-07-01 (cont.); pendiente verificación formal
+      con `launchctl list`.
 - [ ] Diagnosticar cuelgue sin error de `qwen3:14b-hermes` en Docker con
       tool-calling (`get_current_time`, "qué día es hoy") — patrón distinto al
       error explícito ya documentado arriba (`tool_call requires a name
