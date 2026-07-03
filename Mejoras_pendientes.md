@@ -295,6 +295,24 @@ de la lógica de `11_Articulos.py`. Consolidar en un helper compartido (p. ej.
 `utils/`) para evitar drift — misma clase que el cerrado item 45, pareja distinta.
 BAJA prioridad (formateo cosmético de autores).
 
+### 51. Validación de calidad de metadata — MEDIA prioridad
+
+**Nivel 1 (heurísticas locales, sin red) ✅ COMPLETADO 2026-07-04** —
+`scripts/validate_metadata.py` + `scripts/utils/metadata_validation.py`. Detecta
+título==revista / prefijo de revista, autores pegados o con afiliación/dígitos,
+año/DOI implausibles. Escribe sidecar `metadata/validation_<cat>.jsonl` (solo
+lectura sobre `papers_metadata.jsonl`). Detalle en Mejoras_realizadas.md.
+
+**Nivel 2 (Crossref por DOI) — PENDIENTE.** Para los flagged con DOI, contrastar
+título/revista/año/autores contra Crossref y **sugerir** correcciones sin
+sobreescribir automáticamente. Integrar en `11_Articulos.py` como filtro
+"⚠ discrepancias" (leyendo el sidecar) + adoptar-por-campo (aceptar el valor de
+Crossref campo a campo desde el editor). Requiere red → se ejecuta en pciq22.
+
+**Calibración pendiente (Bloque B):** correr Nivel 1 en 1-2 categorías, revisar
+ruido por code y afinar la constante TUNABLE `AFFILIATION_TOKENS` o las
+heurísticas en una segunda iteración en casa (no editar en pciq22).
+
 ### 43. Verificaciones pendientes de la revisión 2026-06-12 — seguimiento
 3_process_corpus.py (canonical_section vs CANONICAL_SECTIONS), ~~1_rename_papers_by_doi.py (nombre
 largo Scopus en descarga)~~ ✅ CUBIERTO 2026-06-13 (renombrado por DOI antes de reprocesar en Coherencia PDF/MD + tab Pendientes), 4_extract_metadata.py (_norm vs 6_Mantenimiento), 5_build_embeddings.py

@@ -3,6 +3,42 @@
 
 ---
 
+### ✅ Validación local de metadata — Nivel 1 (2026-07-04)
+
+Nuevo módulo `scripts/utils/metadata_validation.py` (importable, sin red) que
+detecta registros de `papers_metadata.jsonl` con metadata de referencia
+degradada mediante heurísticas locales. Seis chequeos, cada uno devuelve `None`
+o un issue `{code, field, severity, msg}`:
+- `check_title_eq_journal` (`title_eq_journal`, high): `_norm(title) == _norm(journal)`.
+- `check_title_starts_with_journal` (`title_has_journal_prefix`, medium):
+  título que empieza por la revista (≥8 chars normalizados, frontera de token).
+- `check_glued_authors` (`authors_glued`, high): autor camelCase pegado
+  (`[a-z][A-Z]`) sin espacio. Advisory — falsos positivos conocidos: apellidos
+  tipo McDonald/DeSantis como token único.
+- `check_authors_affiliation` (`authors_affiliation`, high): autor con dígitos o
+  tokens de la constante TUNABLE `AFFILIATION_TOKENS` (University, Institute,
+  Department, DTU, Lyngby, Denmark…).
+- `check_year` (`year_implausible`, medium): año ausente o fuera de
+  `[1900, año_actual+1]`.
+- `check_doi_format` (`doi_malformed`, high): DOI presente que no casa
+  `^10\.\d{4,9}/\S+$`. DOI **ausente** no es issue (lo cubre la columna "Sin DOI").
+
+`_norm` reutiliza `utils.pdf_utils.normalize_stem` (no se duplica normalizador).
+`validate_record` acumula issues; `validate_category` lee el jsonl y emite solo
+los papers flagged con `{paper_id, stable_id, doi, has_doi, title, journal, year,
+authors, issues}`. La forma de `authors` (lista de dicts `{full, forename,
+surname}`) se resuelve con el mismo criterio que `_fmt_authors` de `11_Articulos.py`.
+
+Nuevo CLI `scripts/validate_metadata.py` (QA/mantenimiento, sin número de
+pipeline): `--category <cat>` (repetible) o `--all`. Por categoría escribe el
+sidecar `metadata/validation_<cat>.jsonl` (sobrescribe) y **solo** ese sidecar —
+nunca `papers_metadata.jsonl`. Imprime resumen: nº papers, nº flagged, desglose
+por code y cuántos flagged tienen DOI (arreglables con Crossref en Nivel 2).
+
+Tests `tests/test_metadata_validation.py` (18, todos verdes): un caso por
+chequeo (positivo y negativo), acumulación en `validate_record`, registro limpio
+sin issues, y sidecar de `validate_category` sobre un jsonl temporal.
+
 ### ✅ Exportar chunks a .md con referencia por chunk (RAG) (2026-07-04)
 
 Nueva función `build_chunks_markdown(results, project, categorias_dir, papers_meta,
