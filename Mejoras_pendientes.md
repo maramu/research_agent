@@ -288,6 +288,13 @@ Fuente única en `utils/pdf_utils.py`. Las dos divergencias portadas desde `1_re
 - `sanitize_filename`: añadido `re.sub(r"\s+", "_", name)` tras el paso de chars inválidos.
 `1_rename_papers_by_doi.py` ahora importa `slugify`, `shorten_title`, `sanitize_filename` desde `pdf_utils`; defs locales y banner `# UTILIDADES DE TEXTO` eliminados. Sin cambio de comportamiento en el renombrador. `test_rename.py` repuntado a `utils.pdf_utils`. Suite: 99/99 passed.
 
+### 50. `_fmt_authors` duplicado — BAJA prioridad
+
+`_fmt_authors` duplicado: réplica en `utils/export_refs.py` (`_fmt_authors_md`)
+de la lógica de `11_Articulos.py`. Consolidar en un helper compartido (p. ej.
+`utils/`) para evitar drift — misma clase que el cerrado item 45, pareja distinta.
+BAJA prioridad (formateo cosmético de autores).
+
 ### 43. Verificaciones pendientes de la revisión 2026-06-12 — seguimiento
 3_process_corpus.py (canonical_section vs CANONICAL_SECTIONS), ~~1_rename_papers_by_doi.py (nombre
 largo Scopus en descarga)~~ ✅ CUBIERTO 2026-06-13 (renombrado por DOI antes de reprocesar en Coherencia PDF/MD + tab Pendientes), 4_extract_metadata.py (_norm vs 6_Mantenimiento), 5_build_embeddings.py

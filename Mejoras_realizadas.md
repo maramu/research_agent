@@ -11,7 +11,7 @@ los chunks recuperados en una búsqueda a un único documento Markdown, con la
 referencia bibliográfica lo más completa posible por chunk (título, autores, año,
 revista, DOI, `paper_id`, sección/sección canónica, tipo, score), pensado para que
 un LLM externo pueda citar sin acceso al corpus. El texto de cada chunk va
-delimitado con una cerca de tildes (`~~~text` … `~~~`) cuya longitud se ajusta
+delimitado con una cerca de tildes (`~~~` … `~~~`, cerca desnuda) cuya longitud se ajusta
 dinámicamente si el propio texto ya contiene una racha de `~` igual o mayor, para
 que el delimitador nunca se rompa. Caso adjunto efímero (`paper_id == "__attachment__"`):
 usa `m["_cite"]` como referencia en lugar de buscar en `papers_meta`.

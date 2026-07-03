@@ -243,7 +243,7 @@ def build_chunks_markdown(results, project, categorias_dir, papers_meta,
         lines.append("")
         lines.append("**Texto:**")
         fence = _text_fence(text)
-        lines.append(f"{fence}text")
+        lines.append(fence)
         lines.append(text)
         lines.append(fence)
         lines.append("")
