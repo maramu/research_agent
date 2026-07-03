@@ -165,6 +165,14 @@ un cross-encoder pequeño, antes de pasar al LLM de síntesis.
 - Toggle en la web para activar/desactivar reranking y comparar.
 - Evidencia inicial (2 categorías): híbrido ≤ denso; revisar fusión/pesado BM25+RRF al abordar el reranking.
 Ligado al item 37 — sin set de evaluación no se puede medir, y el soporte de rerank en Ollama es dudoso.
+- **Nota 2026-07-03 (antes de retunear):** el patrón "híbrido ≤ denso" está a
+  n=4/n=6 → **sin potencia estadística** para concluir; el item 37 (~25 preguntas)
+  es prerrequisito duro. Antes de tocar reranking: (1) verificar la procedencia del
+  pool de los golden — si fue denso-only, los qrels están sesgados contra BM25 →
+  reconstruir con union denso+BM25; (2) revisar la tokenización BM25 de
+  acrónimos/fórmulas (H2S, TiO2, NR-SOB) en `utils/retrieval.py`; (3) probar fusión
+  ponderada a nivel de score (α·denso+(1-α)·bm25) o RRF con k bajo (10-20) en vez de
+  k=60 sobre pools diminutos.
 
 ### 35. Fallback OCR para PDFs escaneados — MEDIA prioridad
 
@@ -205,6 +213,25 @@ cualquier cambio de chunking, embeddings, modelo o estrategia de retrieval.
 - ✅ `biogas_upgrading_biomethanation` completado 2026-06-20 (6 preguntas, vía `pool_candidates.py`). Denso Hit@8 1.0/MRR 0.889; híbrido 1.0/0.857.
 - Patrón en 2 categorías: híbrido ≤ denso → antes de retunear RRF/reranking (item 33 fase 2), ampliar a más categorías.
 - Housekeeping menor (baja prioridad): el golden de anoxic (manual, previo a `pool_candidates.py`) no tiene `questions_`/`review_`; para regenerarlo por pooling habría que extraer antes sus preguntas a `questions_anoxic_biogas_biodesulfurization.json`.
+- **DECISIÓN 2026-07-03 — alcance y método de la ampliación:**
+  - Alcance reducido a **3 categorías**: `anoxic_biogas_biodesulfurization`,
+    `biogas_upgrading_biomethanation`, `bioplastics_microplastics` (no las 8).
+  - **Profundidad antes que amplitud:** llevar anoxic y upgrading a ~25 preguntas
+    (tienen baseline denso/híbrido → desbloquean el item 33) antes de sembrar
+    plásticos (greenfield, tercer punto de datos).
+  - **Generador de candidatos: reusar `qwen2.5:14b-instruct`** (ya residente y
+    validado). Descartados Mixtral 8x7B (~13 GB, pelea por RAM con el modelo de
+    síntesis en 24 GB) y Mistral 7B — la calidad la fija la revisión humana en
+    `review_<cat>.md`, no el generador. Cierra la decisión de modelo abierta.
+  - **Pooling sin sesgo:** construir el pool con `union(denso top-k, BM25 top-k)`,
+    no denso-only, para que los qrels no favorezcan estructuralmente al denso
+    (afecta directamente a la validez del item 33).
+  - **Estratificar por arquetipo** (conceptual/paráfrasis, acrónimo/término raro,
+    lookup numérico/tabla, multi-salto) para que el golden set diagnostique *en qué*
+    ayuda el híbrido, no solo dé un número.
+  - **Prerequisito anoxic:** extraer sus preguntas a
+    `questions_anoxic_biogas_biodesulfurization.json` (hoy no existe; golden manual
+    previo a pool_candidates) antes de poder ampliarlo por pooling.
 
 ### 38. Batch API de Anthropic para resúmenes — BAJA prioridad
 
