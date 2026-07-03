@@ -303,11 +303,19 @@ título==revista / prefijo de revista, autores pegados o con afiliación/dígito
 año/DOI implausibles. Escribe sidecar `metadata/validation_<cat>.jsonl` (solo
 lectura sobre `papers_metadata.jsonl`). Detalle en Mejoras_realizadas.md.
 
+**Ajuste 2026-07-04:** `authors_glued` reclasificado a severidad `"info"` (no
+cuenta para el sidecar). `forename`/`surname` vienen vacíos en TODO el corpus
+(solo `full` pegado) → marcaba ~99% de papers. La **reparación de autores es
+sistémica vía Crossref** (adopción en bloque para todos los papers con DOI en el
+Nivel 2), NO triaje por-paper. Detalle en Mejoras_realizadas.md.
+
 **Nivel 2 (Crossref por DOI) — PENDIENTE.** Para los flagged con DOI, contrastar
 título/revista/año/autores contra Crossref y **sugerir** correcciones sin
 sobreescribir automáticamente. Integrar en `11_Articulos.py` como filtro
 "⚠ discrepancias" (leyendo el sidecar) + adoptar-por-campo (aceptar el valor de
-Crossref campo a campo desde el editor). Requiere red → se ejecuta en pciq22.
+Crossref campo a campo desde el editor). Los autores (`full` pegado sin
+`forename`/`surname`) son el caso claro de adopción en bloque por DOI. Requiere
+red → se ejecuta en pciq22.
 
 **Calibración pendiente (Bloque B):** correr Nivel 1 en 1-2 categorías, revisar
 ruido por code y afinar la constante TUNABLE `AFFILIATION_TOKENS` o las

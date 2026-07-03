@@ -5,6 +5,7 @@ import json
 import pytest
 
 from utils.metadata_validation import (
+    SIDECAR_MIN_SEVERITY,
     check_authors_affiliation,
     check_doi_format,
     check_glued_authors,
@@ -14,6 +15,16 @@ from utils.metadata_validation import (
     validate_category,
     validate_record,
 )
+
+
+def _write_jsonl(tmp_path, cat, rows):
+    meta_dir = tmp_path / cat / "metadata"
+    meta_dir.mkdir(parents=True)
+    jsonl = meta_dir / "papers_metadata.jsonl"
+    with jsonl.open("w", encoding="utf-8") as f:
+        for r in rows:
+            f.write(json.dumps(r) + "\n")
+    return tmp_path
 
 
 # ── title == journal ───────────────────────────────────────────────────────
@@ -43,6 +54,13 @@ def test_glued_authors_caza():
     rec = {"authors": [{"full": "ViolaCorbellini"}]}
     issue = check_glued_authors(rec)
     assert issue and issue["code"] == "authors_glued"
+
+
+def test_glued_authors_es_info():
+    """authors_glued es informativo (no cuenta para el sidecar)."""
+    issue = check_glued_authors({"authors": [{"full": "ViolaCorbellini"}]})
+    assert issue["severity"] == "info"
+    assert issue["severity"] not in SIDECAR_MIN_SEVERITY
 
 
 def test_author_con_espacio_no_caza():
@@ -120,9 +138,6 @@ def test_registro_limpio_sin_issues():
 
 def test_validate_category_sidecar(tmp_path):
     cat = "toy_cat"
-    meta_dir = tmp_path / cat / "metadata"
-    meta_dir.mkdir(parents=True)
-    jsonl = meta_dir / "papers_metadata.jsonl"
     rows = [
         {"paper_id": "p1", "title": "Water Research", "journal": "Water Research",
          "year": 2020, "doi": "10.1016/j.watres.2020.1"},
@@ -130,11 +145,39 @@ def test_validate_category_sidecar(tmp_path):
          "year": 2021, "doi": "10.1016/j.watres.2021.2",
          "authors": [{"forename": "Ana", "surname": "Lopez"}]},
     ]
-    with jsonl.open("w", encoding="utf-8") as f:
-        for r in rows:
-            f.write(json.dumps(r) + "\n")
+    base = _write_jsonl(tmp_path, cat, rows)
 
-    flagged = validate_category(cat, tmp_path)
+    flagged = validate_category(cat, base)
     assert len(flagged) == 1
     assert flagged[0]["paper_id"] == "p1"
     assert flagged[0]["has_doi"] is True
+
+
+def test_solo_glued_no_entra_al_sidecar(tmp_path):
+    """Un paper cuyo ÚNICO issue es authors_glued (info) no entra al sidecar."""
+    cat = "glued_only"
+    rows = [
+        {"paper_id": "g1", "title": "Anaerobic digestion of manure",
+         "journal": "Bioresource Technology", "year": 2022,
+         "doi": "10.1016/j.biortech.2022.1",
+         "authors": [{"full": "ViolaCorbellini"}]},
+    ]
+    base = _write_jsonl(tmp_path, cat, rows)
+    assert validate_category(cat, base) == []
+
+
+def test_high_entra_y_lista_glued_info(tmp_path):
+    """Un paper con title_eq_journal (high) entra, y su authors_glued (info)
+    aparece listado dentro de sus issues."""
+    cat = "high_plus_glued"
+    rows = [
+        {"paper_id": "h1", "title": "Water Research", "journal": "Water Research",
+         "year": 2020, "doi": "10.1016/j.watres.2020.1",
+         "authors": [{"full": "ViolaCorbellini"}]},
+    ]
+    base = _write_jsonl(tmp_path, cat, rows)
+    flagged = validate_category(cat, base)
+    assert len(flagged) == 1
+    codes = {i["code"] for i in flagged[0]["issues"]}
+    assert "title_eq_journal" in codes
+    assert "authors_glued" in codes

@@ -44,11 +44,19 @@ _AFFILIATION_RE = re.compile(
 ISSUE_CODES = {
     "title_eq_journal":        "título idéntico al nombre de la revista",
     "title_has_journal_prefix": "título empieza por el nombre de la revista",
-    "authors_glued":           "autor con camelCase pegado (sin espacios)",
+    "authors_glued":           "autor con camelCase pegado (sin espacios) — informativo",
     "authors_affiliation":     "autor contaminado con afiliación/lugar o dígitos",
     "year_implausible":        "año ausente o fuera de [1900, año_actual+1]",
     "doi_malformed":           "DOI presente pero con formato inválido",
 }
+
+# Severidades que hacen entrar un paper al sidecar. Los issues "info" (p. ej.
+# authors_glued) se SIGUEN calculando y se listan si el paper ya entró por otro
+# motivo, pero no lo flaggean por sí solos. Ajustable aquí.
+#   Motivo authors_glued="info": forename/surname vienen vacíos en TODO el corpus
+#   (solo `full` pegado), así que marcaría ~99% de papers — verdadero pero inútil
+#   como triaje por-paper. Su reparación es sistémica vía Crossref (Nivel 2).
+SIDECAR_MIN_SEVERITY = {"medium", "high"}
 
 _DOI_RE = re.compile(r"^10\.\d{4,9}/\S+$")
 
@@ -111,7 +119,7 @@ def check_glued_authors(rec: dict) -> Optional[dict]:
     glued = [n for n in _author_names(rec)
              if not re.search(r"\s", n) and re.search(r"[a-z][A-Z]", n)]
     if glued:
-        return {"code": "authors_glued", "field": "authors", "severity": "high",
+        return {"code": "authors_glued", "field": "authors", "severity": "info",
                 "msg": "autores pegados: " + "; ".join(glued)}
     return None
 
@@ -184,12 +192,14 @@ def load_jsonl(path: Path) -> List[Dict]:
 
 def validate_category(category: str, categorias_dir) -> List[dict]:
     """Valida papers_metadata.jsonl de una categoría. Devuelve SOLO los
-    registros con >=1 issue (lista "a revisar", no el corpus entero)."""
+    registros con >=1 issue de severidad en SIDECAR_MIN_SEVERITY (lista "a
+    revisar", no el corpus entero). Los issues "info" se listan en el registro
+    si el paper ya entró por otro motivo, pero no lo flaggean por sí solos."""
     jsonl = Path(categorias_dir) / category / "metadata" / "papers_metadata.jsonl"
     flagged = []
     for rec in load_jsonl(jsonl):
         issues = validate_record(rec)
-        if issues:
+        if any(i["severity"] in SIDECAR_MIN_SEVERITY for i in issues):
             doi = (rec.get("doi") or "").strip()
             flagged.append({
                 "paper_id":  rec.get("paper_id", ""),

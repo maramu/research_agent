@@ -3,6 +3,28 @@
 
 ---
 
+### ✅ Ajuste Nivel 1: authors_glued a informativo (2026-07-04)
+
+Tras el primer pase sobre datos reales, `authors_glued` marcaba ~99% del corpus:
+`forename`/`surname` vienen vacíos en TODOS los registros (el TEI solo puebla
+`full`, a menudo pegado tipo `ViolaCorbellini`), así que el chequeo es verdadero
+pero inútil como triaje por-paper y ahogaba los codes útiles. Ajuste:
+- Nueva severidad `"info"` (por debajo de medium/high). `check_glued_authors`
+  reclasificado a `"info"`; el resto sin cambios (`title_eq_journal` high,
+  `authors_affiliation` high, `title_has_journal_prefix` medium, `year_implausible`
+  medium, `doi_malformed` high). `authors_affiliation` sigue siendo señal buena.
+- Constante `SIDECAR_MIN_SEVERITY = {"medium", "high"}`. `validate_category` mete
+  un paper al sidecar solo si tiene ≥1 issue de esa severidad; los `info` se
+  siguen calculando y se listan en el registro si el paper ya entró por otro
+  motivo, pero no lo flaggean por sí solos.
+- Resumen del CLI: el desglose por code se calcula sobre TODO el corpus (no solo
+  flagged) para que se vea el volumen real de `authors_glued`, etiquetado
+  `[info, no cuenta]`; el conteo "flagged" pasa a reflejar solo medium/high.
+
+Reparación de autores: sistémica vía Crossref (adopción en bloque en el Nivel 2),
+no triaje por-paper. Tests ampliados a 21 (glued solo → no entra; high + glued →
+entra y lista el glued info; severidad `info` no rompe el desglose).
+
 ### ✅ Validación local de metadata — Nivel 1 (2026-07-04)
 
 Nuevo módulo `scripts/utils/metadata_validation.py` (importable, sin red) que
