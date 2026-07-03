@@ -221,19 +221,24 @@ cualquier cambio de chunking, embeddings, modelo o estrategia de retrieval.
   - **Profundidad antes que amplitud:** llevar anoxic y upgrading a ~25 preguntas
     (tienen baseline denso/híbrido → desbloquean el item 33) antes de sembrar
     plásticos (greenfield, tercer punto de datos).
-  - **Generador de candidatos: reusar `qwen2.5:14b-instruct`** (ya residente y
-    validado). Descartados Mixtral 8x7B (~13 GB, pelea por RAM con el modelo de
-    síntesis en 24 GB) y Mistral 7B — la calidad la fija la revisión humana en
-    `review_<cat>.md`, no el generador. Cierra la decisión de modelo abierta.
-  - **Pooling sin sesgo:** construir el pool con `union(denso top-k, BM25 top-k)`,
-    no denso-only, para que los qrels no favorezcan estructuralmente al denso
-    (afecta directamente a la validez del item 33).
+  - **Sin generador automático — preguntas redactadas a mano.** El flujo del
+    2026-06-20 toma `questions_<cat>.json` ya escritas por el experto;
+    `pool_candidates.py` NO las genera. Cierra la decisión Mixtral/Mistral:
+    **descartada la generación local** — preguntas derivadas por un modelo desde
+    los chunks sesgan el benchmark hacia lo recuperable. Un modelo local
+    (qwen2.5:14b) solo como apoyo de brainstorming de subtemas, nunca como fuente
+    de la pregunta/respuesta final.
+  - **Sesgo de pooling y fusión → ver nota del item 33.** El pool de
+    `pool_candidates.py` ya es `union(denso, rrf(denso,bm25))`, no denso-only;
+    lo pendiente es añadir BM25 puro a la unión para no infravalorar al híbrido.
   - **Estratificar por arquetipo** (conceptual/paráfrasis, acrónimo/término raro,
     lookup numérico/tabla, multi-salto) para que el golden set diagnostique *en qué*
     ayuda el híbrido, no solo dé un número.
   - **Prerequisito anoxic:** extraer sus preguntas a
     `questions_anoxic_biogas_biodesulfurization.json` (hoy no existe; golden manual
-    previo a pool_candidates) antes de poder ampliarlo por pooling.
+    previo a pool_candidates) antes de poder ampliarlo por pooling. Ojo consistencia:
+    su golden se anotó sin pooling (independiente); si se re-poolea, homogeneizar
+    o dejar anoxic como está y ampliar solo upgrading + plásticos.
 
 ### 38. Batch API de Anthropic para resúmenes — BAJA prioridad
 
