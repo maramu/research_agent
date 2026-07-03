@@ -309,17 +309,20 @@ cuenta para el sidecar). `forename`/`surname` vienen vacíos en TODO el corpus
 sistémica vía Crossref** (adopción en bloque para todos los papers con DOI en el
 Nivel 2), NO triaje por-paper. Detalle en Mejoras_realizadas.md.
 
-**Nivel 2 (Crossref por DOI) — PENDIENTE.** Para los flagged con DOI, contrastar
-título/revista/año/autores contra Crossref y **sugerir** correcciones sin
-sobreescribir automáticamente. Integrar en `11_Articulos.py` como filtro
-"⚠ discrepancias" (leyendo el sidecar) + adoptar-por-campo (aceptar el valor de
-Crossref campo a campo desde el editor). Los autores (`full` pegado sin
-`forename`/`surname`) son el caso claro de adopción en bloque por DOI. Requiere
-red → se ejecuta en pciq22.
+**Nivel 2 (Crossref por DOI) ✅ COMPLETADO 2026-07-04** — `scripts/utils/
+crossref.py` (`fetch_work` works/<doi>) + `compare_with_crossref` /
+`validate_category_crossref` en `metadata_validation.py`; flags `--crossref` /
+`--limit` en el CLI; en `11_Articulos.py` (privada) filtro "⚠ Solo con
+discrepancias" + adopción por campo + **botón de adopción masiva de autores**
+(preview → confirmar → `update_metadata_fields`). Crossref SUGIERE, no
+sobreescribe. `_crossref_journal` refactorizado para delegar en `fetch_work`
+(no queda deuda de consolidación). Detalle en Mejoras_realizadas.md.
 
-**Calibración pendiente (Bloque B):** correr Nivel 1 en 1-2 categorías, revisar
-ruido por code y afinar la constante TUNABLE `AFFILIATION_TOKENS` o las
-heurísticas en una segunda iteración en casa (no editar en pciq22).
+**Calibración pendiente (Bloque B, pciq22, run aparte tras push+pull):** correr
+Nivel 1 en 1-2 categorías y afinar `AFFILIATION_TOKENS`; correr Nivel 2
+(`--crossref [--limit N]`) sobre una categoría conocida, revisar volumen de
+`title_recover`/`year_mismatch`/`journal_fill`, probar la adopción por campo y
+la adopción masiva de autores en la web privada.
 
 ### 43. Verificaciones pendientes de la revisión 2026-06-12 — seguimiento
 3_process_corpus.py (canonical_section vs CANONICAL_SECTIONS), ~~1_rename_papers_by_doi.py (nombre

@@ -69,10 +69,8 @@ import json
 import os
 import re
 import shutil
-import time
-from urllib.parse import quote
 
-import requests
+from utils.crossref import fetch_work
 from utils.pdf_utils import normalize_stem as _norm
 from datetime import date
 from pathlib import Path
@@ -406,32 +404,18 @@ def _clean_doi(doi: str) -> str:
 
 
 _CROSSREF_MAILTO = os.getenv("UNPAYWALL_EMAIL", "")
-_crossref_journal_cache: Dict[str, str] = {}
 
 
 def _crossref_journal(doi: str) -> str:
-    """Revista (container-title) desde Crossref por DOI. '' si no hay/falla. Cacheado en memoria."""
-    doi = (doi or "").strip().rstrip("/")
-    if not doi:
+    """Revista (container-title) desde Crossref por DOI. '' si no hay/falla.
+
+    Delega en `utils.crossref.fetch_work` (fetcher canónico works/<doi>, con
+    caché en memoria y sleep de cortesía). Preserva el contrato previo: str,
+    '' = miss. Prefiere container-title; short-container-title como fallback."""
+    work = fetch_work(doi)
+    if not work:
         return ""
-    if doi in _crossref_journal_cache:
-        return _crossref_journal_cache[doi]
-    journal = ""
-    try:
-        params = {"mailto": _CROSSREF_MAILTO} if _CROSSREF_MAILTO else {}
-        r = requests.get(
-            f"https://api.crossref.org/works/{quote(doi, safe='')}",
-            params=params, timeout=15,
-        )
-        if r.status_code == 200:
-            ct = r.json().get("message", {}).get("container-title") or []
-            if ct:
-                journal = (ct[0] or "").strip()
-    except Exception:
-        journal = ""
-    _crossref_journal_cache[doi] = journal
-    time.sleep(0.1)   # cortesía con Crossref
-    return journal
+    return work.get("journal") or work.get("journal_short") or ""
 
 
 def normalize_title(s: str) -> str:

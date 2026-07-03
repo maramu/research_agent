@@ -14,12 +14,14 @@ Forma de `authors` (4_extract_metadata.py): lista de dicts
 {"full", "forename", "surname"}; se toleran también strings sueltos, igual que
 hace `_fmt_authors` en 11_Articulos.py.
 """
+import difflib
 import json
 import re
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
 
+from utils.constants import year_from_paper_id
 from utils.pdf_utils import normalize_stem
 
 # ---------------------------------------------------------------------------
@@ -42,13 +44,26 @@ _AFFILIATION_RE = re.compile(
 )
 
 ISSUE_CODES = {
+    # ── Nivel 1 (heurísticas locales) ──
     "title_eq_journal":        "título idéntico al nombre de la revista",
     "title_has_journal_prefix": "título empieza por el nombre de la revista",
     "authors_glued":           "autor con camelCase pegado (sin espacios) — informativo",
     "authors_affiliation":     "autor contaminado con afiliación/lugar o dígitos",
     "year_implausible":        "año ausente o fuera de [1900, año_actual+1]",
     "doi_malformed":           "DOI presente pero con formato inválido",
+    # ── Nivel 2 (contraste con Crossref por DOI) ──
+    "crossref_miss":           "DOI no resuelto en Crossref (miss/404)",
+    "title_recover":           "título ausente (== revista): Crossref recupera el real",
+    "title_mismatch":          "título local difiere del de Crossref",
+    "journal_mismatch":        "revista local difiere de la de Crossref",
+    "journal_fill":            "revista ausente: Crossref la aporta",
+    "year_mismatch":           "año local difiere de paper_id/Crossref",
+    "authors_mismatch":        "autores locales difieren de Crossref (adopción masiva)",
 }
+
+# Ratio difflib mínimo para considerar dos títulos "iguales" (por debajo →
+# title_mismatch). Sobre texto normalizado.
+_TITLE_MATCH_RATIO = 0.85
 
 # Severidades que hacen entrar un paper al sidecar. Los issues "info" (p. ej.
 # authors_glued) se SIGUEN calculando y se listan si el paper ya entró por otro
@@ -176,6 +191,151 @@ def validate_record(rec: dict) -> List[dict]:
     return [issue for check in _ALL_CHECKS if (issue := check(rec))]
 
 
+# ---------------------------------------------------------------------------
+# Nivel 2 — contraste con Crossref por DOI (Crossref SUGIERE, no sobreescribe)
+# ---------------------------------------------------------------------------
+
+def _year_int(v) -> Optional[int]:
+    try:
+        return int(v) if v is not None and str(v).strip() != "" else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _surnames(authors) -> List[str]:
+    """Apellidos normalizados de una lista de autores (dicts o strings)."""
+    out = []
+    for a in (authors or []):
+        if isinstance(a, dict):
+            sn = (a.get("surname") or "").strip()
+            if not sn:
+                full = (a.get("full") or "").strip()
+                sn = full.split()[-1] if full else ""
+        else:
+            toks = str(a).split()
+            sn = toks[-1] if toks else ""
+        if sn:
+            out.append(_norm(sn))
+    return out
+
+
+def _stored_authors_incomplete(authors) -> bool:
+    """True si todos los autores tienen forename Y surname vacíos (caso corpus:
+    solo `full` pegado). Si no hay autores, también se considera incompleto."""
+    dicts = [a for a in (authors or []) if isinstance(a, dict)]
+    if not authors:
+        return True
+    if dicts and all(not (a.get("forename") or "").strip()
+                     and not (a.get("surname") or "").strip() for a in dicts):
+        return True
+    return False
+
+
+def _fmt_cr_authors(cr_authors) -> str:
+    """[{family,given}] → 'Given Family; …' para preview."""
+    parts = []
+    for a in cr_authors or []:
+        nombre = (f"{a.get('given', '')} {a.get('family', '')}").strip()
+        if nombre:
+            parts.append(nombre)
+    return "; ".join(parts)
+
+
+def compare_with_crossref(rec: dict, fetch=None) -> List[dict]:
+    """Contrasta un registro contra Crossref (works/<doi>) y devuelve issues
+    con {code, field, severity, kind, stored, suggested, ...}. Crossref SUGIERE;
+    la escritura la decide el humano en 11_Articulos.
+
+    `fetch` inyectable (default utils.crossref.fetch_work) para tests offline.
+    `kind` ∈ {"mismatch","recover","fill"}. Sin DOI válido → []. Miss → un solo
+    issue crossref_miss (info)."""
+    doi = (rec.get("doi") or "").strip()
+    if not doi or check_doi_format(rec):   # sin DOI o DOI malformado (Nivel 1)
+        return []
+
+    if fetch is None:
+        from utils.crossref import fetch_work as fetch
+    cr = fetch(doi)
+    if not cr:
+        return [{"code": "crossref_miss", "field": "doi", "severity": "info",
+                 "kind": "miss", "stored": doi, "suggested": None,
+                 "msg": "DOI no resuelto en Crossref"}]
+
+    issues: List[dict] = []
+
+    # ── título ──
+    stored_title = (rec.get("title") or "").strip()
+    cr_title = (cr.get("title") or "").strip()
+    if cr_title:
+        is_journal_as_title = bool(
+            check_title_eq_journal(rec) or check_title_starts_with_journal(rec))
+        if is_journal_as_title:
+            issues.append({
+                "code": "title_recover", "field": "title", "severity": "high",
+                "kind": "recover", "stored": stored_title, "suggested": cr_title,
+                "msg": "título local es la revista; Crossref recupera el real"})
+        else:
+            ratio = difflib.SequenceMatcher(
+                None, _norm(stored_title), _norm(cr_title)).ratio()
+            if ratio < _TITLE_MATCH_RATIO:
+                issues.append({
+                    "code": "title_mismatch", "field": "title", "severity": "medium",
+                    "kind": "mismatch", "stored": stored_title, "suggested": cr_title,
+                    "ratio": round(ratio, 3),
+                    "msg": f"título difiere de Crossref (ratio {ratio:.2f})"})
+
+    # ── revista ──
+    stored_journal = (rec.get("journal") or "").strip()
+    cr_journal = (cr.get("journal") or "").strip()
+    cr_journal_short = (cr.get("journal_short") or "").strip()
+    if cr_journal or cr_journal_short:
+        if not stored_journal:
+            issues.append({
+                "code": "journal_fill", "field": "journal", "severity": "medium",
+                "kind": "fill", "stored": "", "suggested": cr_journal or cr_journal_short,
+                "msg": "revista ausente; Crossref la aporta"})
+        else:
+            nsj = _norm(stored_journal)
+            if nsj != _norm(cr_journal) and nsj != _norm(cr_journal_short):
+                issues.append({
+                    "code": "journal_mismatch", "field": "journal", "severity": "medium",
+                    "kind": "mismatch", "stored": stored_journal,
+                    "suggested": cr_journal or cr_journal_short,
+                    "msg": "revista difiere de Crossref"})
+
+    # ── año ── (paper_id primero; Crossref además/fallback)
+    stored_year = _year_int(rec.get("year"))
+    pid_year = year_from_paper_id(rec.get("paper_id") or "")
+    if pid_year and pid_year != stored_year:
+        issues.append({
+            "code": "year_mismatch", "field": "year", "severity": "medium",
+            "kind": "mismatch", "stored": stored_year, "suggested": pid_year,
+            "suggested_source": "paper_id",
+            "msg": f"año local {stored_year} ≠ paper_id {pid_year}"})
+    cr_year = _year_int(cr.get("year"))
+    if cr_year and cr_year != stored_year and cr_year != pid_year:
+        issues.append({
+            "code": "year_mismatch", "field": "year", "severity": "medium",
+            "kind": "mismatch", "stored": stored_year, "suggested": cr_year,
+            "suggested_source": "crossref",
+            "msg": f"año local {stored_year} ≠ Crossref {cr_year}"})
+
+    # ── autores ── (coarse/advisory; universal en este corpus → adopción masiva)
+    cr_authors = cr.get("authors") or []
+    if cr_authors:
+        stored_sn = set(_surnames(rec.get("authors")))
+        cr_sn = set(_surnames(cr_authors))
+        overlap = (len(stored_sn & cr_sn) / len(cr_sn)) if cr_sn else 1.0
+        if _stored_authors_incomplete(rec.get("authors")) or overlap < 0.5:
+            issues.append({
+                "code": "authors_mismatch", "field": "authors", "severity": "info",
+                "kind": "mismatch", "stored": "; ".join(_author_names(rec)),
+                "suggested": _fmt_cr_authors(cr_authors),
+                "msg": "autores difieren de Crossref (reparar por adopción masiva)"})
+
+    return issues
+
+
 def load_jsonl(path: Path) -> List[Dict]:
     """Lectura tolerante de un jsonl (líneas corruptas se descartan)."""
     records = []
@@ -190,26 +350,70 @@ def load_jsonl(path: Path) -> List[Dict]:
     return records
 
 
+_CROSSREF_REPAIR_KINDS = {"mismatch", "recover", "fill"}
+
+
+def _sidecar_row(rec: dict, issues: List[dict], crossref: Optional[dict] = None) -> dict:
+    """Construye la fila del sidecar para un paper flagged."""
+    doi = (rec.get("doi") or "").strip()
+    row = {
+        "paper_id":  rec.get("paper_id", ""),
+        "stable_id": rec.get("stable_id", ""),
+        "doi":       doi,
+        "has_doi":   bool(doi),
+        "title":     rec.get("title") or "",
+        "journal":   rec.get("journal") or "",
+        "year":      rec.get("year"),
+        "authors":   rec.get("authors") or [],
+        "issues":    issues,
+    }
+    if crossref is not None:
+        row["crossref"] = crossref
+    return row
+
+
 def validate_category(category: str, categorias_dir) -> List[dict]:
-    """Valida papers_metadata.jsonl de una categoría. Devuelve SOLO los
-    registros con >=1 issue de severidad en SIDECAR_MIN_SEVERITY (lista "a
-    revisar", no el corpus entero). Los issues "info" se listan en el registro
-    si el paper ya entró por otro motivo, pero no lo flaggean por sí solos."""
+    """Valida papers_metadata.jsonl de una categoría (Nivel 1 puro). Devuelve
+    SOLO los registros con >=1 issue de severidad en SIDECAR_MIN_SEVERITY (lista
+    "a revisar", no el corpus entero). Los issues "info" se listan en el
+    registro si el paper ya entró por otro motivo, pero no lo flaggean solos."""
     jsonl = Path(categorias_dir) / category / "metadata" / "papers_metadata.jsonl"
     flagged = []
     for rec in load_jsonl(jsonl):
         issues = validate_record(rec)
         if any(i["severity"] in SIDECAR_MIN_SEVERITY for i in issues):
-            doi = (rec.get("doi") or "").strip()
-            flagged.append({
-                "paper_id":  rec.get("paper_id", ""),
-                "stable_id": rec.get("stable_id", ""),
-                "doi":       doi,
-                "has_doi":   bool(doi),
-                "title":     rec.get("title") or "",
-                "journal":   rec.get("journal") or "",
-                "year":      rec.get("year"),
-                "authors":   rec.get("authors") or [],
-                "issues":    issues,
-            })
+            flagged.append(_sidecar_row(rec, issues))
+    return flagged
+
+
+def validate_category_crossref(category: str, categorias_dir,
+                               limit: Optional[int] = None, fetch=None) -> List[dict]:
+    """Nivel 1 + Nivel 2: enriquece el sidecar con un bloque
+    `crossref:{fetched, issues}` por paper con DOI válido. Un paper entra si
+    tiene issues locales medium/high (Nivel 1) O algún issue Crossref con
+    kind ∈ {mismatch, recover, fill}.
+
+    `limit` topa el nº de llamadas a Crossref en la categoría (los papers no
+    consultados quedan sin bloque crossref). `fetch` inyectable para tests."""
+    jsonl = Path(categorias_dir) / category / "metadata" / "papers_metadata.jsonl"
+    if fetch is None:
+        from utils.crossref import fetch_work as fetch
+    flagged, calls = [], 0
+    for rec in load_jsonl(jsonl):
+        local = validate_record(rec)
+        local_flag = any(i["severity"] in SIDECAR_MIN_SEVERITY for i in local)
+
+        cr_block = None
+        doi_valid = bool((rec.get("doi") or "").strip()) and not check_doi_format(rec)
+        if doi_valid and (limit is None or calls < limit):
+            calls += 1
+            cr_issues = compare_with_crossref(rec, fetch=fetch)
+            fetched = not any(i["code"] == "crossref_miss" for i in cr_issues)
+            cr_block = {"fetched": fetched, "issues": cr_issues}
+
+        cr_flag = bool(cr_block) and any(
+            i.get("kind") in _CROSSREF_REPAIR_KINDS for i in cr_block["issues"])
+
+        if local_flag or cr_flag:
+            flagged.append(_sidecar_row(rec, local, crossref=cr_block))
     return flagged

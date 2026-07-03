@@ -40,6 +40,7 @@ from app_utils import (
     check_password, is_public_app,
     list_existing_categories, get_categories_summary,
 )
+from utils.crossref import fetch_work
 
 # ── Helpers para DOI ──
 
@@ -224,6 +225,41 @@ def _parse_authors_text(text: str) -> list[dict]:
             out.append({"forename": " ".join(toks[:-1]), "surname": toks[-1]})
         else:
             out.append({"forename": "", "surname": name})
+    return out
+
+
+# ── Nivel 2: validación con Crossref (sidecar + adopción) ────────────────────
+
+def load_validation_sidecar(category: str) -> dict:
+    """Lee validation_<cat>.jsonl → {paper_id: row}. {} si no existe."""
+    sidecar = CATEGORIAS_DIR / category / "metadata" / f"validation_{category}.jsonl"
+    out: dict = {}
+    if sidecar.exists():
+        with sidecar.open(encoding="utf-8") as f:
+            for line in f:
+                s = line.strip()
+                if not s:
+                    continue
+                try:
+                    row = json.loads(s)
+                except Exception:
+                    continue
+                pid = row.get("paper_id") or row.get("stable_id") or ""
+                if pid:
+                    out[pid] = row
+    return out
+
+
+def _cr_authors_to_writer(cr_authors: list) -> list[dict]:
+    """[{family,given}] de Crossref → [{full,forename,surname}] que espera
+    update_metadata_fields (mismo formato que escribe 4_extract_metadata)."""
+    out = []
+    for a in cr_authors or []:
+        fn = (a.get("given") or "").strip()
+        sn = (a.get("family") or "").strip()
+        full = (f"{fn} {sn}").strip()
+        if full:
+            out.append({"full": full, "forename": fn, "surname": sn})
     return out
 
 
@@ -666,3 +702,119 @@ if not PUBLIC:
                         st.session_state["art_editor_nonce"] = nonce + 1
                         load_articles.clear(); _summary_rows.clear()
                         st.rerun()
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# 🔬 Validación de metadata (Crossref, Nivel 2) — SOLO INSTANCIA PRIVADA
+# ───────────────────────────────────────────────────────────────────────────
+if not PUBLIC:
+    st.divider()
+    st.subheader("🔬 Validación de metadata (Crossref)")
+    st.caption("Crossref es la mejor fuente, no infalible; revisa antes de adoptar. "
+               "Toda escritura pasa por el editor (backup `.bak`).")
+
+    if sel == TODAS:
+        st.info("Selecciona una categoría concreta arriba para revisar discrepancias.")
+    else:
+        sidecar = load_validation_sidecar(sel)
+        if not sidecar:
+            st.info(
+                f"No hay `validation_{sel}.jsonl`. Genéralo en pciq22 con "
+                f"`python3 scripts/validate_metadata.py --category {sel} --crossref`.")
+        else:
+            solo_disc = st.checkbox(
+                "⚠ Solo con discrepancias (del sidecar)", value=True,
+                key=f"solo_disc_{sel}")
+
+            # ── (i) Adopción POR CAMPO desde el bloque crossref del sidecar ──
+            all_rows = load_articles(sel, _meta_mtime(sel))
+            by_pid = {r["paper_id"]: r for r in all_rows}
+            pids = list(sidecar.keys()) if solo_disc else [r["paper_id"] for r in all_rows]
+            st.caption(f"{len(sidecar)} paper(s) en el sidecar.")
+
+            for pid in pids:
+                row = sidecar.get(pid)
+                if not row:
+                    continue
+                cr_issues = (row.get("crossref") or {}).get("issues", [])
+                suggests = [i for i in cr_issues if i.get("suggested")
+                            and i.get("kind") in ("mismatch", "recover", "fill")]
+                if not suggests:
+                    continue
+                title_txt = (by_pid.get(pid, {}).get("title") or row.get("title") or pid)[:80]
+                with st.expander(f"`{pid}` — {title_txt}"):
+                    for k, iss in enumerate(suggests):
+                        field = iss["field"]
+                        src = iss.get("suggested_source", "crossref")
+                        st.markdown(
+                            f"**{field}** ({iss['code']}, fuente {src})  \n"
+                            f"- actual: `{iss.get('stored')}`  \n"
+                            f"- sugerido: `{iss.get('suggested')}`")
+                        if field == "authors":
+                            st.caption("Los autores se reparan con la adopción masiva "
+                                       "de abajo, no campo a campo.")
+                            continue
+                        if st.button(f"Adoptar {field} ({src})",
+                                     key=f"adopt_{sel}_{pid}_{k}"):
+                            val = iss["suggested"]
+                            if field == "year":
+                                val = int(val) if str(val).isdigit() else val
+                            update_metadata_fields(sel, {pid: {field: val}})
+                            st.success(f"✓ {field} adoptado (backup .bak).")
+                            load_articles.clear(); _summary_rows.clear()
+                            st.rerun()
+
+            # ── (ii) Adopción MASIVA de autores por categoría (preview→confirmar) ──
+            st.markdown("---")
+            st.markdown("**Adopción masiva de autores de Crossref** "
+                        "(todos los papers con DOI de esta categoría)")
+            prev_key = f"authors_preview_{sel}"
+
+            if st.button("👁 Previsualizar adopción de autores", key=f"prev_btn_{sel}"):
+                with st.spinner("Consultando Crossref por DOI…"):
+                    preview = []
+                    for r in all_rows:
+                        pid = r["paper_id"]
+                        doi = str(r.get("doi") or "").strip()
+                        if not doi:
+                            preview.append({"paper_id": pid, "estado": "sin DOI",
+                                            "actual": r.get("authors", ""),
+                                            "crossref": "", "cambia": False})
+                            continue
+                        work = fetch_work(doi)
+                        cr_auth = _cr_authors_to_writer((work or {}).get("authors") or [])
+                        if not cr_auth:
+                            preview.append({"paper_id": pid, "estado": "sin fuente",
+                                            "actual": r.get("authors", ""),
+                                            "crossref": "", "cambia": False})
+                            continue
+                        cr_txt = "; ".join(a["full"] for a in cr_auth)
+                        preview.append({
+                            "paper_id": pid, "estado": "ok",
+                            "actual": r.get("authors", ""), "crossref": cr_txt,
+                            "cambia": cr_txt.strip() != str(r.get("authors") or "").strip(),
+                            "_authors": cr_auth})
+                st.session_state[prev_key] = preview
+                st.rerun()
+
+            preview = st.session_state.get(prev_key)
+            if preview:
+                n_cambia = sum(1 for p in preview if p["cambia"])
+                n_sin = sum(1 for p in preview if p["estado"] != "ok")
+                st.caption(f"**{n_cambia}** paper(s) se actualizarán · "
+                           f"{n_sin} sin fuente/DOI (se saltan).")
+                st.dataframe(
+                    pd.DataFrame([{k: v for k, v in p.items() if not k.startswith("_")}
+                                  for p in preview]),
+                    hide_index=True, use_container_width=True)
+                conf = st.checkbox("Confirmar adopción de autores",
+                                   key=f"conf_authors_{sel}")
+                if st.button("✅ Confirmar adopción", key=f"do_authors_{sel}",
+                             disabled=not conf):
+                    updates = {p["paper_id"]: {"authors": p["_authors"]}
+                               for p in preview if p["cambia"] and p.get("_authors")}
+                    n = update_metadata_fields(sel, updates)
+                    st.success(f"✓ {n} paper(s) con autores actualizados (backup .bak).")
+                    st.session_state.pop(prev_key, None)
+                    load_articles.clear(); _summary_rows.clear()
+                    st.rerun()

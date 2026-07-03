@@ -28,6 +28,7 @@ from utils.metadata_validation import (
     SIDECAR_MIN_SEVERITY,
     load_jsonl,
     validate_category,
+    validate_category_crossref,
     validate_record,
 )
 
@@ -35,7 +36,8 @@ from utils.metadata_validation import (
 CATEGORIAS_DIR = Path("/Volumes/research/categorias")
 
 
-def run_category(category: str) -> None:
+def run_category(category: str, use_crossref: bool = False,
+                 limit=None) -> None:
     meta_dir = CATEGORIAS_DIR / category / "metadata"
     jsonl = meta_dir / "papers_metadata.jsonl"
     if not jsonl.exists():
@@ -44,16 +46,19 @@ def run_category(category: str) -> None:
 
     records = load_jsonl(jsonl)
     total = len(records)
-    flagged = validate_category(category, CATEGORIAS_DIR)
+    if use_crossref:
+        flagged = validate_category_crossref(category, CATEGORIAS_DIR, limit=limit)
+    else:
+        flagged = validate_category(category, CATEGORIAS_DIR)
 
     sidecar = meta_dir / f"validation_{category}.jsonl"
     with sidecar.open("w", encoding="utf-8") as f:
         for row in flagged:
             f.write(json.dumps(row, ensure_ascii=False) + "\n")
 
-    # Desglose por code sobre TODO el corpus (no solo flagged), para que se vea
-    # el volumen real de los codes "info" como authors_glued, que casi nunca
-    # caen en un paper flagged.
+    # Desglose por code (Nivel 1) sobre TODO el corpus (no solo flagged), para
+    # que se vea el volumen real de los codes "info" como authors_glued, que
+    # casi nunca caen en un paper flagged.
     by_code, by_sev = Counter(), {}
     for rec in records:
         for i in validate_record(rec):
@@ -61,11 +66,22 @@ def run_category(category: str) -> None:
             by_sev[i["code"]] = i["severity"]
     with_doi = sum(1 for row in flagged if row["has_doi"])
 
-    print(f"[{category}] {total} papers · {len(flagged)} flagged medium/high "
+    print(f"[{category}] {total} papers · {len(flagged)} flagged "
           f"({with_doi} con DOI → arreglables con Crossref en Nivel 2)")
     for code, n in by_code.most_common():
         tag = "  [info, no cuenta]" if by_sev.get(code) not in SIDECAR_MIN_SEVERITY else ""
         print(f"    {code:26s} {n:4d}  — {ISSUE_CODES.get(code, '')}{tag}")
+
+    if use_crossref:
+        calls = sum(1 for row in flagged if "crossref" in row)
+        hits = sum(1 for row in flagged if row.get("crossref", {}).get("fetched"))
+        cr_codes = Counter(
+            i["code"] for row in flagged
+            for i in row.get("crossref", {}).get("issues", []))
+        print(f"    Crossref: {calls} con bloque · {hits} hits · "
+              f"{calls - hits} misses/404")
+        for code, n in cr_codes.most_common():
+            print(f"      {code:24s} {n:4d}  — {ISSUE_CODES.get(code, '')}")
     print(f"    sidecar: {sidecar}")
 
 
@@ -75,6 +91,10 @@ def main() -> None:
                     help="categoría a validar (repetible)")
     ap.add_argument("--all", action="store_true",
                     help="validar todas las CANONICAL_CATEGORIES")
+    ap.add_argument("--crossref", action="store_true",
+                    help="Nivel 2: contrastar con Crossref por DOI (requiere red)")
+    ap.add_argument("--limit", type=int, default=None,
+                    help="tope de llamadas a Crossref por categoría")
     args = ap.parse_args()
 
     if args.all:
@@ -85,7 +105,7 @@ def main() -> None:
         ap.error("indica --category <cat> (repetible) o --all")
 
     for cat in categories:
-        run_category(cat)
+        run_category(cat, use_crossref=args.crossref, limit=args.limit)
 
 
 if __name__ == "__main__":

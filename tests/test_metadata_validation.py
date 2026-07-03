@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Tests de las heurísticas de validación de metadata (Nivel 1)."""
+"""Tests de las heurísticas de validación de metadata (Nivel 1 y 2)."""
 import json
 
 import pytest
@@ -12,9 +12,16 @@ from utils.metadata_validation import (
     check_title_eq_journal,
     check_title_starts_with_journal,
     check_year,
+    compare_with_crossref,
     validate_category,
+    validate_category_crossref,
     validate_record,
 )
+
+
+def _fetch(work):
+    """Factoría de fetch inyectable determinista (offline)."""
+    return lambda doi: work
 
 
 def _write_jsonl(tmp_path, cat, rows):
@@ -181,3 +188,132 @@ def test_high_entra_y_lista_glued_info(tmp_path):
     codes = {i["code"] for i in flagged[0]["issues"]}
     assert "title_eq_journal" in codes
     assert "authors_glued" in codes
+
+
+# ── Nivel 2 — compare_with_crossref (fetch mockeado, offline) ────────────────
+
+def _codes(issues):
+    return {i["code"] for i in issues}
+
+
+def test_crossref_title_recover():
+    """Título marcado title_eq_journal por Nivel 1 → issue kind='recover'."""
+    rec = {"paper_id": "p", "doi": "10.1016/j.watres.2020.1",
+           "title": "Water Research", "journal": "Water Research"}
+    work = {"title": "Anaerobic digestion of manure", "authors": [],
+            "journal": "Water Research", "journal_short": "", "year": 2020}
+    issues = compare_with_crossref(rec, fetch=_fetch(work))
+    ti = [i for i in issues if i["code"] == "title_recover"]
+    assert ti and ti[0]["kind"] == "recover"
+    assert ti[0]["suggested"] == "Anaerobic digestion of manure"
+
+
+def test_crossref_title_mismatch_y_match():
+    """Ratio bajo → title_mismatch; ratio alto → sin issue de título."""
+    doi = "10.1016/j.watres.2020.1"
+    work_diff = {"title": "Completely unrelated subject heading", "authors": [],
+                 "journal": "Water Research", "journal_short": "", "year": 2020}
+    rec = {"paper_id": "p", "doi": doi, "title": "Anaerobic digestion of manure",
+           "journal": "Water Research", "year": 2020}
+    assert "title_mismatch" in _codes(compare_with_crossref(rec, fetch=_fetch(work_diff)))
+
+    work_same = dict(work_diff, title="Anaerobic digestion of manure")
+    assert "title_mismatch" not in _codes(compare_with_crossref(rec, fetch=_fetch(work_same)))
+
+
+def test_crossref_journal_short_match_y_fill():
+    """journal casa short-container-title → sin issue; stored vacío + cr → fill."""
+    doi = "10.1016/j.watres.2020.1"
+    work = {"title": "T", "authors": [], "journal": "Water Research",
+            "journal_short": "Water Res", "year": 2020}
+    rec_match = {"paper_id": "p", "doi": doi, "title": "T",
+                 "journal": "Water Res", "year": 2020}
+    assert "journal_mismatch" not in _codes(compare_with_crossref(rec_match, fetch=_fetch(work)))
+    assert "journal_fill" not in _codes(compare_with_crossref(rec_match, fetch=_fetch(work)))
+
+    rec_empty = {"paper_id": "p", "doi": doi, "title": "T", "journal": "", "year": 2020}
+    fill = [i for i in compare_with_crossref(rec_empty, fetch=_fetch(work))
+            if i["code"] == "journal_fill"]
+    assert fill and fill[0]["kind"] == "fill"
+
+
+def test_crossref_year_paper_id_y_crossref():
+    """stored=2046, paper_id 1995 → sugiere 1995 (paper_id); cr.year distinto →
+    year_mismatch source crossref."""
+    rec = {"paper_id": "smith_1995_foo", "doi": "10.1016/j.watres.2046.1",
+           "title": "T", "journal": "Water Research", "year": 2046}
+    work = {"title": "T", "authors": [], "journal": "Water Research",
+            "journal_short": "", "year": 2001}
+    issues = [i for i in compare_with_crossref(rec, fetch=_fetch(work))
+              if i["code"] == "year_mismatch"]
+    by_src = {i["suggested_source"]: i["suggested"] for i in issues}
+    assert by_src.get("paper_id") == 1995
+    assert by_src.get("crossref") == 2001
+
+
+def test_crossref_miss_no_peta():
+    """fetch → None ⇒ un solo issue crossref_miss (info), sin excepción."""
+    rec = {"paper_id": "p", "doi": "10.1016/j.watres.2020.1", "title": "T"}
+    issues = compare_with_crossref(rec, fetch=_fetch(None))
+    assert len(issues) == 1 and issues[0]["code"] == "crossref_miss"
+    assert issues[0]["severity"] == "info"
+
+
+def test_crossref_authors_mismatch_incompleto():
+    """Autores con forename/surname vacíos (solo full) → authors_mismatch con
+    suggested = lista limpia de Crossref."""
+    rec = {"paper_id": "p", "doi": "10.1016/j.watres.2020.1", "title": "T",
+           "journal": "Water Research", "year": 2020,
+           "authors": [{"full": "ViolaCorbellini", "forename": "", "surname": ""}]}
+    work = {"title": "T", "journal": "Water Research", "journal_short": "", "year": 2020,
+            "authors": [{"family": "Corbellini", "given": "Viola"}]}
+    am = [i for i in compare_with_crossref(rec, fetch=_fetch(work))
+          if i["code"] == "authors_mismatch"]
+    assert am and am[0]["kind"] == "mismatch"
+    assert "Corbellini" in am[0]["suggested"]
+
+
+def test_crossref_sin_doi_o_malformado_vacio():
+    """Sin DOI o DOI malformado → [] (Nivel 1 gestiona el malformado)."""
+    assert compare_with_crossref({"paper_id": "p", "doi": ""}, fetch=_fetch({})) == []
+    assert compare_with_crossref({"paper_id": "p", "doi": "j.x"}, fetch=_fetch({})) == []
+
+
+def test_validate_category_crossref_entra_por_mismatch(tmp_path):
+    """Un paper limpio en Nivel 1 pero con mismatch Crossref entra al sidecar
+    con su bloque crossref."""
+    cat = "l2"
+    rows = [
+        {"paper_id": "p1", "doi": "10.1016/j.watres.2020.1",
+         "title": "Anaerobic digestion of manure", "journal": "Water Research",
+         "year": 2020, "authors": [{"forename": "Ana", "surname": "Lopez"}]},
+    ]
+    base = _write_jsonl(tmp_path, cat, rows)
+    work = {"title": "A totally different title string", "authors": [],
+            "journal": "Water Research", "journal_short": "", "year": 2020}
+    flagged = validate_category_crossref(cat, base, fetch=_fetch(work))
+    assert len(flagged) == 1
+    assert flagged[0]["crossref"]["fetched"] is True
+    assert "title_mismatch" in _codes(flagged[0]["crossref"]["issues"])
+
+
+def test_validate_category_crossref_limit(tmp_path):
+    """--limit topa las llamadas: con limit=1 solo el primer paper trae bloque."""
+    cat = "l2lim"
+    rows = [
+        {"paper_id": "p1", "doi": "10.1016/j.watres.2020.1", "title": "T1",
+         "journal": "Water Research", "year": 2020},
+        {"paper_id": "p2", "doi": "10.1016/j.watres.2021.2", "title": "T2",
+         "journal": "Water Research", "year": 2021},
+    ]
+    base = _write_jsonl(tmp_path, cat, rows)
+    work = {"title": "Different heading entirely here", "authors": [],
+            "journal": "Water Research", "journal_short": "", "year": 2020}
+    calls = {"n": 0}
+
+    def counting_fetch(doi):
+        calls["n"] += 1
+        return work
+
+    validate_category_crossref(cat, base, limit=1, fetch=counting_fetch)
+    assert calls["n"] == 1

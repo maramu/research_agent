@@ -3,6 +3,68 @@
 
 ---
 
+### ✅ Validación de metadata — Nivel 2 (Crossref por DOI) (2026-07-04)
+
+Capa de contraste con Crossref sobre el Nivel 1. Principio: **Crossref SUGIERE,
+no sobreescribe**; el humano confirma en 11_Articulos y toda escritura pasa por
+el `update_metadata_fields()` existente (hereda `.bak` + upsert `doi_manual` +
+`PRESERVE_FIELDS`) — no se creó escritor nuevo.
+
+**`scripts/utils/crossref.py` (nuevo)** — fetcher canónico `fetch_work(doi) ->
+dict|None` del endpoint `works/<doi>`: normaliza a `{title, authors:[{family,
+given}], journal, journal_short, year}` (año desde `issued`→`published-print`→
+`published-online`; ignora entradas de organización sin `family`); 404/DataCite/
+no-JSON → None sin excepción; caché en memoria por DOI + `sleep(0.1)` de
+cortesía; `mailto=UNPAYWALL_EMAIL`; DOI normalizado con `utils.pdf_utils.
+normalize_doi`. `_crossref_journal` de `4_extract_metadata.py` ahora **delega** en
+`fetch_work` (contrato str preservado; imports muertos `requests`/`quote`/`time`
+eliminados). NO se tocó `crossref_suggest` (endpoint search por título, distinto).
+
+**`compare_with_crossref(rec, fetch)` en `utils/metadata_validation.py`** — solo
+con DOI válido (usa `check_doi_format`); miss → un único `crossref_miss` (info).
+Por campo emite issues con `{code, field, severity, kind, stored, suggested, …}`,
+`kind ∈ {mismatch, recover, fill, miss}`:
+- **título:** si el Nivel 1 lo marcó `title_eq_journal`/`title_has_journal_prefix`
+  → `title_recover` (kind recover, high): el título local ES la revista, Crossref
+  RECUPERA el dato ausente. Si no, `difflib.ratio(_norm) < 0.85` → `title_mismatch`.
+- **revista:** `journal_fill` si local vacío + Crossref tiene; `journal_mismatch`
+  si `_norm(stored)` no casa `container-title` NI `short-container-title`.
+- **año:** `year_from_paper_id` PRIMERO (gratis, sin red) — si difiere del stored,
+  sugerencia `suggested_source="paper_id"`; además, si `cr.year` difiere, otra
+  `year_mismatch` con `suggested_source="crossref"`. Para años corruptos
+  (2046/2097) o None prioriza la de paper_id.
+- **autores:** `authors_mismatch` (info, advisory) si `forename`/`surname` vacíos
+  en stored o solapamiento de apellidos < 0.5. Universal en este corpus → la
+  reparación real es la adopción masiva, no el flag por-paper.
+
+`validate_category_crossref(category, categorias_dir, limit, fetch)` enriquece el
+sidecar con `crossref:{fetched, issues}`; un paper entra si tiene Nivel 1
+medium/high O algún issue Crossref con kind `mismatch`/`recover`/`fill`. `fetched`
+se deriva de los issues (sin doble llamada). `--limit` topa las llamadas.
+
+**CLI `validate_metadata.py`:** flags `--crossref` (default OFF → Nivel 1 puro) y
+`--limit N`. Resumen ampliado: nº con bloque, hits, misses/404 y desglose de codes
+Crossref.
+
+**`11_Articulos.py` (solo app privada):** sección "🔬 Validación de metadata
+(Crossref)" que lee `validation_<cat>.jsonl`. (i) Checkbox "⚠ Solo con
+discrepancias" + por paper un expander con adopción POR CAMPO (actual vs sugerido,
+botón "Adoptar" que llama a `update_metadata_fields` con SOLO ese campo; para
+`year` ofrece paper_id y Crossref cuando difieren). (ii) **Botón de adopción MASIVA
+de autores** por categoría: preview primero (nunca escribe directo) con tabla
+paper_id · autores actuales · autores Crossref y contador "N se actualizarán";
+checkbox de confirmación; al confirmar, `update_metadata_fields(pid, authors=…)`
+por paper con formato `{full,forename,surname}` derivado de `given`/`family`;
+papers sin DOI o con miss se saltan (listados como "sin fuente"/"sin DOI").
+Reutiliza `fetch_work` (caché). Copy: "Crossref es la mejor fuente, no infalible;
+revisa antes de adoptar."
+
+Tests: `tests/test_metadata_validation.py` ampliado a 30 (Crossref con `fetch`
+monkeypatcheado, offline y determinista): title_recover, title_mismatch/match,
+journal short-match/fill, año doble fuente (paper_id 1995 vs Crossref), miss sin
+petar, authors_mismatch con stored incompleto, `--limit`, y entrada al sidecar por
+mismatch. Suite completa 129/129 verde.
+
 ### ✅ Ajuste Nivel 1: authors_glued a informativo (2026-07-04)
 
 Tras el primer pase sobre datos reales, `authors_glued` marcaba ~99% del corpus:
