@@ -3,6 +3,29 @@
 
 ---
 
+### ✅ pool_candidates.py — BM25 puro en la unión + preservación de anotaciones (2026-07-03)
+
+Dos endurecimientos de `scripts/pool_candidates.py`, ligados a la nota del item 33/37
+sobre sesgo de pooling (ver Mejoras_pendientes.md):
+
+- **Fix A · BM25 puro en la unión:** además de `dense_rank` y el híbrido
+  `rrf_fuse(dense, bm25)`, ahora se calcula también `bm25_rank` puro y su resultado
+  entra en la unión de candidatos (`candidates = dense_pos | hybrid_pos | bm25_pos`).
+  Antes, un documento que solo destacaba en BM25 podía quedar fuera si el RRF lo
+  diluía por debajo del corte, infravalorando al híbrido en el golden set. Se añade
+  una columna `b{pos}` (o `b—`) junto a `d{pos}`/`h{pos}` en cada línea de checkbox
+  para que el experto vea también el ranking BM25 puro. Reutiliza el mismo cálculo
+  de BM25 que ya alimentaba el híbrido — sin coste adicional. Backward-safe: si
+  `rank-bm25` no está instalado, `bm25_rank` devuelve `[]` y todo queda `b—`.
+- **Fix B · Preservar anotaciones al regenerar el review:** al reejecutar `pool`,
+  si `review_<categoria>.md` ya existe, se parsea con `parse_review` y las marcas
+  `[x]` previas por `qid` se conservan en la regeneración (antes, cualquier
+  reejecución de `pool` perdía todo el trabajo de anotación manual del experto).
+  Nota añadida a la cabecera del review advirtiendo de no reordenar preguntas entre
+  pooladas (la preservación es por `qid`, no por posición/texto).
+
+---
+
 ## Sesión 2026-07-01 (cont.) — Hermes Agent: auditoría de seguridad y pausa
 
 **Nota:** este trabajo vive fuera de este repo (`~/.hermes` + `~/hermes-docker`), no

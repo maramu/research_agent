@@ -170,8 +170,9 @@ Ligado al item 37 — sin set de evaluación no se puede medir, y el soporte de 
   n=4/n=6 → **sin potencia estadística** para concluir; el item 37 (~25 preguntas)
   es prerrequisito duro. Sobre el pooling: `pool_candidates.py` ya agrupa
   `union(denso, rrf(denso,bm25))`, pero un doc que SOLO encuentra BM25 puede quedar
-  fuera (pasa por el filtro RRF antes de agruparse) → añadir `bm25_rank` puro a la
-  unión para que el experto también los juzgue y el golden no infravalore al híbrido.
+  fuera (pasa por el filtro RRF antes de agruparse) → ~~añadir `bm25_rank` puro a la
+  unión para que el experto también los juzgue y el golden no infravalore al híbrido.~~
+  ✅ hecho 2026-07-03 (columna `b{pos}` en `pool_candidates.py`).
   Antes de tocar reranking: (1) revisar la tokenización BM25 de acrónimos/fórmulas
   (H2S, TiO2, NR-SOB) en `utils/retrieval.py`; (2) fusión ponderada a nivel de score
   (α·denso+(1-α)·bm25) o RRF con k bajo (10-20) en vez de k=60 sobre pools diminutos.
@@ -230,7 +231,8 @@ cualquier cambio de chunking, embeddings, modelo o estrategia de retrieval.
     de la pregunta/respuesta final.
   - **Sesgo de pooling y fusión → ver nota del item 33.** El pool de
     `pool_candidates.py` ya es `union(denso, rrf(denso,bm25))`, no denso-only;
-    lo pendiente es añadir BM25 puro a la unión para no infravalorar al híbrido.
+    ~~lo pendiente es añadir BM25 puro a la unión para no infravalorar al híbrido.~~
+    ✅ hecho 2026-07-03.
   - **Estratificar por arquetipo** (conceptual/paráfrasis, acrónimo/término raro,
     lookup numérico/tabla, multi-salto) para que el golden set diagnostique *en qué*
     ayuda el híbrido, no solo dé un número.

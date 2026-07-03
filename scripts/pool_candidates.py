@@ -151,6 +151,7 @@ def cmd_pool(args):
     base = Path(args.base)
     eval_dir = Path(args.eval_dir) if args.eval_dir else base.parent / "metadatos" / "eval"
     out_path = Path(args.out) if args.out else eval_dir / f"review_{args.category}.md"
+    preserved = parse_review(out_path) if out_path.exists() else {}
 
     questions = load_questions(Path(args.questions))
     index, meta, cfg = load_index_and_meta(args.category, args.phase, base)
@@ -177,17 +178,21 @@ def cmd_pool(args):
         pool = pool_size(args.pool_k, index.ntotal, has_filter=False)
 
         d_idx, _dist_map = dense_rank(index, qv, pool)
-        hybrid_ranked = rrf_fuse(d_idx, bm25_rank(bm25, question, pool))
+        b_idx = bm25_rank(bm25, question, pool)
+        hybrid_ranked = rrf_fuse(d_idx, b_idx)
         h_idx = [idx for idx, _score in hybrid_ranked]
 
         _dense_ids,  dense_pos  = rank_to_paper_ids(d_idx, meta, args.pool_k)
         _hybrid_ids, hybrid_pos = rank_to_paper_ids(h_idx, meta, args.pool_k)
+        _bm25_ids,   bm25_pos   = rank_to_paper_ids(b_idx, meta, args.pool_k)
 
         INF = float("inf")
-        candidates = set(dense_pos) | set(hybrid_pos)
+        candidates = set(dense_pos) | set(hybrid_pos) | set(bm25_pos)
         ordered = sorted(
             candidates,
-            key=lambda pid: min(dense_pos.get(pid, INF), hybrid_pos.get(pid, INF)),
+            key=lambda pid: min(
+                dense_pos.get(pid, INF), hybrid_pos.get(pid, INF), bm25_pos.get(pid, INF)
+            ),
         )
 
         print(f"[{qid}/{len(questions)}] {question[:70]}... → {len(ordered)} candidatos")
@@ -199,9 +204,12 @@ def cmd_pool(args):
             title = info.get("title", "") or ""
             dp = dense_pos.get(pid)
             hp = hybrid_pos.get(pid)
+            bp = bm25_pos.get(pid)
             d_str = f"d{dp}" if dp else "d—"
             h_str = f"h{hp}" if hp else "h—"
-            lines.append(f"- [ ] {pid} | ({year}) {title} | {d_str} {h_str}")
+            b_str = f"b{bp}" if bp else "b—"
+            mark = "x" if pid in preserved.get(qid, ()) else " "
+            lines.append(f"- [{mark}] {pid} | ({year}) {title} | {d_str} {h_str} {b_str}")
         lines.append("")
         blocks.append("\n".join(lines))
 
@@ -210,6 +218,8 @@ def cmd_pool(args):
         f"# Review de candidatos — {args.category}\n\n"
         f"Marca con `[x]` los paper_id relevantes para cada pregunta, luego ejecuta "
         f"`pool_candidates.py build`.\n\n"
+        f"Al re-ejecutar `pool` se conservan las marcas `[x]` previas por qid; "
+        f"no reordenes las preguntas entre pooladas.\n\n"
     )
     out_path.write_text(header + "\n".join(blocks), encoding="utf-8")
     print(f"\nReview escrito: {out_path}")
