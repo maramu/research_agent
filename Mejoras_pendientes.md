@@ -165,14 +165,16 @@ un cross-encoder pequeño, antes de pasar al LLM de síntesis.
 - Toggle en la web para activar/desactivar reranking y comparar.
 - Evidencia inicial (2 categorías): híbrido ≤ denso; revisar fusión/pesado BM25+RRF al abordar el reranking.
 Ligado al item 37 — sin set de evaluación no se puede medir, y el soporte de rerank en Ollama es dudoso.
+
 - **Nota 2026-07-03 (antes de retunear):** el patrón "híbrido ≤ denso" está a
   n=4/n=6 → **sin potencia estadística** para concluir; el item 37 (~25 preguntas)
-  es prerrequisito duro. Antes de tocar reranking: (1) verificar la procedencia del
-  pool de los golden — si fue denso-only, los qrels están sesgados contra BM25 →
-  reconstruir con union denso+BM25; (2) revisar la tokenización BM25 de
-  acrónimos/fórmulas (H2S, TiO2, NR-SOB) en `utils/retrieval.py`; (3) probar fusión
-  ponderada a nivel de score (α·denso+(1-α)·bm25) o RRF con k bajo (10-20) en vez de
-  k=60 sobre pools diminutos.
+  es prerrequisito duro. Sobre el pooling: `pool_candidates.py` ya agrupa
+  `union(denso, rrf(denso,bm25))`, pero un doc que SOLO encuentra BM25 puede quedar
+  fuera (pasa por el filtro RRF antes de agruparse) → añadir `bm25_rank` puro a la
+  unión para que el experto también los juzgue y el golden no infravalore al híbrido.
+  Antes de tocar reranking: (1) revisar la tokenización BM25 de acrónimos/fórmulas
+  (H2S, TiO2, NR-SOB) en `utils/retrieval.py`; (2) fusión ponderada a nivel de score
+  (α·denso+(1-α)·bm25) o RRF con k bajo (10-20) en vez de k=60 sobre pools diminutos.
 
 ### 35. Fallback OCR para PDFs escaneados — MEDIA prioridad
 
