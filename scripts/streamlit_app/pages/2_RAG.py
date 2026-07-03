@@ -47,7 +47,7 @@ from app_utils import (
     fmt_cost, get_monthly_usage, list_embedding_phases, list_existing_categories,
     record_rag_query, record_rag_query_full, check_password, is_public_app,
 )
-from utils.export_refs import build_papers_zip
+from utils.export_refs import build_papers_zip, build_chunks_markdown
 from utils.constants import CANONICAL_SECTIONS, year_from_paper_id
 from utils.citations import (
     load_papers_metadata, build_cite_map, apply_citations, CITE_PROMPT_RULES,
@@ -696,6 +696,31 @@ def _render_papers_export(papers, project, key_prefix=""):
             )
 
 
+def _render_chunks_export(results, project, score_label="score", key_prefix=""):
+    """Botón de descarga de TODOS los chunks recuperados en un único .md con
+    referencia completa por chunk. Independiente del ZIP de PDFs/MD.
+    """
+    _mj = CATEGORIAS_DIR / project / "metadata" / "papers_metadata.jsonl"
+    _mtime = _mj.stat().st_mtime if _mj.exists() else 0.0
+    papers_meta = load_papers_meta(project, _mtime)
+
+    md = build_chunks_markdown(
+        results, project, CATEGORIAS_DIR, papers_meta,
+        query=st.session_state.get("_last_query"), score_label=score_label,
+    )
+    st.download_button(
+        "⬇️ Descargar chunks (Markdown)",
+        data=md.encode("utf-8"),
+        file_name=f"{project}_chunks_RAG.md",
+        mime="text/markdown",
+        key=f"{key_prefix}dl_chunks_md",
+    )
+    st.caption(
+        "Incluye la referencia bibliográfica completa por chunk (título, autores, "
+        "año, revista, DOI, sección) para citar desde un LLM externo."
+    )
+
+
 def render_premium_block():
     """Bloque '🔎 Profundizar (modelo de pago)'.
 
@@ -775,6 +800,9 @@ def render_premium_block():
             st.markdown(f"**{title}** ({authors_str}, {year}){doi_str}")
         if prev_papers:
             _render_papers_export(prev_papers, prev_project, key_prefix="premium_")
+            _prem_results = [(d["score"], 0, d["m"]) for d in prev_results]
+            _render_chunks_export(_prem_results, prev_project, score_label="score",
+                                  key_prefix="premium_")
 
     # Resultado premium persistido (sobrevive a reruns posteriores). Se muestra
     # junto a la respuesta gratuita, sin sobrescribirla.
@@ -1432,6 +1460,7 @@ for rank, (score, idx, m) in enumerate(results, start=1):
 
 st.divider()
 _render_papers_export(retrieved_papers, project, key_prefix="")
+_render_chunks_export(results, project, score_label=_sl, key_prefix="")
 
 # Bloque premium tras una búsqueda recién ejecutada (go=True): _last_results ya
 # refleja esta consulta. (El camino go=False se renderiza arriba, antes del stop.)

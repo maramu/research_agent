@@ -25,6 +25,10 @@
 - ~~`section_canonical`: `CANONICAL_SECTIONS` (constants) y `canonical_section()` (3_process) se
   sincronizan a mano → riesgo de drift.~~ ✅ VERIFICADO/RESUELTO 2026-06-17 — no habían divergido: 6 patrones en `_CANON_PATTERNS` + fallback `"other"` + `"table"` asignado en `build_chunk_records` = las 8 etiquetas de `CANONICAL_SECTIONS`. Blindado con `tests/test_canonical_sections.py`.
 
+- ~~Exportar chunks/contexto recuperados en RAG a un formato citable por un LLM externo.~~
+  ✅ COMPLETADO 2026-07-04 — botón "⬇️ Descargar chunks (Markdown)" en `2_RAG.py`
+  (`build_chunks_markdown` en `utils/export_refs.py`), independiente del ZIP PDF+MD.
+
 ### Verificaciones pendientes (ficheros no vistos) → item 43.
 
 ## Keywords y criterios de búsqueda

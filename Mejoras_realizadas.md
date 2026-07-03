@@ -3,6 +3,33 @@
 
 ---
 
+### ✅ Exportar chunks a .md con referencia por chunk (RAG) (2026-07-04)
+
+Nueva función `build_chunks_markdown(results, project, categorias_dir, papers_meta,
+query=None, score_label="score")` en `scripts/utils/export_refs.py`: serializa TODOS
+los chunks recuperados en una búsqueda a un único documento Markdown, con la
+referencia bibliográfica lo más completa posible por chunk (título, autores, año,
+revista, DOI, `paper_id`, sección/sección canónica, tipo, score), pensado para que
+un LLM externo pueda citar sin acceso al corpus. El texto de cada chunk va
+delimitado con una cerca de tildes (`~~~text` … `~~~`) cuya longitud se ajusta
+dinámicamente si el propio texto ya contiene una racha de `~` igual o mayor, para
+que el delimitador nunca se rompa. Caso adjunto efímero (`paper_id == "__attachment__"`):
+usa `m["_cite"]` como referencia en lugar de buscar en `papers_meta`.
+
+En `scripts/streamlit_app/pages/2_RAG.py`, función de render `_render_chunks_export`
+(junto a `_render_papers_export`, ya existente): botón nuevo e independiente
+"⬇️ Descargar chunks (Markdown)" que carga `papers_meta` de forma autónoma (no
+depende de haber lanzado la síntesis) y genera el .md vía `build_chunks_markdown`.
+Se invoca en dos puntos:
+- Flujo principal, justo después de `_render_papers_export(retrieved_papers, project, key_prefix="")`.
+- `render_premium_block()`, tras `_render_papers_export(prev_papers, prev_project, key_prefix="premium_")`,
+  reconstruyendo `results` desde `_last_results` igual que hace el resto del bloque premium.
+
+La descarga de ZIP (PDFs + MD limpio) vía `build_papers_zip`/`_render_papers_export`
+se mantiene intacta — este es un botón adicional, no un reemplazo.
+
+---
+
 ### ✅ pool_candidates.py — BM25 puro en la unión + preservación de anotaciones (2026-07-03)
 
 Dos endurecimientos de `scripts/pool_candidates.py`, ligados a la nota del item 33/37
