@@ -241,6 +241,36 @@ def _fmt_cr_authors(cr_authors) -> str:
     return "; ".join(parts)
 
 
+def _norm_field_value(field: str, value):
+    """Valor comparable para issue_is_stale: year → int|None; resto → str strip."""
+    if field == "year":
+        return _year_int(value)
+    return str(value or "").strip()
+
+
+def issue_is_stale(issue: dict, current: dict,
+                   sidecar_row: Optional[dict] = None) -> bool:
+    """True si un issue del sidecar (FOTO en disco) ya no aplica al registro
+    VIGENTE de papers_metadata.jsonl:
+    - issue con `suggested` (Crossref): el valor actual YA coincide con la
+      sugerencia (fue adoptada en esta sesión o por otra vía).
+    - diagnóstico local sin sugerencia (pasar `sidecar_row`): el campo cambió
+      respecto a la foto, así que el diagnóstico está desactualizado.
+    Solo visualización — el sidecar NO se reescribe; la fuente de verdad sigue
+    siendo re-correr el validador. Campos fuera de title/journal/year (authors,
+    doi) nunca se dan por resueltos aquí."""
+    field = issue.get("field") or ""
+    if field not in ("title", "journal", "year"):
+        return False
+    cur = _norm_field_value(field, (current or {}).get(field))
+    sug = issue.get("suggested")
+    if sug not in (None, ""):
+        return cur == _norm_field_value(field, sug)
+    if sidecar_row is not None:
+        return cur != _norm_field_value(field, sidecar_row.get(field))
+    return False
+
+
 def year_delta_severity(delta) -> str:
     """Severidad de un year_mismatch según el delta de año (con o sin signo):
     ±1 → "low" (desfase online-temprano vs published-print, apto para adopción

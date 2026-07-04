@@ -3,6 +3,50 @@
 
 ---
 
+### ✅ UX validación Crossref: adopción in situ y desaparición en vivo (11_Articulos) (2026-07-04)
+
+Dos fricciones del ciclo de adopción (que funcionaba, pero incómodo): (1) los
+papers adoptados seguían en el listado hasta re-correr el validador (el sidecar
+es una foto); (2) la tabla "Revisar individualmente" (saltos |Δ|≥2 de año) era
+estática — obligaba a buscar el paper entre ~93 expanders del listado por-campo.
+
+**Desaparición en vivo (re-verificación real, no set de sesión).** Nuevo helper
+puro `issue_is_stale(issue, current, sidecar_row=None)` en
+`utils/metadata_validation.py`: un issue de la foto ya no aplica si el valor
+VIGENTE de `papers_metadata.jsonl` coincide con `suggested` (adoptado en esta
+sesión o por otra vía — más honesto que un set de sesión porque refleja el
+estado real en disco), o, para diagnósticos locales sin sugerencia, si el campo
+cambió respecto a la foto (diagnóstico desactualizado). Sin red: la sugerencia
+del sidecar ya es el `cr[field]` congelado, así que ni siquiera hace falta el
+`fetch_work` cacheado. Campos `authors`/`doi` nunca se dan por resueltos aquí.
+En el listado por-campo se filtran issues stale; un paper que se queda sin
+issues visibles se pinta como expander "✓ resuelto en esta sesión"; caption
+final "N issue(s) resueltos en esta sesión; re-ejecuta el validador para
+refrescar el sidecar". Es SOLO filtro de visualización — el sidecar en disco no
+se reescribe; la fuente de verdad sigue siendo re-correr el validador.
+
+**Botón por fila en "Revisar individualmente".** La tabla estática de saltos
+|Δ|≥2 pasa a filas paper_id · año actual · año Crossref (Δ) · botón "Adoptar
+año" que llama al MISMO `update_metadata_fields(pid, {"year": ...})` (hereda
+`.bak` + `doi_manual` + `PRESERVE_FIELDS`) — adopción individual in situ, NO
+entra al lote masivo. Participa de la misma desaparición en vivo (reutiliza
+`issue_is_stale` contra el registro vigente, así también desaparece si se
+adoptó desde el listado por-campo); se mantiene la nota de corrupción probable
+/ caso editorial (passalacqua a criterio del usuario). Adopción masiva de +1,
+masiva de autores y lógica del validador intactas.
+
+**Verificación (casa):** `py_compile` OK; tests unitarios de `issue_is_stale`
+(sugerencia adoptada con coerción int/strip, diagnóstico local por cambio de
+campo, authors/doi nunca resueltos). Suite completa: **143 passed**.
+
+Bloque B (pciq22, tras push+pull + reinicio del LaunchAgent Streamlit): adoptar
+un año grande desde la tabla → la fila desaparece sin re-correr el validador;
+adoptar un título por-campo → su issue desaparece; cerrar biogas (6 años
+grandes, 7 títulos, 2 revistas) verificando `.bak`; re-correr el validador →
+sidecar ~0 (la desaparición en vivo debe coincidir con lo escrito en disco).
+
+---
+
 ### ✅ Adopción masiva de año acotada a ±1 (severity low); saltos grandes a revisión individual (2026-07-04)
 
 Último ajuste de la política de año con datos reales de 80 `year_mismatch`:

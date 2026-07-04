@@ -41,7 +41,7 @@ from app_utils import (
     list_existing_categories, get_categories_summary,
 )
 from utils.crossref import fetch_work
-from utils.metadata_validation import year_delta_severity
+from utils.metadata_validation import issue_is_stale, year_delta_severity
 
 # ── Helpers para DOI ──
 
@@ -732,6 +732,7 @@ if not PUBLIC:
             by_pid = {r["paper_id"]: r for r in all_rows}
             pids = list(sidecar.keys()) if solo_disc else [r["paper_id"] for r in all_rows]
             st.caption(f"{len(sidecar)} paper(s) marcados para revisar en esta categoría.")
+            n_resueltos = 0  # issues de la foto ya adoptados (vigente == sugerido)
 
             for pid in pids:
                 row = sidecar.get(pid)
@@ -755,6 +756,26 @@ if not PUBLIC:
                             and i.get("field") in ("title", "journal", "year")]
                 authors_iss = [i for i in cr_issues
                                if i.get("code") == "authors_mismatch"]
+
+                # Desaparición en vivo: omite issues que ya no aplican al
+                # registro vigente (sugerencia adoptada / campo cambiado). El
+                # sidecar en disco no se toca — es la foto del último pase.
+                cur_rec = by_pid.get(pid, {})
+                n_antes = len(suggests) + len(local_issues)
+                suggests = [i for i in suggests
+                            if not issue_is_stale(i, cur_rec)]
+                local_issues = [i for i in local_issues
+                                if not issue_is_stale(i, cur_rec, row)]
+                stale_aqui = n_antes - len(suggests) - len(local_issues)
+                n_resueltos += stale_aqui
+                if stale_aqui and not suggests and not local_issues \
+                        and not authors_iss:
+                    with st.expander(f"✓ `{pid}` — {title_txt} "
+                                     f"(resuelto en esta sesión)"):
+                        st.caption("Los campos adoptados ya coinciden con la "
+                                   "sugerencia; re-ejecuta el validador para "
+                                   "refrescar el sidecar.")
+                    continue
 
                 label = (f"`{pid}` — {title_txt}  "
                          f"({len(local_issues)} local(es) · "
@@ -794,6 +815,10 @@ if not PUBLIC:
                                    "para ver sugerencias de Crossref.")
                     elif not suggests and not authors_iss and not local_issues:
                         st.caption("Sin discrepancias accionables en este pase.")
+
+            if n_resueltos:
+                st.caption(f"{n_resueltos} issue(s) resueltos en esta sesión; "
+                           "re-ejecuta el validador para refrescar el sidecar.")
 
             # ── (ii) Adopción MASIVA de autores por categoría (preview→confirmar) ──
             st.markdown("---")
@@ -930,12 +955,33 @@ if not PUBLIC:
                 if yreview:
                     st.markdown("**Revisar individualmente** (no incluidos en "
                                 "la adopción masiva)")
-                    st.dataframe(pd.DataFrame(yreview), hide_index=True,
-                                 use_container_width=True)
                     st.caption("Saltos |Δ|≥2: corrupción probable o caso "
-                               "editorial dudoso. Adóptalos uno a uno desde el "
-                               "listado por-campo de arriba (actual vs "
-                               "sugerido antes de decidir).")
+                               "editorial dudoso — compara actual vs sugerido "
+                               "antes de adoptar (el passalacqua es criterio "
+                               "del usuario). Adopción individual in situ, "
+                               "misma escritura que el listado por-campo.")
+                    # Desaparición en vivo: fuera los que ya coinciden con
+                    # Crossref (adoptados aquí o en el listado por-campo).
+                    vivos = [p for p in yreview if not issue_is_stale(
+                        {"field": "year", "suggested": p["año Crossref"]},
+                        by_pid.get(p["paper_id"], {}))]
+                    if not vivos:
+                        st.caption("✓ Todos los saltos grandes están "
+                                   "resueltos en esta sesión.")
+                    for p in vivos:
+                        pid_y = p["paper_id"]
+                        c1, c2, c3, c4 = st.columns([5, 2, 3, 2])
+                        c1.markdown(f"`{pid_y}`")
+                        c2.markdown(f"actual: `{p['año actual']}`")
+                        c3.markdown(f"Crossref: `{p['año Crossref']}` "
+                                    f"(Δ {p['delta']})")
+                        if c4.button("Adoptar año",
+                                     key=f"adopt_big_{sel}_{pid_y}"):
+                            update_metadata_fields(
+                                sel, {pid_y: {"year": p["año Crossref"]}})
+                            st.success("✓ año adoptado (backup .bak).")
+                            load_articles.clear(); _summary_rows.clear()
+                            st.rerun()
                 if yskip:
                     with st.expander(f"Saltados ({len(yskip)})"):
                         st.dataframe(pd.DataFrame(yskip), hide_index=True,

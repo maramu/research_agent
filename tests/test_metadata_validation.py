@@ -13,6 +13,7 @@ from utils.metadata_validation import (
     check_title_starts_with_journal,
     check_year,
     compare_with_crossref,
+    issue_is_stale,
     validate_category,
     validate_category_crossref,
     validate_record,
@@ -289,6 +290,34 @@ def test_crossref_year_fallback_paper_id_sin_cr_year():
     assert len(issues) == 1
     assert issues[0]["suggested_source"] == "paper_id"
     assert issues[0]["suggested"] == 1995
+
+
+def test_issue_is_stale_sugerencia_adoptada():
+    """Vigente == sugerido → el issue de la foto ya no aplica (adoptado)."""
+    iss = {"field": "year", "suggested": 1995, "stored": 2046}
+    assert issue_is_stale(iss, {"year": 1995}) is True
+    assert issue_is_stale(iss, {"year": "1995"}) is True   # coerción int
+    assert issue_is_stale(iss, {"year": 2046}) is False    # sigue sin adoptar
+    tit = {"field": "title", "suggested": "Real Title"}
+    assert issue_is_stale(tit, {"title": "Real Title  "}) is True  # strip
+    assert issue_is_stale(tit, {"title": "Water Research"}) is False
+
+
+def test_issue_is_stale_diagnostico_local_por_cambio():
+    """Issue local sin sugerencia: stale si el campo cambió vs la foto del
+    sidecar (se re-evaluará al re-correr el validador)."""
+    iss = {"field": "title"}  # p. ej. title_eq_journal
+    row = {"title": "Water Research"}
+    assert issue_is_stale(iss, {"title": "Otro título"}, row) is True
+    assert issue_is_stale(iss, {"title": "Water Research"}, row) is False
+    assert issue_is_stale(iss, {"title": "Otro"}) is False  # sin foto: no opina
+
+
+def test_issue_is_stale_campos_no_gestionados():
+    """authors/doi nunca se dan por resueltos aquí (adopción masiva/validador)."""
+    assert issue_is_stale({"field": "authors", "suggested": "A B"},
+                          {"authors": "A B"}) is False
+    assert issue_is_stale({"field": "doi", "suggested": None}, {}) is False
 
 
 def test_year_delta_severity_acota_lote_masivo():
