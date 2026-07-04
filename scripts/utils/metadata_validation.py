@@ -271,6 +271,16 @@ def issue_is_stale(issue: dict, current: dict,
     return False
 
 
+def build_validate_cmd(category: str, crossref: bool = True) -> List[str]:
+    """Args (sin intérprete/script) para invocar validate_metadata.py --category
+    <category> [--crossref]. Usado por 11_Articulos.py para re-validar desde
+    la web con el mismo `pipeline.run_step` que el resto del pipeline."""
+    args = ["--category", category]
+    if crossref:
+        args.append("--crossref")
+    return args
+
+
 def year_delta_severity(delta) -> str:
     """Severidad de un year_mismatch según el delta de año (con o sin signo):
     ±1 → "low" (desfase online-temprano vs published-print, apto para adopción

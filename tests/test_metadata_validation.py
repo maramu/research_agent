@@ -6,6 +6,7 @@ import pytest
 
 from utils.metadata_validation import (
     SIDECAR_MIN_SEVERITY,
+    build_validate_cmd,
     check_authors_affiliation,
     check_doi_format,
     check_glued_authors,
@@ -290,6 +291,14 @@ def test_crossref_year_fallback_paper_id_sin_cr_year():
     assert len(issues) == 1
     assert issues[0]["suggested_source"] == "paper_id"
     assert issues[0]["suggested"] == 1995
+
+
+def test_build_validate_cmd_con_y_sin_crossref():
+    """Args para pipeline.run_step("validate_metadata.py", args): --category
+    siempre, --crossref solo si se pide (default True)."""
+    assert build_validate_cmd("biogas") == ["--category", "biogas", "--crossref"]
+    assert build_validate_cmd("biogas", crossref=False) == ["--category", "biogas"]
+    assert build_validate_cmd("biogas", crossref=True) == ["--category", "biogas", "--crossref"]
 
 
 def test_issue_is_stale_sugerencia_adoptada():

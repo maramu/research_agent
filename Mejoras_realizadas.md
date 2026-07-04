@@ -3,6 +3,49 @@
 
 ---
 
+### ✅ Botón de re-validación de categoría desde la web (11_Articulos) (2026-07-04)
+
+Hasta ahora el sidecar `validation_<cat>.jsonl` solo se regeneraba corriendo
+`validate_metadata.py` en terminal — el contador de la sección Crossref se
+quedaba obsoleto tras una tanda de adopciones (mitigado por la desaparición en
+vivo de la sesión anterior, pero el sidecar en disco seguía sin refrescar).
+Como Streamlit corre en pciq22 (donde están el NAS y la red), lanzar el
+subproceso ahí no rompe la separación casa/pciq22: el código se sigue editando
+en casa.
+
+**Reutilizado, no reinventado:** mismo patrón que `execute_script_live` de
+`6_Mantenimiento.py` — `pipeline.run_step(script, args, on_output, label)`
+(`sys.executable` + `SCRIPTS_DIR/script`, sin rutas absolutas frágiles) con
+`st.status(expanded=True)` y una caja de código que se va llenando línea a
+línea. Nueva función local `_run_validator_live(category, crossref)` en
+`11_Articulos.py` replica exactamente esa envoltura para
+`validate_metadata.py`. Nuevo helper puro `build_validate_cmd(category,
+crossref=True)` en `utils/metadata_validation.py` arma los args
+(`["--category", cat]` + `["--crossref"]` opcional) — testeable sin Streamlit.
+
+**UI:** junto al contador del sidecar, tres columnas: caption del contador ·
+checkbox "Incluir Crossref (más lento)" (default ON; desmarcado corre solo
+Nivel 1 local, en segundos) · botón "🔄 Re-validar esta categoría". Caption
+"Re-ejecuta el validador y refresca el sidecar de esta categoría. Con Crossref
+tarda ~1 min." Al pulsar: `st.status` con spinner + salida en vivo; si
+`returncode == 0` → `st.rerun()` (el sidecar se lee sin `st.cache_data`, así
+que la foto nueva aparece sin más); si falla, `st.error` con las últimas 15
+líneas de salida capturada, sin romper la página. `run_step` no expone
+timeout (mismo patrón que ya usan otros pasos largos del pipeline en la app,
+p. ej. el re-index FAISS) — no se inventó uno nuevo para no divergir de la
+envoltura existente.
+
+**Verificación (casa):** `py_compile` OK. Test unitario de `build_validate_cmd`
+(con y sin `--crossref`). Suite completa: **144 passed**.
+
+Bloque B (pciq22, tras push+pull + reinicio LaunchAgent Streamlit): adoptar el
+último `title_recover` de biogas; pulsar "🔄 Re-validar esta categoría" — debe
+tardar ~1 min, mostrar el desglose (biogas → 0-1 flagged) y refrescar el
+contador sin salir a terminal; repetir con "Incluir Crossref" desmarcado — debe
+correr en segundos (solo Nivel 1 local).
+
+---
+
 ### ✅ UX validación Crossref: adopción in situ y desaparición en vivo (11_Articulos) (2026-07-04)
 
 Dos fricciones del ciclo de adopción (que funcionaba, pero incómodo): (1) los

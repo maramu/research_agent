@@ -41,7 +41,7 @@ from app_utils import (
     list_existing_categories, get_categories_summary,
 )
 from utils.crossref import fetch_work
-from utils.metadata_validation import issue_is_stale, year_delta_severity
+from utils.metadata_validation import build_validate_cmd, issue_is_stale, year_delta_severity
 
 # ── Helpers para DOI ──
 
@@ -274,6 +274,40 @@ def _load_cleanup_module():
         sys.modules[key] = mod
         spec.loader.exec_module(mod)
     return sys.modules[key]
+
+
+def _run_validator_live(category: str, crossref: bool) -> dict | None:
+    """Re-ejecuta validate_metadata.py para `category` con feedback en vivo,
+    mismo patrón que `execute_script_live` de 6_Mantenimiento.py (pipeline.run_step
+    + status_box con salida incremental). NO reimplementa el validador."""
+    import pipeline
+    args = build_validate_cmd(category, crossref=crossref)
+    label = f"validate_metadata.py --category {category}" + (" --crossref" if crossref else "")
+    log_lines: list[str] = []
+    status_box = st.status(f"Re-validando `{category}`" +
+                           (" con Crossref…" if crossref else " (solo local)…"),
+                           expanded=True)
+    output_box = status_box.empty()
+    MAX_LINES = 200
+
+    def on_output(line: str) -> None:
+        log_lines.append(line)
+        output_box.code("\n".join(log_lines[-MAX_LINES:]), language="text")
+
+    try:
+        result = pipeline.run_step("validate_metadata.py", args,
+                                   on_output=on_output, label=label)
+    except Exception as e:
+        status_box.update(label=f"✗ re-validación falló: {e}", state="error")
+        st.exception(e)
+        return None
+
+    rc = result.get("returncode", -1)
+    if rc == 0:
+        status_box.update(label=f"✓ `{category}` re-validado", state="complete")
+    else:
+        status_box.update(label=f"✗ re-validación falló (rc={rc})", state="error")
+    return result
 
 
 def delete_papers(category: str, paper_ids: list[str]) -> dict:
@@ -731,7 +765,22 @@ if not PUBLIC:
             all_rows = load_articles(sel, _meta_mtime(sel))
             by_pid = {r["paper_id"]: r for r in all_rows}
             pids = list(sidecar.keys()) if solo_disc else [r["paper_id"] for r in all_rows]
-            st.caption(f"{len(sidecar)} paper(s) marcados para revisar en esta categoría.")
+
+            col_cnt, col_cr, col_rv = st.columns([4, 3, 2])
+            col_cnt.caption(f"{len(sidecar)} paper(s) marcados para revisar en esta categoría.")
+            incluir_crossref = col_cr.checkbox(
+                "Incluir Crossref (más lento)", value=True, key=f"cr_toggle_{sel}")
+            revalidar = col_rv.button("🔄 Re-validar esta categoría", key=f"revalidate_{sel}")
+            st.caption("Re-ejecuta el validador y refresca el sidecar de esta categoría. "
+                       "Con Crossref tarda ~1 min.")
+            if revalidar:
+                result = _run_validator_live(sel, incluir_crossref)
+                if result and result.get("returncode") == 0:
+                    st.rerun()
+                elif result:
+                    tail = "\n".join(result.get("output", [])[-15:])
+                    st.error(f"La re-validación falló (rc={result.get('returncode')}):\n\n{tail}")
+
             n_resueltos = 0  # issues de la foto ya adoptados (vigente == sugerido)
 
             for pid in pids:
