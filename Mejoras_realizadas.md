@@ -3,6 +3,49 @@
 
 ---
 
+### ✅ Año canónico desde Crossref en validación N2 (paper_id a fallback) (2026-07-04)
+
+Ajuste tras datos reales del primer pase con `--crossref`: los 71/71
+`year_mismatch` salían con `suggested_source="paper_id"` (etiqueta derivada del
+nombre de archivo) y NUNCA se comparaba contra Crossref (la autoridad). Causa en
+`compare_with_crossref` (`utils/metadata_validation.py`): paper_id se evaluaba
+PRIMERO y la rama Crossref llevaba el corte `and cr_year != pid_year` — como en
+este corpus paper_id y Crossref casi siempre coinciden, la condición de Crossref
+era siempre falsa. Histograma real `crossref_year − local_year` sobre 120
+papers: {0: 96, +1: 20, −7: 2, −9: 1, −51: 1}. **Decisión: Crossref es el año
+CANÓNICO; paper_id deja de ser fuente de sugerencia.**
+
+**Cambios (solo `utils/metadata_validation.py`, rama del año; título/revista/
+adopción masiva de autores intactos):**
+- Con `cr.year` presente y ≠ local → `year_mismatch` con `suggested=cr.year`,
+  `suggested_source="crossref"`, SIEMPRE (corte eliminado). Única fuente de año
+  cuando Crossref lo trae.
+- Severidad por delta: `|delta|==1` → `severity="low"` (desfase print/online,
+  ~20 casos de bajo valor — siguen en el sidecar y siguen siendo adoptables,
+  solo se distinguen para que la UI priorice); `|delta|>=2` (o local ausente) →
+  `"medium"`. `kind="mismatch"` en ambos (el flag de entrada al sidecar por
+  Crossref va por `kind`, no por severity → nada sale del sidecar).
+- `paper_id` a FALLBACK: nuevo helper `_year_fallback_paper_id(rec)` que solo
+  se usa si Crossref no trae año (`cr.year` vacío) o no resuelve (miss →
+  `crossref_miss` + fallback). Mantiene viva la señal para años corruptos que
+  Crossref no puede confirmar. `year_from_paper_id` sigue importado (usado por
+  el fallback y por media docena de módulos más — verificado con grep).
+- `ISSUE_CODES["year_mismatch"]` y docstring actualizados.
+
+**Verificación (casa, sin red):** `py_compile` OK. Tests con fetch mockeado en
+`test_metadata_validation.py`: cr.year ≠ local → única sugerencia crossref
+(nunca paper_id aunque también difiera); cr.year == local → sin issue (los 96
+delta-0); ±1 → low y ≥2 → medium; cr sin año → fallback paper_id; miss + año
+corrupto → `crossref_miss` + fallback paper_id; miss sin año en paper_id → solo
+`crossref_miss`. Suite completa: **133 passed**.
+
+Esperado en pciq22 (Bloque B): `year_mismatch` cae de 71 a ~24, todos
+`source="crossref"`; ~20 low (±1) y ~4 medium (corruptos: strevett 2046→1995
+via mismatch alto). Deferred (item 51): posible adopción masiva de año análoga
+a la de autores, ahora que hay fuente única canónica.
+
+---
+
 ### ✅ Fix UI: renderizar listado de discrepancias por-campo en validación Crossref (11_Articulos) (2026-07-04)
 
 El punto 1.E.i del Nivel 2 quedó sin renderizar en la práctica: el bucle bajo el

@@ -237,26 +237,77 @@ def test_crossref_journal_short_match_y_fill():
     assert fill and fill[0]["kind"] == "fill"
 
 
-def test_crossref_year_paper_id_y_crossref():
-    """stored=2046, paper_id 1995 → sugiere 1995 (paper_id); cr.year distinto →
-    year_mismatch source crossref."""
+def test_crossref_year_canonico_unica_fuente():
+    """Con cr.year presente, la ÚNICA sugerencia de año es crossref (nunca
+    paper_id, aunque el paper_id también difiera del local)."""
     rec = {"paper_id": "smith_1995_foo", "doi": "10.1016/j.watres.2046.1",
            "title": "T", "journal": "Water Research", "year": 2046}
     work = {"title": "T", "authors": [], "journal": "Water Research",
             "journal_short": "", "year": 2001}
     issues = [i for i in compare_with_crossref(rec, fetch=_fetch(work))
               if i["code"] == "year_mismatch"]
-    by_src = {i["suggested_source"]: i["suggested"] for i in issues}
-    assert by_src.get("paper_id") == 1995
-    assert by_src.get("crossref") == 2001
+    assert len(issues) == 1
+    assert issues[0]["suggested_source"] == "crossref"
+    assert issues[0]["suggested"] == 2001
+
+
+def test_crossref_year_igual_sin_issue():
+    """cr.year == local (los 96 delta-0 del histograma) → sin year_mismatch."""
+    rec = {"paper_id": "smith_2020_foo", "doi": "10.1016/j.watres.2020.1",
+           "title": "T", "journal": "Water Research", "year": 2020}
+    work = {"title": "T", "authors": [], "journal": "Water Research",
+            "journal_short": "", "year": 2020}
+    assert "year_mismatch" not in _codes(compare_with_crossref(rec, fetch=_fetch(work)))
+
+
+def test_crossref_year_severidad_por_delta():
+    """|delta|==1 (print/online) → severity low; |delta|>=2 → medium."""
+    rec = {"paper_id": "p_2020_x", "doi": "10.1016/j.watres.2020.1",
+           "title": "T", "journal": "Water Research", "year": 2020}
+    work1 = {"title": "T", "authors": [], "journal": "Water Research",
+             "journal_short": "", "year": 2021}
+    ym1 = [i for i in compare_with_crossref(rec, fetch=_fetch(work1))
+           if i["code"] == "year_mismatch"]
+    assert ym1 and ym1[0]["severity"] == "low"
+    assert ym1[0]["suggested_source"] == "crossref"
+
+    work2 = dict(work1, year=2013)
+    ym2 = [i for i in compare_with_crossref(rec, fetch=_fetch(work2))
+           if i["code"] == "year_mismatch"]
+    assert ym2 and ym2[0]["severity"] == "medium"
+
+
+def test_crossref_year_fallback_paper_id_sin_cr_year():
+    """cr resuelto pero SIN año → fallback: sugerencia desde paper_id."""
+    rec = {"paper_id": "smith_1995_foo", "doi": "10.1016/j.watres.2046.1",
+           "title": "T", "journal": "Water Research", "year": 2046}
+    work = {"title": "T", "authors": [], "journal": "Water Research",
+            "journal_short": "", "year": None}
+    issues = [i for i in compare_with_crossref(rec, fetch=_fetch(work))
+              if i["code"] == "year_mismatch"]
+    assert len(issues) == 1
+    assert issues[0]["suggested_source"] == "paper_id"
+    assert issues[0]["suggested"] == 1995
 
 
 def test_crossref_miss_no_peta():
-    """fetch → None ⇒ un solo issue crossref_miss (info), sin excepción."""
+    """fetch → None ⇒ crossref_miss (info) sin excepción; sin año en paper_id
+    no se añade fallback."""
     rec = {"paper_id": "p", "doi": "10.1016/j.watres.2020.1", "title": "T"}
     issues = compare_with_crossref(rec, fetch=_fetch(None))
     assert len(issues) == 1 and issues[0]["code"] == "crossref_miss"
     assert issues[0]["severity"] == "info"
+
+
+def test_crossref_miss_con_fallback_paper_id():
+    """fetch → None y año local ≠ paper_id → crossref_miss + year_mismatch
+    source paper_id (la señal sigue viva para papers que Crossref no resuelve)."""
+    rec = {"paper_id": "smith_1995_foo", "doi": "10.1016/j.watres.2046.1",
+           "title": "T", "year": 2046}
+    issues = compare_with_crossref(rec, fetch=_fetch(None))
+    assert _codes(issues) == {"crossref_miss", "year_mismatch"}
+    ym = [i for i in issues if i["code"] == "year_mismatch"][0]
+    assert ym["suggested_source"] == "paper_id" and ym["suggested"] == 1995
 
 
 def test_crossref_authors_mismatch_incompleto():

@@ -324,6 +324,17 @@ Nivel 1 en 1-2 categorías y afinar `AFFILIATION_TOKENS`; correr Nivel 2
 `title_recover`/`year_mismatch`/`journal_fill`, probar la adopción por campo y
 la adopción masiva de autores en la web privada.
 
+**Ajuste 2026-07-04 (año canónico):** tras datos reales (71/71 `year_mismatch`
+contra paper_id, histograma `crossref−local` = {0:96, 1:20, −7:2, −9:1, −51:1}),
+Crossref pasa a ser la fuente CANÓNICA del año y paper_id queda como fallback
+(solo si Crossref no resuelve o no trae año); los ±1 (print/online) se marcan
+`severity="low"`. Detalle en Mejoras_realizadas.md.
+
+**Deferred — adopción masiva de AÑO (Crossref):** ahora que el año tiene fuente
+única canónica, cabe un botón de adopción masiva de año análogo al de autores
+(preview → confirmar → `update_metadata_fields`) en la sección Crossref de
+`11_Articulos.py`. Sin fecha; valorar tras la calibración del Bloque B.
+
 ### 43. Verificaciones pendientes de la revisión 2026-06-12 — seguimiento
 3_process_corpus.py (canonical_section vs CANONICAL_SECTIONS), ~~1_rename_papers_by_doi.py (nombre
 largo Scopus en descarga)~~ ✅ CUBIERTO 2026-06-13 (renombrado por DOI antes de reprocesar en Coherencia PDF/MD + tab Pendientes), 4_extract_metadata.py (_norm vs 6_Mantenimiento), 5_build_embeddings.py

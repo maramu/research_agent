@@ -57,7 +57,7 @@ ISSUE_CODES = {
     "title_mismatch":          "título local difiere del de Crossref",
     "journal_mismatch":        "revista local difiere de la de Crossref",
     "journal_fill":            "revista ausente: Crossref la aporta",
-    "year_mismatch":           "año local difiere de paper_id/Crossref",
+    "year_mismatch":           "año local difiere de Crossref (canónico; paper_id solo fallback)",
     "authors_mismatch":        "autores locales difieren de Crossref (adopción masiva)",
 }
 
@@ -241,14 +241,29 @@ def _fmt_cr_authors(cr_authors) -> str:
     return "; ".join(parts)
 
 
+def _year_fallback_paper_id(rec: dict) -> List[dict]:
+    """Fallback de año SOLO cuando Crossref no aporta año (miss o year vacío):
+    sugiere el año embebido en paper_id. Mantiene viva la señal para los años
+    corruptos de papers que Crossref no puede confirmar."""
+    stored_year = _year_int(rec.get("year"))
+    pid_year = year_from_paper_id(rec.get("paper_id") or "")
+    if pid_year and pid_year != stored_year:
+        return [{"code": "year_mismatch", "field": "year", "severity": "medium",
+                 "kind": "mismatch", "stored": stored_year, "suggested": pid_year,
+                 "suggested_source": "paper_id",
+                 "msg": f"año local {stored_year} ≠ paper_id {pid_year} "
+                        f"(sin año de Crossref)"}]
+    return []
+
+
 def compare_with_crossref(rec: dict, fetch=None) -> List[dict]:
     """Contrasta un registro contra Crossref (works/<doi>) y devuelve issues
     con {code, field, severity, kind, stored, suggested, ...}. Crossref SUGIERE;
     la escritura la decide el humano en 11_Articulos.
 
     `fetch` inyectable (default utils.crossref.fetch_work) para tests offline.
-    `kind` ∈ {"mismatch","recover","fill"}. Sin DOI válido → []. Miss → un solo
-    issue crossref_miss (info)."""
+    `kind` ∈ {"mismatch","recover","fill"}. Sin DOI válido → []. Miss →
+    crossref_miss (info) + fallback de año por paper_id si aplica."""
     doi = (rec.get("doi") or "").strip()
     if not doi or check_doi_format(rec):   # sin DOI o DOI malformado (Nivel 1)
         return []
@@ -259,7 +274,7 @@ def compare_with_crossref(rec: dict, fetch=None) -> List[dict]:
     if not cr:
         return [{"code": "crossref_miss", "field": "doi", "severity": "info",
                  "kind": "miss", "stored": doi, "suggested": None,
-                 "msg": "DOI no resuelto en Crossref"}]
+                 "msg": "DOI no resuelto en Crossref"}] + _year_fallback_paper_id(rec)
 
     issues: List[dict] = []
 
@@ -303,22 +318,24 @@ def compare_with_crossref(rec: dict, fetch=None) -> List[dict]:
                     "suggested": cr_journal or cr_journal_short,
                     "msg": "revista difiere de Crossref"})
 
-    # ── año ── (paper_id primero; Crossref además/fallback)
+    # ── año ── (Crossref CANÓNICO; paper_id solo fallback si Crossref no trae
+    # año). severity discrimina: ±1 = "low" (desfase print/online, adoptable
+    # pero de bajo valor), resto = "medium". Sigue entrando al sidecar igual
+    # (el flag Crossref va por kind, no por severity).
     stored_year = _year_int(rec.get("year"))
-    pid_year = year_from_paper_id(rec.get("paper_id") or "")
-    if pid_year and pid_year != stored_year:
-        issues.append({
-            "code": "year_mismatch", "field": "year", "severity": "medium",
-            "kind": "mismatch", "stored": stored_year, "suggested": pid_year,
-            "suggested_source": "paper_id",
-            "msg": f"año local {stored_year} ≠ paper_id {pid_year}"})
     cr_year = _year_int(cr.get("year"))
-    if cr_year and cr_year != stored_year and cr_year != pid_year:
-        issues.append({
-            "code": "year_mismatch", "field": "year", "severity": "medium",
-            "kind": "mismatch", "stored": stored_year, "suggested": cr_year,
-            "suggested_source": "crossref",
-            "msg": f"año local {stored_year} ≠ Crossref {cr_year}"})
+    if cr_year:
+        if cr_year != stored_year:
+            delta = abs(cr_year - stored_year) if stored_year is not None else None
+            severity = "low" if delta == 1 else "medium"
+            issues.append({
+                "code": "year_mismatch", "field": "year", "severity": severity,
+                "kind": "mismatch", "stored": stored_year, "suggested": cr_year,
+                "suggested_source": "crossref",
+                "msg": f"año local {stored_year} ≠ Crossref {cr_year}"
+                       + (" (±1, print/online)" if severity == "low" else "")})
+    else:
+        issues.extend(_year_fallback_paper_id(rec))
 
     # ── autores ── (coarse/advisory; universal en este corpus → adopción masiva)
     cr_authors = cr.get("authors") or []
