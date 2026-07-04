@@ -3,6 +3,43 @@
 
 ---
 
+### ✅ Adopción masiva de año acotada a ±1 (severity low); saltos grandes a revisión individual (2026-07-04)
+
+Último ajuste de la política de año con datos reales de 80 `year_mismatch`:
+73 son +1 (low, online-temprano vs print → adopción al alto segura) y 7 son
+|Δ|≥2 (medium) — 6 corruptos que Crossref corrige bien y 1 caso
+legítimo-pero-dudoso (**passalacqua**: local=2023, print=2025, online=2024; el
+2023 local es erróneo pero print=2025 es una elección alta defendible, no
+automática). **Decisión: la adopción MASIVA de año se limita a
+severity=="low" (|Δ|==1); los medium se adoptan uno a uno en el listado
+por-campo**, donde se ve actual vs sugerido antes de decidir (verificado: ese
+listado no filtra por severity, así que los year medium ya salen ahí con botón).
+
+**Cambios:**
+- `utils/metadata_validation.py`: el criterio se extrae al helper puro
+  `year_delta_severity(delta)` (±1 → "low"; resto/None → "medium") y
+  `compare_with_crossref` lo reutiliza (misma regla, cero duplicación; sin
+  cambio de comportamiento del validador).
+- `11_Articulos.py`, bloque (iii): el preview parte en `mass` (|Δ|==1, con
+  tabla + checkbox "solo ±1" + botón de confirmación) y `review` (|Δ|≥2, tabla
+  aparte "**Revisar individualmente** (no incluidos en la adopción masiva)"
+  con paper_id · actual · sugerido · delta, SIN botón en bloque, con nota que
+  remite al listado por-campo). Contador inequívoco: "N paper(s) +1 se
+  actualizarán (adopción masiva) · M con salto grande a revisar aparte · K se
+  saltan". El botón de confirmar solo escribe el lote `mass`. Adopción masiva
+  de autores y por-campo intactas.
+
+**Verificación (casa):** `py_compile` OK; test unitario del helper (deltas
+mixtos {+1, +1, +2, −51} → masivo solo los dos +1; −1 low; None/0 medium).
+Suite completa: **140 passed**.
+
+Bloque B (pciq22): preview → 73 al lote masivo y 7 a "revisar
+individualmente"; confirmar masivo; adoptar los 7 medium por-campo (strevett
+2046→1995, los 2026→, he/rani, passalacqua 2023→2025 a criterio editorial);
+re-correr validador → `year_mismatch` ~0.
+
+---
+
 ### ✅ Año canónico published-print + adopción masiva de año (validación N2) (2026-07-04)
 
 Cierre de la política de año con datos reales de 85 papers. `fetch_work` cogía

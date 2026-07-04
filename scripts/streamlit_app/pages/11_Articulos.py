@@ -41,6 +41,7 @@ from app_utils import (
     list_existing_categories, get_categories_summary,
 )
 from utils.crossref import fetch_work
+from utils.metadata_validation import year_delta_severity
 
 # ── Helpers para DOI ──
 
@@ -849,17 +850,22 @@ if not PUBLIC:
                     load_articles.clear(); _summary_rows.clear()
                     st.rerun()
 
-            # ── (iii) Adopción MASIVA de año por categoría (preview→confirmar) ──
+            # ── (iii) Adopción MASIVA de año por categoría (preview→confirmar).
+            # SOLO entra el lote severity "low" (|delta|==1, online-temprano vs
+            # print): los |delta|>=2 se muestran aparte y se adoptan uno a uno
+            # en el listado por-campo de arriba (caso passalacqua: print alto
+            # defendible pero no automático).
             st.markdown("---")
             st.markdown("**Adopción masiva de año de Crossref** "
-                        "(todos los papers con DOI de esta categoría; año "
-                        "canónico = published-print, el de publicación citable)")
+                        "(papers con DOI de esta categoría; año canónico = "
+                        "published-print; solo desfases ±1 — los saltos "
+                        "grandes se revisan uno a uno)")
             year_prev_key = f"year_preview_{sel}"
 
             if st.button("👁 Previsualizar adopción de año",
                          key=f"year_prev_btn_{sel}"):
                 with st.spinner("Consultando Crossref por DOI…"):
-                    yprev, yskip = [], []
+                    ymass, yreview, yskip = [], [], []
                     for r in all_rows:
                         pid = r["paper_id"]
                         doi = str(r.get("doi") or "").strip()
@@ -883,43 +889,53 @@ if not PUBLIC:
                         if local == cr_year:
                             continue  # ya coincide: nada que adoptar
                         delta = (cr_year - local) if local is not None else None
-                        yprev.append({
-                            "paper_id": pid, "año actual": local,
-                            "año Crossref": int(cr_year), "delta": delta,
-                            "prioridad": ("low (±1 print/online)"
-                                          if delta in (1, -1) else "medium")})
-                    # Corruptos (medium) arriba, ±1 benignos abajo.
-                    yprev.sort(key=lambda p: (p["prioridad"] != "medium",
-                                              p["paper_id"]))
-                    st.session_state[year_prev_key] = {"rows": yprev,
-                                                       "skip": yskip}
+                        entry = {"paper_id": pid, "año actual": local,
+                                 "año Crossref": int(cr_year), "delta": delta}
+                        if year_delta_severity(delta) == "low":
+                            ymass.append(entry)
+                        else:
+                            yreview.append(entry)
+                    ymass.sort(key=lambda p: p["paper_id"])
+                    yreview.sort(key=lambda p: p["paper_id"])
+                    st.session_state[year_prev_key] = {
+                        "mass": ymass, "review": yreview, "skip": yskip}
                 st.rerun()
 
             ydata = st.session_state.get(year_prev_key)
             if ydata:
-                yprev, yskip = ydata["rows"], ydata["skip"]
-                n_med = sum(1 for p in yprev if p["prioridad"] == "medium")
-                st.caption(f"**{len(yprev)}** paper(s) cambiarán de año · "
-                           f"{n_med} con |Δ|≥2 (corruptos, arriba) · "
-                           f"{len(yprev) - n_med} desfase ±1 print/online · "
-                           f"{len(yskip)} se saltan (sin DOI / miss / sin año).")
-                if yprev:
-                    st.dataframe(pd.DataFrame(yprev), hide_index=True,
+                ymass = ydata.get("mass", [])
+                yreview = ydata.get("review", [])
+                yskip = ydata.get("skip", [])
+                st.caption(f"**{len(ymass)}** paper(s) +1 se actualizarán "
+                           f"(adopción masiva) · **{len(yreview)}** con salto "
+                           f"grande a revisar aparte · {len(yskip)} se saltan "
+                           f"(sin DOI / miss / sin año).")
+                if ymass:
+                    st.dataframe(pd.DataFrame(ymass), hide_index=True,
                                  use_container_width=True)
-                    conf_y = st.checkbox("Confirmar adopción de año",
+                    conf_y = st.checkbox("Confirmar adopción de año (solo ±1)",
                                          key=f"conf_year_{sel}")
                     if st.button("✅ Confirmar adopción de año",
                                  key=f"do_year_{sel}", disabled=not conf_y):
                         updates = {p["paper_id"]: {"year": p["año Crossref"]}
-                                   for p in yprev}
+                                   for p in ymass}
                         n = update_metadata_fields(sel, updates)
                         st.success(f"✓ {n} paper(s) con año actualizado "
                                    f"(backup .bak).")
                         st.session_state.pop(year_prev_key, None)
                         load_articles.clear(); _summary_rows.clear()
                         st.rerun()
-                else:
+                elif not yreview:
                     st.caption("Todos los años con fuente Crossref ya coinciden.")
+                if yreview:
+                    st.markdown("**Revisar individualmente** (no incluidos en "
+                                "la adopción masiva)")
+                    st.dataframe(pd.DataFrame(yreview), hide_index=True,
+                                 use_container_width=True)
+                    st.caption("Saltos |Δ|≥2: corrupción probable o caso "
+                               "editorial dudoso. Adóptalos uno a uno desde el "
+                               "listado por-campo de arriba (actual vs "
+                               "sugerido antes de decidir).")
                 if yskip:
                     with st.expander(f"Saltados ({len(yskip)})"):
                         st.dataframe(pd.DataFrame(yskip), hide_index=True,

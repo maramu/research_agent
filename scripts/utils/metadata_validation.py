@@ -241,6 +241,15 @@ def _fmt_cr_authors(cr_authors) -> str:
     return "; ".join(parts)
 
 
+def year_delta_severity(delta) -> str:
+    """Severidad de un year_mismatch según el delta de año (con o sin signo):
+    ±1 → "low" (desfase online-temprano vs published-print, apto para adopción
+    MASIVA); resto (|delta|>=2 o delta desconocido/None) → "medium" (posible
+    corrupción o caso editorial dudoso — passalacqua: local 2023, online 2024,
+    print 2025 —, a adoptar uno a uno en el listado por-campo)."""
+    return "low" if delta is not None and abs(delta) == 1 else "medium"
+
+
 def _year_fallback_paper_id(rec: dict) -> List[dict]:
     """Fallback de año SOLO cuando Crossref no aporta año (miss o year vacío):
     sugiere el año embebido en paper_id. Mantiene viva la señal para los años
@@ -327,7 +336,7 @@ def compare_with_crossref(rec: dict, fetch=None) -> List[dict]:
     if cr_year:
         if cr_year != stored_year:
             delta = abs(cr_year - stored_year) if stored_year is not None else None
-            severity = "low" if delta == 1 else "medium"
+            severity = year_delta_severity(delta)
             issues.append({
                 "code": "year_mismatch", "field": "year", "severity": severity,
                 "kind": "mismatch", "stored": stored_year, "suggested": cr_year,

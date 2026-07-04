@@ -16,6 +16,7 @@ from utils.metadata_validation import (
     validate_category,
     validate_category_crossref,
     validate_record,
+    year_delta_severity,
 )
 
 
@@ -288,6 +289,17 @@ def test_crossref_year_fallback_paper_id_sin_cr_year():
     assert len(issues) == 1
     assert issues[0]["suggested_source"] == "paper_id"
     assert issues[0]["suggested"] == 1995
+
+
+def test_year_delta_severity_acota_lote_masivo():
+    """Criterio compartido validador/adopción masiva: de una lista mixta de
+    deltas solo los ±1 (severity low) entran al lote masivo."""
+    deltas = [1, 1, 2, -51]
+    masivo = [d for d in deltas if year_delta_severity(d) == "low"]
+    assert masivo == [1, 1]
+    assert year_delta_severity(-1) == "low"
+    assert year_delta_severity(None) == "medium"
+    assert year_delta_severity(0) == "medium"  # delta 0 nunca genera issue
 
 
 def test_crossref_miss_no_peta():
