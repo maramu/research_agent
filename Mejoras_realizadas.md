@@ -3,6 +3,54 @@
 
 ---
 
+### ✅ Año canónico published-print + adopción masiva de año (validación N2) (2026-07-04)
+
+Cierre de la política de año con datos reales de 85 papers. `fetch_work` cogía
+el año de `issued`, que es el MÍNIMO de las fechas Crossref (normalmente el
+online temprano): los 65 `year_mismatch` "+1" eran local=año-temprano vs año de
+publicación real. `published-print` es el año citable. Único caso raro
+verificado (1978_wise: print=1978, online=2004 = digitalización tardía) también
+lo resuelve preferir print. **Política: año canónico = Crossref con preferencia
+published-print → published-online → issued → published.** Las diferencias de
+1 año se resuelven a favor de print; las grandes son corrupción y print sigue
+siendo el correcto.
+
+**`utils/crossref.py`** — la extracción de año se encapsula en `_pick_year(message)`
+(testeable): primer `date-parts[0][0]` no nulo en ese orden de preferencia;
+devuelve int o None. Resto de la salida de `fetch_work` intacto.
+
+**`utils/metadata_validation.py`** — sin cambios: la rama de año consume
+`cr["year"]` (no re-parsea fechas), así que hereda la preferencia. La severidad
+low/medium por |delta| sigue teniendo sentido con print: los ±1 restantes
+(local online-temprano vs print) siguen low, los corruptos medium.
+
+**`11_Articulos.py`** — nueva **adopción masiva de AÑO** (solo privada), bloque
+(iii) tras la de autores y con su mismo patrón preview→confirmar:
+- Preview: tabla paper_id · año actual · año Crossref · delta · prioridad para
+  los papers con DOI cuyo `cr.year` ≠ local; corruptos (|Δ|≥2, medium) ARRIBA y
+  ±1 print/online (low) abajo; contador desglosado. Papers sin DOI, miss
+  Crossref o sin año se saltan y se listan en un expander.
+- Checkbox de confirmación → `update_metadata_fields(sel, {pid: {"year": ...}})`
+  por paper (hereda `.bak` + `doi_manual` + `PRESERVE_FIELDS`; sin escritor
+  nuevo) → invalidación de caché + `st.rerun()`. Reutiliza `fetch_work` (caché
+  por DOI). Las adopciones masiva de autores y por-campo NO se tocaron.
+
+**Verificación (casa, sin red):** `py_compile` de los tres ficheros OK. Tests
+nuevos `tests/test_crossref.py` para `_pick_year` con mensajes sintéticos:
+print normal (1990), el Wise (print=1978+online=2004 → 1978, NO online), caída
+a online (sin print), solo issued, clave genérica `published`, sin fechas →
+None. Los tests de severidad por delta de `compare_with_crossref` (delta 0 sin
+issue, ±1 low, grande medium) ya existían y siguen verdes. Suite completa:
+**139 passed**.
+
+Bloque B (pciq22): tras re-correr con `--crossref`, `year_mismatch` seguirá ~71
+(el fix mejora QUÉ año se sugiere, no elimina la discrepancia local≠print) pero
+con el sugerido correcto; preview de adopción masiva (los +1 suben 2014→2015,
+strevett 2046→1995, Wise queda 1978 NO 2004), confirmar, verificar `.bak`, y un
+segundo pase del validador debe dejar `year_mismatch` ~0.
+
+---
+
 ### ✅ Año canónico desde Crossref en validación N2 (paper_id a fallback) (2026-07-04)
 
 Ajuste tras datos reales del primer pase con `--crossref`: los 71/71

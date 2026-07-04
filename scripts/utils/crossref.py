@@ -33,9 +33,15 @@ def _authors(message: dict) -> List[dict]:
     return out
 
 
-def _year(message: dict) -> Optional[int]:
-    """Año desde issued → published-print → published-online. None si no hay."""
-    for key in ("issued", "published-print", "published-online"):
+def _pick_year(message: dict) -> Optional[int]:
+    """Año CANÓNICO con preferencia published-print → published-online →
+    issued → published (primer date-parts[0][0] no nulo).
+
+    published-print es el año de publicación citable. `issued` es el MÍNIMO de
+    las fechas Crossref (suele ser el online temprano: origen de los mismatches
+    +1 local<print), y published-online puede ser una digitalización tardía
+    (caso Wise: print=1978, online=2004) — por eso print va primero."""
+    for key in ("published-print", "published-online", "issued", "published"):
         parts = (message.get(key) or {}).get("date-parts") or []
         if parts and parts[0] and parts[0][0]:
             try:
@@ -74,7 +80,7 @@ def fetch_work(doi: str) -> Optional[dict]:
                 "authors":       _authors(msg),
                 "journal":       (ct[0] or "").strip() if ct else "",
                 "journal_short": (sct[0] or "").strip() if sct else "",
-                "year":          _year(msg),
+                "year":          _pick_year(msg),
             }
     except Exception:
         result = None

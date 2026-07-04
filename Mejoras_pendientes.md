@@ -330,10 +330,11 @@ Crossref pasa a ser la fuente CANÓNICA del año y paper_id queda como fallback
 (solo si Crossref no resuelve o no trae año); los ±1 (print/online) se marcan
 `severity="low"`. Detalle en Mejoras_realizadas.md.
 
-**Deferred — adopción masiva de AÑO (Crossref):** ahora que el año tiene fuente
-única canónica, cabe un botón de adopción masiva de año análogo al de autores
-(preview → confirmar → `update_metadata_fields`) en la sección Crossref de
-`11_Articulos.py`. Sin fecha; valorar tras la calibración del Bloque B.
+**~~Deferred — adopción masiva de AÑO (Crossref)~~ ✅ COMPLETADO 2026-07-04:**
+botón de adopción masiva de año análogo al de autores (preview → confirmar →
+`update_metadata_fields`) en la sección Crossref de `11_Articulos.py`, con año
+canónico published-print (`_pick_year` en `utils/crossref.py`). Detalle en
+Mejoras_realizadas.md.
 
 ### 43. Verificaciones pendientes de la revisión 2026-06-12 — seguimiento
 3_process_corpus.py (canonical_section vs CANONICAL_SECTIONS), ~~1_rename_papers_by_doi.py (nombre

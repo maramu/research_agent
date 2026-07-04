@@ -848,3 +848,79 @@ if not PUBLIC:
                     st.session_state.pop(prev_key, None)
                     load_articles.clear(); _summary_rows.clear()
                     st.rerun()
+
+            # ── (iii) Adopción MASIVA de año por categoría (preview→confirmar) ──
+            st.markdown("---")
+            st.markdown("**Adopción masiva de año de Crossref** "
+                        "(todos los papers con DOI de esta categoría; año "
+                        "canónico = published-print, el de publicación citable)")
+            year_prev_key = f"year_preview_{sel}"
+
+            if st.button("👁 Previsualizar adopción de año",
+                         key=f"year_prev_btn_{sel}"):
+                with st.spinner("Consultando Crossref por DOI…"):
+                    yprev, yskip = [], []
+                    for r in all_rows:
+                        pid = r["paper_id"]
+                        doi = str(r.get("doi") or "").strip()
+                        if not doi:
+                            yskip.append({"paper_id": pid, "motivo": "sin DOI"})
+                            continue
+                        work = fetch_work(doi)
+                        if not work:
+                            yskip.append({"paper_id": pid,
+                                          "motivo": "miss Crossref"})
+                            continue
+                        cr_year = work.get("year")
+                        if not cr_year:
+                            yskip.append({"paper_id": pid,
+                                          "motivo": "sin año Crossref"})
+                            continue
+                        try:
+                            local = int(r.get("year"))
+                        except (TypeError, ValueError):
+                            local = None
+                        if local == cr_year:
+                            continue  # ya coincide: nada que adoptar
+                        delta = (cr_year - local) if local is not None else None
+                        yprev.append({
+                            "paper_id": pid, "año actual": local,
+                            "año Crossref": int(cr_year), "delta": delta,
+                            "prioridad": ("low (±1 print/online)"
+                                          if delta in (1, -1) else "medium")})
+                    # Corruptos (medium) arriba, ±1 benignos abajo.
+                    yprev.sort(key=lambda p: (p["prioridad"] != "medium",
+                                              p["paper_id"]))
+                    st.session_state[year_prev_key] = {"rows": yprev,
+                                                       "skip": yskip}
+                st.rerun()
+
+            ydata = st.session_state.get(year_prev_key)
+            if ydata:
+                yprev, yskip = ydata["rows"], ydata["skip"]
+                n_med = sum(1 for p in yprev if p["prioridad"] == "medium")
+                st.caption(f"**{len(yprev)}** paper(s) cambiarán de año · "
+                           f"{n_med} con |Δ|≥2 (corruptos, arriba) · "
+                           f"{len(yprev) - n_med} desfase ±1 print/online · "
+                           f"{len(yskip)} se saltan (sin DOI / miss / sin año).")
+                if yprev:
+                    st.dataframe(pd.DataFrame(yprev), hide_index=True,
+                                 use_container_width=True)
+                    conf_y = st.checkbox("Confirmar adopción de año",
+                                         key=f"conf_year_{sel}")
+                    if st.button("✅ Confirmar adopción de año",
+                                 key=f"do_year_{sel}", disabled=not conf_y):
+                        updates = {p["paper_id"]: {"year": p["año Crossref"]}
+                                   for p in yprev}
+                        n = update_metadata_fields(sel, updates)
+                        st.success(f"✓ {n} paper(s) con año actualizado "
+                                   f"(backup .bak).")
+                        st.session_state.pop(year_prev_key, None)
+                        load_articles.clear(); _summary_rows.clear()
+                        st.rerun()
+                else:
+                    st.caption("Todos los años con fuente Crossref ya coinciden.")
+                if yskip:
+                    with st.expander(f"Saltados ({len(yskip)})"):
+                        st.dataframe(pd.DataFrame(yskip), hide_index=True,
+                                     use_container_width=True)
