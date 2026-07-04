@@ -3,6 +3,47 @@
 
 ---
 
+### ✅ Fix UI: renderizar listado de discrepancias por-campo en validación Crossref (11_Articulos) (2026-07-04)
+
+El punto 1.E.i del Nivel 2 quedó sin renderizar en la práctica: el bucle bajo el
+checkbox "⚠ Solo con discrepancias" hacía `continue` para todo paper sin
+sugerencias Crossref adoptables, así que con un sidecar generado SIN `--crossref`
+(o con papers que solo tienen issues locales) no se pintaba NADA — el checkbox
+filtraba sobre un listado inexistente. La adopción masiva de autores (1.E.ii) no
+se tocó.
+
+**Cambios (solo `scripts/streamlit_app/pages/11_Articulos.py`, sección Crossref):**
+- Un expander por **cada** paper del sidecar (ON) o de la categoría (OFF; los que
+  no están en el sidecar muestran "sin issues en el último pase"). Cabecera con
+  `paper_id`, título y contadores (issues locales · sugerencias Crossref).
+- Por issue Crossref adoptable (`kind ∈ {recover, mismatch, fill}`, campo
+  título/revista/año): fila campo · actual · sugerido (+fuente) · botón "Adoptar"
+  → `update_metadata_fields(sel, {pid: {field: val}})` (hereda `.bak` +
+  `doi_manual` + `PRESERVE_FIELDS`; sin escritor nuevo). Para `year` con dos
+  fuentes (paper_id y crossref) llegan dos issues → dos botones etiquetados.
+  Tras adoptar: `load_articles.clear()` + `_summary_rows.clear()` + `st.rerun()`
+  (el paper sigue en el sidecar hasta re-correr `validate_metadata.py`; la web
+  NO reescribe el sidecar).
+- `authors_mismatch` NO se adopta campo a campo: caption informativo que remite
+  a la adopción masiva de abajo (un solo camino de escritura de autores).
+- Issues locales Nivel 1 (`authors_affiliation`, `authors_glued` info, año
+  implausible…) listados como **diagnóstico de solo lectura** (code, severidad,
+  msg).
+- Degradación elegante: si la fila no trae bloque `crossref` (sidecar viejo sin
+  `--crossref`), se muestran los issues locales igualmente + aviso discreto
+  "Re-ejecuta el validador con `--crossref` para ver sugerencias de Crossref".
+  No peta si falta la clave.
+- Cosmético: contador "N paper(s) marcados para revisar en esta categoría" (antes
+  "en el sidecar").
+
+**Verificación (casa):** `py_compile` OK; suite completa 129 passed (no se tocó
+lógica de validación). Pendiente BLOQUE B en pciq22: marcar el checkbox, adoptar
+título del Corbellini (recover) y un año corrupto (2046→paper_id), verificar
+`.bak` + `PRESERVE_FIELDS`, y re-correr `validate_metadata.py --crossref` para
+ver bajar el contador.
+
+---
+
 ### ✅ Validación de metadata — Nivel 2 (Crossref por DOI) (2026-07-04)
 
 Capa de contraste con Crossref sobre el Nivel 1. Principio: **Crossref SUGIERE,

@@ -726,23 +726,39 @@ if not PUBLIC:
                 "⚠ Solo con discrepancias (del sidecar)", value=True,
                 key=f"solo_disc_{sel}")
 
-            # ── (i) Adopción POR CAMPO desde el bloque crossref del sidecar ──
+            # ── (i) Listado por-campo del sidecar (adopción individual) ──
             all_rows = load_articles(sel, _meta_mtime(sel))
             by_pid = {r["paper_id"]: r for r in all_rows}
             pids = list(sidecar.keys()) if solo_disc else [r["paper_id"] for r in all_rows]
-            st.caption(f"{len(sidecar)} paper(s) en el sidecar.")
+            st.caption(f"{len(sidecar)} paper(s) marcados para revisar en esta categoría.")
 
             for pid in pids:
                 row = sidecar.get(pid)
+                title_txt = (by_pid.get(pid, {}).get("title")
+                             or (row or {}).get("title") or pid)[:80]
                 if not row:
+                    # Checkbox OFF: paper de la categoría sin issues en el sidecar.
+                    with st.expander(f"`{pid}` — {title_txt}"):
+                        st.caption("Sin issues en el último pase del validador.")
                     continue
-                cr_issues = (row.get("crossref") or {}).get("issues", [])
-                suggests = [i for i in cr_issues if i.get("suggested")
-                            and i.get("kind") in ("mismatch", "recover", "fill")]
-                if not suggests:
-                    continue
-                title_txt = (by_pid.get(pid, {}).get("title") or row.get("title") or pid)[:80]
-                with st.expander(f"`{pid}` — {title_txt}"):
+
+                local_issues = row.get("issues") or []
+                cr_block = row.get("crossref")  # None → pase sin --crossref
+                cr_issues = (cr_block or {}).get("issues") or []
+                # Adoptables campo a campo: title/journal/year con sugerencia.
+                # year puede venir por duplicado (fuente paper_id y crossref):
+                # cada issue lleva su propio botón etiquetado con la fuente.
+                suggests = [i for i in cr_issues
+                            if i.get("suggested")
+                            and i.get("kind") in ("mismatch", "recover", "fill")
+                            and i.get("field") in ("title", "journal", "year")]
+                authors_iss = [i for i in cr_issues
+                               if i.get("code") == "authors_mismatch"]
+
+                label = (f"`{pid}` — {title_txt}  "
+                         f"({len(local_issues)} local(es) · "
+                         f"{len(suggests)} sugerencia(s) Crossref)")
+                with st.expander(label):
                     for k, iss in enumerate(suggests):
                         field = iss["field"]
                         src = iss.get("suggested_source", "crossref")
@@ -750,12 +766,8 @@ if not PUBLIC:
                             f"**{field}** ({iss['code']}, fuente {src})  \n"
                             f"- actual: `{iss.get('stored')}`  \n"
                             f"- sugerido: `{iss.get('suggested')}`")
-                        if field == "authors":
-                            st.caption("Los autores se reparan con la adopción masiva "
-                                       "de abajo, no campo a campo.")
-                            continue
                         if st.button(f"Adoptar {field} ({src})",
-                                     key=f"adopt_{sel}_{pid}_{k}"):
+                                     key=f"adopt_{sel}_{pid}_{field}_{src}_{k}"):
                             val = iss["suggested"]
                             if field == "year":
                                 val = int(val) if str(val).isdigit() else val
@@ -763,6 +775,24 @@ if not PUBLIC:
                             st.success(f"✓ {field} adoptado (backup .bak).")
                             load_articles.clear(); _summary_rows.clear()
                             st.rerun()
+
+                    if authors_iss:
+                        st.caption("↳ Autores difieren de Crossref — se reparan con "
+                                   "la adopción masiva de abajo, no campo a campo.")
+                    if cr_block is not None and not cr_block.get("fetched", True):
+                        st.caption("↳ DOI no resuelto en Crossref (miss).")
+
+                    if local_issues:
+                        st.markdown("**Diagnóstico local (Nivel 1)** — solo lectura:")
+                        for iss in local_issues:
+                            st.markdown(f"- `{iss.get('code')}` "
+                                        f"({iss.get('severity')}): {iss.get('msg')}")
+
+                    if cr_block is None:
+                        st.caption("ℹ Re-ejecuta el validador con `--crossref` "
+                                   "para ver sugerencias de Crossref.")
+                    elif not suggests and not authors_iss and not local_issues:
+                        st.caption("Sin discrepancias accionables en este pase.")
 
             # ── (ii) Adopción MASIVA de autores por categoría (preview→confirmar) ──
             st.markdown("---")
