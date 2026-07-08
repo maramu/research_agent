@@ -40,8 +40,8 @@ Parámetros CLI:
     --input-dir DIR       Carpeta alternativa de PDFs (sobreescribe la ruta por defecto)
 
 Variables de entorno (config/.env):
-    GROBID_URL            URL del servidor GROBID (defecto: http://pciq22.uca.es:8070)
-    OLLAMA_HOST           URL del servidor Ollama  (defecto: http://pciq22.uca.es:11434)
+    GROBID_URL            URL del servidor GROBID (defecto: http://127.0.0.1:8070)
+    OLLAMA_HOST           URL del servidor Ollama  (defecto: http://127.0.0.1:11435)
 
 Dependencias:
     requests, python-dotenv, xml.etree.ElementTree (stdlib)
@@ -80,8 +80,8 @@ except Exception:
 TEI_NS = {"tei": "http://www.tei-c.org/ns/1.0"}
 
 DEFAULT_BASE   = "/Volumes/research/categorias"
-DEFAULT_GROBID = os.getenv("GROBID_URL", "http://pciq22.uca.es:8070")
-OLLAMA_HOST    = os.getenv("OLLAMA_HOST", "http://pciq22.uca.es:11434")
+DEFAULT_GROBID = os.getenv("GROBID_URL", "http://127.0.0.1:8070")
+OLLAMA_HOST    = os.getenv("OLLAMA_HOST", "http://127.0.0.1:11435")
 
 VALID_PHASES = [
     "biological_gas_odor_treatment",

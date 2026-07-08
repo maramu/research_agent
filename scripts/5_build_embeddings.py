@@ -53,7 +53,7 @@ Parámetros CLI:
     --force               Re-indexa todo desde cero aunque ya exista el índice
 
 Variables de entorno (config/.env):
-    OLLAMA_HOST           URL del servidor Ollama (defecto: http://pciq22.uca.es:11434)
+    OLLAMA_HOST           URL del servidor Ollama (defecto: http://127.0.0.1:11435)
 
 Dependencias:
     faiss-cpu, numpy, ollama, python-dotenv
@@ -255,7 +255,7 @@ def main():
 
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    ollama_host = os.getenv("OLLAMA_HOST", "http://pciq22.uca.es:11434")
+    ollama_host = os.getenv("OLLAMA_HOST", "http://127.0.0.1:11435")
     client      = ollama.Client(host=ollama_host)
 
     print(f"Project    : {args.project}")

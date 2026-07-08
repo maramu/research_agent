@@ -47,7 +47,7 @@ from utils.constants import OLLAMA_MODEL_EMBED
 from utils.retrieval import dense_rank, bm25_rank, rrf_fuse, pool_size, build_bm25
 
 DEFAULT_BASE = "/Volumes/research/categorias"
-OLLAMA_HOST  = os.getenv("OLLAMA_HOST", "http://pciq22.uca.es:11434")
+OLLAMA_HOST  = os.getenv("OLLAMA_HOST", "http://127.0.0.1:11435")
 
 
 # ───────────────────────────────────────────────────────────────────────────

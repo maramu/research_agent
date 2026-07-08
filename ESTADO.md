@@ -11,7 +11,7 @@
 | Config | `/Volumes/Disco/proyectos/research_agent/config/` |
 | Venv | `~/venvs/rag_papers` (Python 3.13 via Homebrew /opt/homebrew/bin/python3.13) |
 | GROBID | Docker (ARM64 nativo), imagen `grobid/grobid:0.9.0-crf`, compose en `~/grobid-compose.yml` |
-| Ollama | `http://pciq22.uca.es:11434` |
+| Ollama | Solo loopback (`127.0.0.1:11435`); remoto vía proxy Caddy con Bearer en `http://pciq22.uca.es:11434` — ver [Ollama — instalación en pciq22](#ollama--instalación-en-pciq22) |
 | Streamlit | `http://<ip-pciq22>:8501` — servicio launchd 24/7 en pciq22 |
 | GitHub | `https://github.com/maramu/research_agent` |
 
@@ -442,9 +442,9 @@ launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.research_agent.strea
 ## Configuración (config/.env)
 
 ```
-OLLAMA_HOST=http://pciq22.uca.es:11434
-OLLAMA_API_KEY=<clave>
-GROBID_URL=http://pciq22.uca.es:8070
+OLLAMA_HOST=http://127.0.0.1:11435
+OLLAMA_API_KEY=<clave — también token Bearer del proxy Caddy, ver más abajo>
+GROBID_URL=http://127.0.0.1:8070
 GROBID_TIMEOUT=600
 UNPAYWALL_EMAIL=martin.ramirez@uca.es
 ELSEVIER_API_KEY=<clave>
@@ -477,7 +477,8 @@ El backlog vivo y el orden de prioridad están en `Mejoras_pendientes.md`. El hi
 
 ## Notas importantes
 
-- Ollama en `pciq22.uca.es` solo accesible desde red UCA o VPN. Las consultas RAG con Anthropic/OpenAI NO requieren VPN UCA (útil cuando la VPN cae)
+- **Ollama y GROBID securizados (2026-07-08):** Ollama ya no escucha en red — solo `127.0.0.1:11435`. El puerto público `11434` lo sirve un proxy Caddy (`deployment/Caddyfile.ollama` + `deployment/com.research_agent.caddy_ollama.plist`) que exige `Authorization: Bearer <OLLAMA_API_KEY>` y devuelve 401 sin él. GROBID pasó a `127.0.0.1:8070` (sin proxy — nada remoto lo usa). Ver detalle y diagrama en [Ollama — instalación en pciq22](#ollama--instalación-en-pciq22) y `deployment/README.md`.
+- Ollama en `pciq22.uca.es` solo accesible desde red UCA o VPN **y** con el token Bearer correcto (antes solo dependía de la red). Las consultas RAG con Anthropic/OpenAI NO requieren VPN UCA (útil cuando la VPN cae)
 - `mxbai-embed-large` NO es compatible con los chunks actuales (512 ctx vs ~1500 chars por chunk). Usar `bge-m3` (8192 ctx) como alternativa a nomic
 - Los registros de coste RAG se guardan en `/Volumes/research/metadatos/rag_usage/rag_usage_YYYY-MM.jsonl`
 - Descargas Elsevier requieren VPN activa (autenticación por IP institucional)
@@ -547,8 +548,9 @@ UCA) porque:
 - **Binario:** `/usr/local/bin/ollama`
 - **Libs:** `/usr/local/lib/ollama/` (llama-server, llama-quantize, libggml-*.dylib)
 - **Modelos:** `~/.ollama/models/`
-- **Servicio:** LaunchAgent `~/Library/LaunchAgents/com.martin.ollama.plist` (`OLLAMA_HOST=0.0.0.0:11434`)
+- **Servicio:** LaunchAgent `~/Library/LaunchAgents/com.martin.ollama.plist` (`OLLAMA_HOST=127.0.0.1:11435`, `OLLAMA_ORIGINS=app://obsidian.md*` para CORS del plugin Obsidian)
 - **Logs:** `~/ollama.launchd.log` / `~/ollama.launchd.err`
+- Existen también los servicios `com.ollama.ollama` / `homebrew.mxcl.ollama` cargados en el sistema pero **inactivos** (status 78, no arrancan binario) — no se han tocado, no interfieren.
 
 **Para actualizar:**
 1. Descargar `https://github.com/ollama/ollama/releases/download/vX.Y.Z/ollama-darwin.tgz`
@@ -558,5 +560,63 @@ UCA) porque:
 
 ⚠️ Los modelos en `~/.ollama/models/` no se tocan al actualizar.
 ⚠️ Evitar abrir Ollama.app — interfiere con el servicio headless.
+
+#### Securización (2026-07-08) — autenticación real, no solo perímetro de red
+
+Antes, Ollama (`0.0.0.0:11434`) y GROBID (`0.0.0.0:8070`) estaban expuestos a
+toda la red UCA sin ninguna autenticación. Arquitectura actual:
+
+```
+Cliente remoto ──Bearer token──▶ Caddy :11434 (0.0.0.0) ──▶ Ollama 127.0.0.1:11435
+                                  (401 si falta/no coincide el token)
+
+Cliente local (pipeline, Streamlit 8501/8502) ────────────▶ Ollama 127.0.0.1:11435 (directo, sin token)
+
+GROBID: 127.0.0.1:8070 únicamente — sin proxy, nada remoto lo usa
+```
+
+- **Ollama**: solo loopback (`127.0.0.1:11435`, ver plist arriba). Ya no acepta
+  conexiones de red directas.
+- **GROBID**: bind cambiado en `~/grobid-compose.yml` a `127.0.0.1:8070:8070`.
+- **Caddy** (`brew install caddy`, ya instalado — v2.11.4): escucha en
+  `0.0.0.0:11434` (mismo puerto público de siempre, los clientes remotos no
+  cambian URL) y hace `reverse_proxy` a `127.0.0.1:11435` solo si la petición
+  trae `Authorization: Bearer <OLLAMA_API_KEY>`; si no, `401`. Reenvía la
+  cabecera `Origin` intacta (comportamiento por defecto de Caddy), así que
+  `OLLAMA_ORIGINS` sigue gestionando CORS para Obsidian sin cambios.
+  - Config versionada: `deployment/Caddyfile.ollama` (sin secretos).
+  - Servicio: `deployment/com.research_agent.caddy_ollama.plist` (patrón
+    Streamlit — `PATH` fijado a mano, logs en `~/Library/Logs/research_agent/`).
+  - El token vive en `config/.env` (`OLLAMA_API_KEY`) **y** en
+    `config/.env.caddy_ollama` (fichero mínimo aparte, no versionado, que es
+    el que realmente carga el proceso Caddy vía `--envfile` — así Caddy no ve
+    el resto de secretos del proyecto).
+  - **Nota**: en esta máquina ya corría otro Caddy manual (proyecto
+    `word-pdf-to-md`, puerto 8503, admin API en `127.0.0.1:2019`). El Caddyfile
+    de Ollama usa `admin off` para no chocar con él.
+- **Clientes locales** (scripts del pipeline, Streamlit): usan
+  `OLLAMA_HOST=http://127.0.0.1:11435` / `GROBID_URL=http://127.0.0.1:8070` en
+  `config/.env`, sin token — nunca pasan por Caddy.
+- **Cliente remoto** (p.ej. plugin Ollama de Obsidian): URL sin cambios
+  (`http://pciq22.uca.es:11434`) + cabecera `Authorization: Bearer <token>`.
+
+**Rotar el token:**
+```bash
+NEW_TOKEN=$(openssl rand -hex 32)
+# Actualizar OLLAMA_API_KEY=$NEW_TOKEN en config/.env Y en config/.env.caddy_ollama
+launchctl kickstart -k gui/$(id -u)/com.research_agent.caddy_ollama
+# Actualizar el token en los clientes remotos (Obsidian, etc.)
+```
+
+Detalle completo de instalación/rotación en `deployment/README.md`.
+
+**Pendiente — Hermes (pausado por auditoría, NO reactivar sin más contexto):**
+si `~/hermes-docker` apuntaba a Ollama por `http://host.docker.internal:11434`
+(o similar), al reactivarse deberá añadir la cabecera `Authorization: Bearer
+<token>`, porque ese endpoint ahora exige autenticación (ya no es acceso
+directo sin auth). Un contenedor Docker no alcanza el loopback del host en
+`127.0.0.1:11435` — por eso debe seguir pasando por Caddy (`:11434`) con el
+token, y no se le puede simplemente apuntar al puerto interno. No se ha
+tocado `~/.hermes` ni `~/hermes-docker` en este cambio.
 
 - **Identidad git:** `user.email = martinconil@gmail.com` / `user.name = Martín Ramírez` configurada globalmente en ambas máquinas (2026-06-23). El NAS (`/Volumes/Disco/`) hereda la identidad del entorno desde el que se ejecuta git — usar siempre desde pciq22 o con la global correcta.

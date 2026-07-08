@@ -8,6 +8,7 @@ __pycache__/
 
 # Secrets / entorno
 .env
+config/.env.caddy_ollama
 
 # macOS
 .DS_Store

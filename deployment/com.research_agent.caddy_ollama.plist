@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.research_agent.caddy_ollama</string>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/martinramirez/proyectos/research_agent</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/opt/homebrew/bin/caddy</string>
+        <string>run</string>
+        <string>--config</string>
+        <string>/Users/martinramirez/proyectos/research_agent/deployment/Caddyfile.ollama</string>
+        <string>--adapter</string>
+        <string>caddyfile</string>
+        <string>--envfile</string>
+        <string>/Users/martinramirez/proyectos/research_agent/config/.env.caddy_ollama</string>
+    </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>HOME</key>
+        <string>/Users/martinramirez</string>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>/Users/martinramirez/Library/Logs/research_agent/caddy_ollama.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/Users/martinramirez/Library/Logs/research_agent/caddy_ollama.err.log</string>
+
+    <key>ThrottleInterval</key>
+    <integer>5</integer>
+</dict>
+</plist>

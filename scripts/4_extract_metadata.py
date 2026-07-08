@@ -50,8 +50,8 @@ Parámetros CLI:
     --source-type TYPE    Fuerza el campo source_type (scopus|inbox|adhoc|manual)
 
 Variables de entorno (config/.env):
-    OLLAMA_HOST           URL del servidor Ollama (defecto: http://pciq22.uca.es:11434)
-    GROBID_URL            URL del servidor GROBID  (defecto: http://pciq22.uca.es:8070)
+    OLLAMA_HOST           URL del servidor Ollama (defecto: http://127.0.0.1:11435)
+    GROBID_URL            URL del servidor GROBID  (defecto: http://127.0.0.1:8070)
 
 Dependencias:
     xml.etree.ElementTree (stdlib), python-dotenv

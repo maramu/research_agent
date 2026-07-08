@@ -41,7 +41,7 @@ Parámetros CLI:
     --no-ollama           Usa solo keywords, sin llamar a Ollama
 
 Variables de entorno (config/.env):
-    OLLAMA_HOST           URL del servidor Ollama (defecto: http://pciq22.uca.es:11434)
+    OLLAMA_HOST           URL del servidor Ollama (defecto: http://127.0.0.1:11435)
 
 Dependencias:
     pymupdf (fitz), ollama, pyyaml, python-dotenv

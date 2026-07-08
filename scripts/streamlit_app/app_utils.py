@@ -66,8 +66,8 @@ METADATOS_DIR   = NAS_ROOT / "metadatos"
 DOI_MANUAL_XLSX = METADATOS_DIR / "doi_manual.xlsx"
 RAG_USAGE_DIR   = METADATOS_DIR / "rag_usage"  # uno por mes: rag_usage_YYYY-MM.jsonl
 
-OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://pciq22.uca.es:11434")
-GROBID_URL  = os.getenv("GROBID_URL",  "http://pciq22.uca.es:8070")
+OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://127.0.0.1:11435")
+GROBID_URL  = os.getenv("GROBID_URL",  "http://127.0.0.1:8070")
 
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 OPENAI_API_KEY    = os.getenv("OPENAI_API_KEY", "")

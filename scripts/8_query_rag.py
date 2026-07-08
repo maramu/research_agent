@@ -31,7 +31,7 @@ Parámetros CLI:
     --paper PAPER_ID      Filtrar por paper_id (coincidencia parcial)
 
 Variables de entorno (config/.env):
-    OLLAMA_HOST           URL del servidor Ollama (defecto: http://pciq22.uca.es:11434)
+    OLLAMA_HOST           URL del servidor Ollama (defecto: http://127.0.0.1:11435)
 
 Dependencias:
     faiss-cpu, numpy, ollama, python-dotenv
@@ -136,7 +136,7 @@ def main():
     if not index_path.exists():
         raise SystemExit(f"No existe index.faiss en: {emb_dir}")
 
-    ollama_host = os.getenv("OLLAMA_HOST", "http://pciq22.uca.es:11434")
+    ollama_host = os.getenv("OLLAMA_HOST", "http://127.0.0.1:11435")
     client      = ollama.Client(host=ollama_host, timeout=120)
 
     index = faiss.read_index(str(index_path))

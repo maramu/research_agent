@@ -1,0 +1,14 @@
+{
+	admin off
+	auto_https off
+}
+
+:11434 {
+	@unauthorized not header Authorization "Bearer {env.OLLAMA_API_KEY}"
+	handle @unauthorized {
+		respond "Unauthorized" 401
+	}
+	handle {
+		reverse_proxy 127.0.0.1:11435
+	}
+}
