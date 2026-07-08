@@ -4,10 +4,19 @@
 }
 
 :11434 {
+	# Preflight CORS (OPTIONS): nunca lleva Authorization por diseño del
+	# estándar — se proxea a Ollama sin exigir token para que responda él
+	# el CORS (OLLAMA_ORIGINS). No ejecuta nada ni devuelve datos.
+	@preflight method OPTIONS
+	handle @preflight {
+		reverse_proxy 127.0.0.1:11435
+	}
+
 	@unauthorized not header Authorization "Bearer {env.OLLAMA_API_KEY}"
 	handle @unauthorized {
 		respond "Unauthorized" 401
 	}
+
 	handle {
 		reverse_proxy 127.0.0.1:11435
 	}
