@@ -584,6 +584,15 @@ GROBID: 127.0.0.1:8070 únicamente — sin proxy, nada remoto lo usa
   trae `Authorization: Bearer <OLLAMA_API_KEY>`; si no, `401`. Reenvía la
   cabecera `Origin` intacta (comportamiento por defecto de Caddy), así que
   `OLLAMA_ORIGINS` sigue gestionando CORS para Obsidian sin cambios.
+  - **Fix preflight CORS (2026-07-08):** el plugin Ollama de Obsidian dejó de
+    funcionar tras el despliegue inicial porque el preflight `OPTIONS` del
+    navegador/Electron nunca lleva `Authorization` (no forma parte del
+    estándar CORS) — Caddy lo bloqueaba con `401` antes de que Ollama pudiera
+    responder con las cabeceras CORS (`OLLAMA_ORIGINS`). Se añadió un matcher
+    `@preflight method OPTIONS` que reenvía esas peticiones a Ollama **sin
+    exigir token** (no ejecuta nada ni devuelve datos, solo permite completar
+    el handshake CORS); el resto de métodos siguen exigiendo Bearer igual que
+    antes. Verificado con el plugin funcionando. Commit `b281961`.
   - Config versionada: `deployment/Caddyfile.ollama` (sin secretos).
   - Servicio: `deployment/com.research_agent.caddy_ollama.plist` (patrón
     Streamlit — `PATH` fijado a mano, logs en `~/Library/Logs/research_agent/`).

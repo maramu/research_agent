@@ -3,6 +3,68 @@
 
 ---
 
+### ✅ Securización Ollama/GROBID — autenticación Bearer real vía Caddy (2026-07-08)
+
+Ollama (`*:11434`) y GROBID (`*:8070`) estaban expuestos a toda la red UCA sin
+ninguna autenticación (solo perímetro de red UCA/VPN). Se pidió autenticación
+real, no solo de red.
+
+**Arquitectura nueva** (detalle y diagrama en `ESTADO.md` →
+"Ollama — instalación en pciq22" y `deployment/README.md`):
+- Ollama pasa a escuchar solo en loopback `127.0.0.1:11435`
+  (`~/Library/LaunchAgents/com.martin.ollama.plist`, fuera del repo).
+- Caddy (`brew`, ya instalado) ocupa el puerto público `0.0.0.0:11434` y hace
+  `reverse_proxy` a Ollama solo si la petición trae
+  `Authorization: Bearer <token>`; si no, `401`. Los clientes remotos
+  conservan la misma URL, solo añaden la cabecera.
+- GROBID pasa a `127.0.0.1:8070:8070` (bind en `~/grobid-compose.yml`, fuera
+  del repo) — nada remoto lo usa, no necesita proxy.
+- Clientes locales (pipeline, Streamlit 8501/8502) hablan directo con
+  `127.0.0.1:11435` / `127.0.0.1:8070`, sin token. Se actualizaron los
+  defaults hardcodeados a `pciq22.uca.es:11434/8070` en `run_eval.py`,
+  `5_build_embeddings.py`, `3b_summarize.py`, `pool_candidates.py`,
+  `4_extract_metadata.py`, `8_query_rag.py`, `2_screen_pdfs.py`,
+  `3_process_corpus.py`, `streamlit_app/app_utils.py`.
+- Nuevo en el repo: `deployment/Caddyfile.ollama`,
+  `deployment/com.research_agent.caddy_ollama.plist` (mismo patrón que los
+  plists de Streamlit — `PATH` fijado a mano, logs en
+  `~/Library/Logs/research_agent/`), `deployment/README.md` (reinstalación,
+  rotación de token, qué configura un cliente remoto),
+  `config/.env.caddy_ollama.example`.
+- El token Bearer reutiliza `OLLAMA_API_KEY` (antes no se validaba en ningún
+  sitio). Vive en `config/.env` **y** en `config/.env.caddy_ollama` — un
+  fichero mínimo aparte (no versionado) que es el que realmente carga el
+  proceso Caddy vía `--envfile`, para que Caddy no cargue en su entorno el
+  resto de secretos del proyecto (OpenAI, Anthropic, SMTP...).
+- Hallazgo durante el despliegue: ya corría otro Caddy manual en la máquina
+  (proyecto `word-pdf-to-md`, puerto 8503, admin API en `127.0.0.1:2019`) —
+  el Caddyfile de Ollama usa `admin off` para no chocar con él.
+
+**Verificado:** `curl 127.0.0.1:11435/api/tags` → 200; `curl localhost:11434`
+sin token → 401; con token → 200; `lsof` confirma `11435`/`8070` solo en
+`127.0.0.1` y `11434` (Caddy) en `*`; embedding real vía `bge-m3` a través del
+proxy loopback OK; GROBID `/api/isalive` → 200; el Caddy de `word-pdf-to-md`
+siguió vivo (no se rompió).
+
+**Fix de seguimiento (mismo día):** el plugin Ollama de Obsidian dejó de
+funcionar tras el despliegue — el preflight `OPTIONS` del CORS nunca lleva
+`Authorization` (estándar), así que Caddy lo bloqueaba con `401` antes de que
+Ollama pudiera responder con las cabeceras CORS (`OLLAMA_ORIGINS`). Se añadió
+un matcher `@preflight method OPTIONS` en `deployment/Caddyfile.ollama` que
+reenvía esas peticiones a Ollama sin exigir token (no ejecuta nada ni
+devuelve datos); el resto de métodos siguen exigiendo Bearer. Verificado con
+el plugin funcionando.
+
+**Pendiente anotado (no accionado):** si Hermes (pausado por auditoría) se
+reactiva y su config apuntaba a Ollama directo, deberá pasar por Caddy
+(`host.docker.internal:11434`, no `127.0.0.1:11435` — un contenedor no
+alcanza el loopback del host) y añadir la cabecera Bearer. No se ha tocado
+`~/.hermes` ni `~/hermes-docker`.
+
+Commits: `ca05f97` (arquitectura Caddy/loopback) y `b281961` (fix preflight CORS).
+
+---
+
 ### ✅ Botón de re-validación de categoría desde la web (11_Articulos) (2026-07-04)
 
 Hasta ahora el sidecar `validation_<cat>.jsonl` solo se regeneraba corriendo

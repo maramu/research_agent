@@ -418,6 +418,14 @@ Residuales:
 - [ ] Migración config v30→31 pendiente (con backup, fuera de sesión).
 - [ ] **Hardening SSH en pciq22** (`PasswordAuthentication no`) — aviso del security
       audit de Hermes; prioridad media si solo se accede por VPN.
+- [~] *(en pausa mientras Hermes esté parado)* Ollama y GROBID se securizaron
+      con autenticación Bearer real (2026-07-08, ver `ESTADO.md` y
+      `Mejoras_realizadas.md`): Ollama ya no acepta conexiones directas de
+      red, solo `127.0.0.1:11435` + proxy Caddy en `:11434` con token. Si la
+      config de Hermes apuntaba a Ollama directo, al reactivarlo deberá
+      apuntar a `http://host.docker.internal:11434` (Caddy, no el puerto
+      loopback — un contenedor no lo alcanza) **con** cabecera
+      `Authorization: Bearer <token>`.
 - [~] *(en pausa mientras Hermes esté parado)* Aplicar plist ingesta 04:00 en
       pciq22 (commit en repo hecho; falta `git pull` + `cp deployment/... ~/Library/LaunchAgents/` +
       `launchctl bootout/bootstrap`).
