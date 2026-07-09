@@ -498,8 +498,27 @@ confirmación humana) — detalle en `Mejoras_realizadas.md`. Pendiente:
   retrieval semántico (exponer el RAG como una tool más) para flujos
   "consulta semántica → síntesis → nota en Inbox" en una sola conversación.
   Hoy están separados a propósito (ver decisión en `Mejoras_realizadas.md`).
-- **Batería de consultas RAG desatendida (`run_rag_batch.py`):** script
+- ~~**Batería de consultas RAG desatendida (`run_rag_batch.py`):** script
   headless que, dado un YAML de preguntas, escribe un `.md` por pregunta con
   respuesta sintetizada + chunks recuperados, reutilizando código de
   producción sin tocar `2_RAG.py`. (Prompt ya redactado, pendiente de
-  ejecutar.)
+  ejecutar.)~~ — ✅ **COMPLETADO 2026-07-09/10**: CLI `run_rag_batch.py` +
+  página Streamlit `13_RAG_multiple.py` (solo app privada) + `synth_timeout`
+  configurable. Detalle en `Mejoras_realizadas.md`. Pendiente de ejecución
+  real en pciq22 (solo verificado en casa: `py_compile`/`grep` estáticos).
+  Deuda y trabajo futuro derivados:
+  - **Deuda de consolidación (BAJA prioridad):** la plantilla `system_content`
+    de síntesis vive DUPLICADA en `run_rag_batch.py` (función `synthesize`) y
+    en `2_RAG.py` (`synthesize_answer`) — la página `13_RAG_multiple.py` no
+    añade una tercera copia porque reutiliza `run_batch()`. Candidata a
+    extraer a un `utils/synthesis.py` compartido; misma clase de problema que
+    los items 45/50 (utilidades duplicadas entre CLI/Streamlit), pareja
+    distinta. No urge — importa sobre todo si se retoma una evaluación
+    rigurosa (item 37, golden Q&A) donde el prompt deba ser IDÉNTICO entre la
+    web y la batería.
+  - **Futuro (no planificado):** (a) batería en la app pública con síntesis
+    Gemini en vez de Ollama, para evitar contención del único servicio Ollama
+    local cuando varios usuarios consultan RAG a la vez (ver nota operativa en
+    `ESTADO.md`); (b) ejecución en segundo plano que sobreviva al cierre del
+    navegador — hoy `13_RAG_multiple.py` es síncrona y muere si se cierra la
+    pestaña a mitad de batería (para tandas largas, usar el CLI en pciq22).

@@ -202,6 +202,7 @@ def run_batch(cfg: dict, base: str = DEFAULT_BASE, progress_cb=None) -> dict:
     cfg.setdefault("hybrid", True)
     cfg.setdefault("sections", [])
     cfg.setdefault("model", "qwen2.5:14b-instruct")
+    cfg.setdefault("synth_timeout", 600)
 
     category = cfg["category"]
     base_path = Path(base)
@@ -221,7 +222,7 @@ def run_batch(cfg: dict, base: str = DEFAULT_BASE, progress_cb=None) -> dict:
         raise SystemExit(f"No existe index.faiss en: {emb_dir}")
 
     ollama_host = os.getenv("OLLAMA_HOST", "http://127.0.0.1:11435")
-    client = ollama.Client(host=ollama_host, timeout=300)
+    client = ollama.Client(host=ollama_host, timeout=cfg["synth_timeout"])
 
     index = faiss.read_index(str(index_path))
     meta = load_metadata(emb_dir)

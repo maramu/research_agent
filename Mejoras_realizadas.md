@@ -2,6 +2,47 @@
 > Histórico append-only (lo más nuevo arriba). Backlog: Mejoras_pendientes.md · Estado/arquitectura: ESTADO.md
 
 ---
+### ✅ Timeout de síntesis configurable en la batería RAG + cierre de la sesión de esta tarde (2026-07-10)
+
+**Motivación:** el `timeout=300` fijo del cliente Ollama en `run_batch()` podía
+cortar respuestas largas del 14B en preguntas con mucho contexto recuperado
+(`top_k` alto); necesitaba ser ajustable sin tocar código, tanto desde el YAML
+del CLI como desde la página Streamlit.
+
+**Solución:**
+- `run_rag_batch.py`: `cfg.setdefault("synth_timeout", 600)` junto al resto de
+  defaults en `run_batch()`; el `ollama.Client(host=ollama_host, timeout=300)`
+  pasa a `timeout=cfg["synth_timeout"]`. Como embed y síntesis comparten el
+  mismo cliente, el timeout se aplica a ambos (el embed es rápido y no se ve
+  afectado en la práctica). Cabecera del .md sin cambios — sigue byte-compatible
+  con el formato validado el 2026-07-09.
+- `13_RAG_multiple.py`: `st.number_input` "Timeout de síntesis (s)" (min 60,
+  default 600, paso 30) junto al selector de modelo, caption "sube si el 14B
+  corta respuestas largas"; se mete en `cfg["synth_timeout"]`.
+- `scripts/ejemplos/rag_batch_ejemplo.yml`: línea `synth_timeout: 600` con
+  comentario.
+
+**Cierre de la sesión de la batería RAG (resumen, detalle en las dos entradas
+de abajo):** en dos commits de esta tarde/noche se construyó de extremo a
+extremo la batería de consultas RAG desatendida — `scripts/run_rag_batch.py`
+(CLI headless, reutiliza VERBATIM la recuperación de `8_query_rag.py` y la
+plantilla de síntesis de `2_RAG.py` sin importar de ninguno, para no arrastrar
+`streamlit`) y la página `scripts/streamlit_app/pages/13_RAG_multiple.py`
+(solo app privada, reutiliza `run_batch()` sin duplicar lógica). Salida: un
+`.md` por pregunta (respuesta local + chunks con referencia bibliográfica) en
+`/Volumes/research/exports/rag_batch_<categoría>_<timestamp>/`, descargable en
+zip desde la página. Con este commit queda además documentada la nota
+operativa de uso concurrente de Ollama (ver `ESTADO.md` → sección "Ollama —
+instalación en pciq22").
+
+**Verificación (casa, sin NAS/Ollama/Streamlit):** `py_compile` sobre ambos
+ficheros OK; YAML de ejemplo parseado con `synth_timeout == 600`; `grep
+synth_timeout` presente en los dos ficheros; `grep "timeout=300"` en
+`run_rag_batch.py` vacío (ya no queda el valor fijo); `grep "import
+streamlit|app_utils"` en `run_rag_batch.py` sigue vacío (headless intacto).
+Pendiente de ejecución real en pciq22.
+
+---
 ### ✅ Página Streamlit "RAG múltiple" (edita, lanza y descarga baterías) (2026-07-09)
 
 **Motivación:** dar interfaz web a la batería de consultas RAG (`run_rag_batch.py`,

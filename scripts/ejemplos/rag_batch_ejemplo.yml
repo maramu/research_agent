@@ -6,6 +6,7 @@ year_start: null
 year_end: null
 sections: []
 model: qwen2.5:14b-instruct
+synth_timeout: 600  # timeout Ollama por pregunta, en segundos
 questions:
   - q: "¿Qué microorganismos son responsables de la desulfurización biológica anóxica del biogás?"
     sections: [results, discussion]

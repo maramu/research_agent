@@ -83,6 +83,10 @@ with st.form("rag_batch_form"):
     model = st.selectbox("Modelo de síntesis (Ollama)", OLLAMA_MODELS_LLM,
                          index=_model_idx)
 
+    synth_timeout = st.number_input("Timeout de síntesis (s)", min_value=60,
+                                    value=600, step=30)
+    st.caption("Sube si el 14B corta respuestas largas.")
+
     questions_raw = st.text_area(
         "Preguntas (una por línea)", height=200,
         placeholder="¿Pregunta 1?\n¿Pregunta 2?",
@@ -110,6 +114,7 @@ if submitted:
         "year_end": int(year_end) if year_end else None,
         "sections": list(sections),
         "model": model,
+        "synth_timeout": int(synth_timeout),
         "questions": questions,
     }
 
