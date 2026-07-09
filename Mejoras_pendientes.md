@@ -476,3 +476,30 @@ Discord. Nueva incidencia sin cerrar: cuelgue silencioso de `qwen3:14b-hermes` c
 tool-calling en Docker (distinto del error ya documentado). Detalle en
 `Mejoras_realizadas.md` → sesión 2026-07-01 (fuera de este repo: `~/.hermes` +
 `~/hermes-docker`).
+
+---
+
+## Agente Obsidian — `tools/obsidian.py` + `scripts/agent_chat.py` (2026-07-09)
+
+Base ya completada (garantía de escritura en código + CLI con tool-calling y
+confirmación humana) — detalle en `Mejoras_realizadas.md`. Pendiente:
+
+- **Explorar Camino A — cliente MCP dentro de Obsidian** (candidato: plugin
+  **Local LLM Hub**): envolver `tools/obsidian.py` como servidor MCP stdio y
+  apuntar el plugin a él, para tener chat con streaming dentro de Obsidian
+  conservando la garantía de escritura solo en `00_Inbox/`. **Verificación
+  crítica previa:** confirmar que el plugin permite poner sus vault-tools
+  propias en "Off" (escriben sin restricción de carpeta) manteniendo activas
+  las tools MCP externas; si no se pueden desacoplar, este plugin no sirve.
+  Nota: es un plugin beta (BRAT), solo escritorio.
+- *(Opcional)* Envolver el agente en una página Streamlit con confirmación
+  humana visual y previsualización Markdown, si el uso por CLI se queda corto.
+- *(Opcional)* **RAG-como-tool:** unificar el agente de escritura con el
+  retrieval semántico (exponer el RAG como una tool más) para flujos
+  "consulta semántica → síntesis → nota en Inbox" en una sola conversación.
+  Hoy están separados a propósito (ver decisión en `Mejoras_realizadas.md`).
+- **Batería de consultas RAG desatendida (`run_rag_batch.py`):** script
+  headless que, dado un YAML de preguntas, escribe un `.md` por pregunta con
+  respuesta sintetizada + chunks recuperados, reutilizando código de
+  producción sin tocar `2_RAG.py`. (Prompt ya redactado, pendiente de
+  ejecutar.)

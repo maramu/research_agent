@@ -9,11 +9,20 @@
 | Mac mini Pro (UCA) (pciq22.uca.es) | máquina principal — scripts, Streamlit, datos, Ollama, GROBID |
 | Scripts | `/Users/martinramirez/proyectos/research_agent/scripts/` |
 | Config | `/Volumes/Disco/proyectos/research_agent/config/` |
-| Venv | `~/venvs/rag_papers` (Python 3.13 via Homebrew /opt/homebrew/bin/python3.13) |
+| Venv | `~/venvs/rag_papers` (Python 3.13 via Homebrew /opt/homebrew/bin/python3.13) — **el venv bueno del proyecto**; ver nota abajo |
 | GROBID | Docker (ARM64 nativo), imagen `grobid/grobid:0.9.0-crf`, compose en `~/grobid-compose.yml` |
 | Ollama | Solo loopback (`127.0.0.1:11435`); remoto vía proxy Caddy con Bearer en `http://pciq22.uca.es:11434` — ver [Ollama — instalación en pciq22](#ollama--instalación-en-pciq22) |
 | Streamlit | `http://<ip-pciq22>:8501` — servicio launchd 24/7 en pciq22 |
 | GitHub | `https://github.com/maramu/research_agent` |
+
+> ⚠️ **Venv correcto: `~/venvs/rag_papers`.** Hay un `.venv/` residual dentro del
+> propio repo (`research_agent/.venv/`, creado en algún momento con
+> `python3.14` de Homebrew) que **NO** es el entorno del proyecto — sus
+> symlinks a `python3`/`python3.14` están rotos y, aunque no lo estuvieran,
+> le faltan las dependencias del proyecto (activarlo y ejecutar cualquier
+> script con `ollama` da `ModuleNotFoundError: ollama`). No se ha borrado (no
+> es mío tocarlo sin preguntar), pero cualquier `python3 -m pytest` o
+> `python3 scripts/...` debe lanzarse con `~/venvs/rag_papers/bin/python3`.
 
 ### Hermes Agent (productividad personal)
 
@@ -191,6 +200,7 @@ research_agent/
 │   ├── 6_make_packages.py
 │   ├── 7_make_master_index.py
 │   ├── 8_query_rag.py
+│   ├── agent_chat.py                 ← chat CLI con tool-calling (Obsidian, escritura solo en 00_Inbox)
 │   ├── run_eval.py                   ← evaluación Hit@k / MRR contra golden sets (item 37)
 │   ├── pool_candidates.py            ← pooling de candidatos → golden sets (item 37)
 │   ├── utils/
@@ -222,6 +232,8 @@ research_agent/
 │           ├── 9_Actividad.py        ← actividad sistema (solo app privada)
 │           ├── 10_Duplicados.py      ← revisión de duplicados + cuarentena reversible (privada)
 │           └── 11_Articulos.py       ← catálogo bibliográfico filtrable; editor DOI/Año/Autores/Revista + borrado reversible (solo privada)
+├── tools/                            ← tools de tool-calling, independientes de scripts/utils/
+│   └── obsidian.py                   ← 4 tools Obsidian (lectura libre, escritura solo en 00_Inbox)
 ├── deployment/
 │   ├── com.research_agent.streamlit.plist        ← LaunchAgent Streamlit privado (8501)
 │   ├── com.research_agent.streamlit_public.plist ← LaunchAgent Streamlit público (8502)
@@ -230,7 +242,8 @@ research_agent/
 ├── tests/                            ← suite pytest (item 39)
 │   ├── conftest.py                   ← añade scripts/ a sys.path
 │   ├── test_pdf_utils.py             ← DOI_REGEX, _clean_doi, slugify, strip_accents, normalize_stem
-│   └── test_rename.py                ← shorten_title, sanitize_filename (importlib desde 1_rename)
+│   ├── test_rename.py                ← shorten_title, sanitize_filename (importlib desde 1_rename)
+│   └── test_obsidian_tools.py        ← _validar_ruta_escritura / _sanitizar_nombre (24 tests, item Obsidian)
 ├── pytest.ini
 ├── .gitignore
 └── requirements.txt
@@ -252,6 +265,9 @@ research_agent/
 | `6_make_packages.py` | Crea paquetes NotebookLM (FULLTEXT, REFERENCES, INDEX) | ✅ |
 | `7_make_master_index.py` | Genera MASTER_INDEX.md por categoría | ✅ |
 | `8_query_rag.py` | Consultas RAG sobre índice FAISS (CLI). **2026-06-11**: nuevos flags `--sections`, `--year-start`/`--year-end`, `--hybrid`. | ✅ |
+| `agent_chat.py` (NUEVO, **2026-07-09**) | Chat CLI con tool-calling nativo (`ollama.chat(tools=[...], think=False)`) contra Ollama local. Lee todo el vault de Obsidian y escribe SOLO en `00_Inbox/` a través de las 4 tools de `tools/obsidian.py` (importadas sin modificar) vía el plugin Local REST API de Obsidian. Flujo independiente del RAG/embeddings del proyecto: no toca FAISS ni `8_query_rag.py`; para contexto usa solo las tools de lectura (`leer_nota`, `buscar_en_vault`). Modelo por defecto `qwen3:8b` sin thinking; comando `/model <nombre>` cambia el modelo activo en caliente (p. ej. a `qwen3:14b`) sin reiniciar el historial. Confirmación humana `[s/N]` con vista previa completa (ruta + frontmatter + contenido) antes de cada escritura, flag `--yes`/`--no-confirm` para desactivarla en pruebas; límite de 8 rondas de tools por turno; comandos `/salir`, `/multi`, `/nuevo`, `/model`. | ✅ |
+| `tools/obsidian.py` (NUEVO, **2026-07-09**) | Cliente HTTPS mínimo contra el plugin Local REST API (with MCP) de Obsidian (`https://127.0.0.1:27124`, autofirmado, Bearer token en `config/.env.obsidian`, aislado del `.env` general igual que `config/.env.caddy_ollama`). 4 tools: `leer_nota`/`buscar_en_vault` (lectura sin restricción de carpeta) y `crear_nota_inbox`/`anexar_a_nota_inbox` (escritura SOLO en `00_Inbox/`). La garantía real es a nivel de código: `_validar_ruta_escritura` rechaza rutas fuera de `00_Inbox/`, con `..`, absolutas, o con extensión distinta de `.md`; el saneado de nombre rechaza explícitamente `/`, `\`, `..` en vez de neutralizarlos en silencio. Sin tools de borrado ni de movimiento. `crear_nota_inbox` no sobrescribe (sufijo de fecha/hora si el nombre ya existe) y añade siempre el tag `origen-agente` al frontmatter de la convención del vault (`type`, `titulo`, `creado`, `actualizado`, `estado`, `tags`, `fuente`). | ✅ |
+| `tests/test_obsidian_tools.py` (NUEVO, **2026-07-09**) | 24 tests de `_validar_ruta_escritura`/`_sanitizar_nombre` (rutas válidas/rechazadas, saneado de nombre) y de las tools de escritura reales lanzando `PermissionError` antes de tocar la red. Verificado también contra Obsidian real (lectura, búsqueda, creación con frontmatter, no-sobrescritura, rechazo humano, adversarial vía modelo) y con Obsidian cerrado (error claro, sin traceback ni cuelgue). Suite total del repo: 168/168 en verde. | ✅ |
 | `9_cleanup_duplicates.py` | Detecta y elimina PDFs duplicados por DOI. Detección avanzada por título normalizado (solo grupos donde todos los papers comparten DOI o carecen de él — grupos con ≥2 DOIs distintos se ignoran como artículos diferentes) y hash SHA-256 con informe `metadatos/duplicate_report.xlsx` (3 hojas: DOI/Titulo/Hash). **2026-06-09**: nueva función `apply_hash_cleanup()` — `--apply` ahora elimina también duplicados por hash PDF (no solo DOI); desempate por nombre limpio Crossref. **2026-06-11**: nueva función `quarantine_paper()` — cuarentena REVERSIBLE que mueve PDF + artefactos a `/Volumes/research/quarantine/duplicates/<ts>/` con `_manifest` y quita la línea del paper de `papers_metadata.jsonl` (backup `.bak`). Usada por la página Duplicados (`10_Duplicados.py`). Commit fb320a9. **2026-06-12 (item 42):** copy2→copy en `rewrite_metadata`. **2026-06-17**: `quarantine_paper()` añade `"meta_lines"` al manifiesto; nueva `restore_from_quarantine(manifest_path, base)` — invierte la cuarentena (shutil.move, sin sobrescribir), reinerta `meta_lines` en `papers_metadata.jsonl` con dedup por `file_key` y backup `.bak`, warning si manifiesto legacy sin `meta_lines`. | ✅ |
 | `utils/corpus_manifest.py` | Genera `corpus_manifest.json` por categoría: n_pdfs, n_chunks, quality_score, faiss_indexes, faiss_stale, keywords_hash, git_commit. CLI + API pública `read_manifest()` | ✅ |
 | `utils/retrieval.py` (NUEVO, item 33, 2026-06-11) | Funciones de recuperación: `dense_rank`, `bm25_rank`, `rrf_fuse` (RRF_K=60), `passes_filters` (centraliza filtros items 32/34), `pool_size`, `build_bm25`, `tokenize`. BM25 al vuelo desde metadata.jsonl, alineado con FAISS por orden. | ✅ |

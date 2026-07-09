@@ -2,6 +2,90 @@
 > Histórico append-only (lo más nuevo arriba). Backlog: Mejoras_pendientes.md · Estado/arquitectura: ESTADO.md
 
 ---
+### ✅ Agente de escritura en Obsidian limitado a 00_Inbox (tools + CLI) (2026-07-09)
+
+**Motivación:** dotar al sistema de capacidad de escribir en el vault de
+Obsidian (crear/anexar notas) sin arriesgar que un modelo, por error o por
+prompt injection desde contenido leído, escriba o modifique algo fuera de
+`00_Inbox/`. La garantía tenía que ser de código, no de prompt.
+
+**Solución — dos piezas:**
+
+1. **`tools/obsidian.py`** (NUEVO): cliente HTTPS mínimo contra el plugin
+   Local REST API (with MCP) de Obsidian (`https://127.0.0.1:27124`,
+   autofirmado, `Authorization: Bearer <token>`). 4 tools expuestas:
+   `leer_nota` y `buscar_en_vault` (lectura sin restricción de carpeta —
+   pueden leer cualquier nota del vault) y `crear_nota_inbox` /
+   `anexar_a_nota_inbox` (escritura SOLO en `00_Inbox/`). La garantía real es
+   `_validar_ruta_escritura`: rechaza con `PermissionError` cualquier ruta
+   fuera de `00_Inbox/`, con `..`, absoluta, o con extensión distinta de
+   `.md`; el saneado de nombre de fichero rechaza explícitamente `/`, `\` y
+   `..` en vez de neutralizarlos en silencio. No existen tools de borrado ni
+   de movimiento — el modelo no tiene esa capacidad ni intentándolo.
+   `crear_nota_inbox` no sobrescribe (si el nombre ya existe, añade sufijo
+   de fecha/hora) y añade siempre el tag `origen-agente` al frontmatter de la
+   convención del vault (`type`, `titulo`, `creado`, `actualizado`, `estado`,
+   `tags`, `fuente`). Secreto aislado en `config/.env.obsidian` (no
+   versionado, plantilla `config/.env.obsidian.example`), mismo principio que
+   `config/.env.caddy_ollama`: el proceso consumidor no carga el resto de
+   claves del `.env` general.
+
+2. **`scripts/agent_chat.py`** (NUEVO): chat de terminal con tool-calling
+   nativo (`ollama.chat(tools=[...])`) que registra esas 4 tools sin
+   modificarlas. Bucle correcto de tool-calling (resultados como mensajes
+   `role: "tool"`, límite de 8 rondas por turno con aviso si se alcanza) y
+   **confirmación humana `[s/N]`** antes de cada escritura: muestra ruta
+   destino, frontmatter reconstruido y contenido completo; si se rechaza, se
+   devuelve al modelo un resultado de tool indicando el rechazo sin tocar el
+   vault (flag `--yes`/`--no-confirm` para desactivar la confirmación solo en
+   pruebas). Comandos `/salir`, `/multi` (entrada multilínea), `/nuevo`
+   (reinicia historial) y `/model` (cambia el modelo activo en caliente sin
+   reiniciar el historial). Trazabilidad en gris de cada llamada a tool y su
+   resultado.
+
+**Decisión de flujo separado:** el agente NO usa el pipeline de RAG/embeddings
+del proyecto — para contexto usa únicamente las tools de lectura de Obsidian.
+FAISS y `8_query_rag.py`/`2_RAG.py` quedan intactos y en su interfaz actual;
+unificar ambos (RAG como tool) queda en el backlog, a propósito no resuelto
+ahora.
+
+**Ajuste de rendimiento:** en este hardware (Mac mini, modelos locales vía
+Ollama) el "thinking" de qwen3 resultaba impráctico en turnos con
+tool-calling. Desactivarlo (`think=False`) fue la palanca clave de
+rendimiento; con eso, `qwen3:8b` (modelo por defecto) resuelve un turno en
+~27 s frente a ~58 s de `qwen3:14b` en la misma pregunta. `qwen3:14b` sigue
+disponible a un `/model qwen3:14b` de distancia cuando la tarea lo requiera,
+sin reiniciar la conversación. Timeout de cliente subido a 600 s (turnos con
+tool-calling y contexto largo pueden superar los 5 min incluso con thinking
+desactivado).
+
+**Verificación:** 168/168 tests en verde (`tests/test_obsidian_tools.py`, 24
+nuevos: rutas válidas/rechazadas, saneado de nombre, tools de escritura
+lanzando `PermissionError` antes de tocar la red). Con Obsidian real abierto:
+lectura y búsqueda vía CLI, creación de nota con frontmatter y tag
+`origen-agente` correctos, no-sobrescritura (sufijo de fecha/hora),
+confirmación humana verificada en ambos sentidos (aceptar/rechazar sin
+escribir nada). Pruebas adversariales: por código directo (`crear_nota_inbox`
+con `..` en la ruta, `anexar_a_nota_inbox` fuera de `00_Inbox/`) y vía modelo
+("borra esta nota", "muévela fuera de Inbox", forzar una tool de escritura
+con ruta fuera de Inbox) — en todos los casos el modelo declina o
+`PermissionError` corta la operación, sin fuga y sin colgar la sesión. Límite
+de iteraciones de tools probado con un cliente simulado que siempre pide
+tools: se detiene a las 8 rondas con aviso, sin bucle infinito. Con Obsidian
+cerrado: error claro y accionable, sin traceback ni cuelgue.
+
+**Bug encontrado y corregido en verificación:** `crear_nota_inbox` con `..`
+en el nombre no lanzaba `PermissionError` — el saneado convertía la ruta en
+un nombre de fichero inocuo que caía dentro de `00_Inbox/` (sin fuga real,
+pero sin el "falla alto" esperado). Corregido para rechazar explícitamente
+`/`, `\` y `..` en el nombre antes de sanear nada.
+
+**Nota de entorno:** el plugin Local REST API (with MCP) quedó instalado y
+activo en el Obsidian de pciq22, escuchando en loopback (`127.0.0.1:27124`).
+
+Commits: `52cc515` (tools de Obsidian) y `ba1d268` (agente CLI).
+
+---
 ### ✅ Migración cron → launchd + WakeOnLaunchDate (2026-07-09)
 
 **Problema:** Pregunta diaria (06:00 todos los días) y Scopus (04:00 lunes) no se ejecutaban
