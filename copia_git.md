@@ -18,3 +18,7 @@ git push origin main
 # En pciq22
 cd ~/proyectos/research_agent
 git pull
+
+# Cuando git pull no funcione hacer:
+git fetch origin
+git pull origin main
