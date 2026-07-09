@@ -2,6 +2,37 @@
 > Histórico append-only (lo más nuevo arriba). Backlog: Mejoras_pendientes.md · Estado/arquitectura: ESTADO.md
 
 ---
+### ✅ Batería de consultas RAG desatendida → .md por pregunta (2026-07-09)
+
+**Motivación:** poder lanzar una lista de preguntas RAG sobre una categoría sin
+pasar por Streamlit ni supervisión manual, y quedarse con un .md por pregunta
+(respuesta sintetizada + chunks recuperados con su referencia bibliográfica)
+para revisar offline o alimentar otro proceso.
+
+**Solución:** `scripts/run_rag_batch.py` (NUEVO, un solo fichero, sin tocar
+`2_RAG.py`). Lee un YAML (`--config`) con `category`, `top_k`, `hybrid`,
+`sections`, `model` de síntesis y la lista de `questions` (cada una puede
+sobreescribir `sections`). Reutiliza VERBATIM el código de producción en vez de
+reimplementarlo: `load_metadata`/`embed_query` y el ensamblado de recuperación
+(denso + BM25/RRF + `passes_filters`) de `8_query_rag.py`, y la plantilla
+`system_content` exacta de `synthesize_answer` en `2_RAG.py` — copiados, no
+importados, para que el script quede libre de `streamlit`/`app_utils` (headless
+de verdad). Por pregunta: recupera con `utils/retrieval.py`, sintetiza con
+`ollama.generate` local, resuelve citas `[N]` con `utils/citations.py`, serializa
+los chunks con `utils/export_refs.build_chunks_markdown`, y escribe
+`NN_<slug>.md` en `/Volumes/research/exports/rag_batch_<category>_<fecha>/`.
+Un fallo por pregunta escribe `NN_<slug>.ERROR.md` con el traceback y la batería
+sigue con la siguiente (un fallo no aborta el resto). No escribe en
+`rag_usage_*.jsonl` (fuera del flujo de la UI, sin contador de coste). Incluye
+`scripts/ejemplos/rag_batch_ejemplo.yml` con 2 preguntas de
+`anoxic_biogas_biodesulfurization`.
+
+**Verificación (casa, sin NAS/Ollama):** `py_compile` sobre el script OK; YAML
+de ejemplo parseado OK con `yaml.safe_load` (venv `~/venvs/rag_papers`, el
+`python3` del sistema no tiene PyYAML); `grep -nE "import streamlit|app_utils"`
+sin resultados. Pendiente de ejecución real en pciq22 (necesita NAS + Ollama).
+
+---
 ### ✅ Agente de escritura en Obsidian limitado a 00_Inbox (tools + CLI) (2026-07-09)
 
 **Motivación:** dotar al sistema de capacidad de escribir en el vault de

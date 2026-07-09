@@ -1,0 +1,12 @@
+category: anoxic_biogas_biodesulfurization
+phase: all
+top_k: 8
+hybrid: true
+year_start: null
+year_end: null
+sections: []
+model: qwen2.5:14b-instruct
+questions:
+  - q: "¿Qué microorganismos son responsables de la desulfurización biológica anóxica del biogás?"
+    sections: [results, discussion]
+  - q: "¿Qué eficiencias de eliminación de H2S se reportan en sistemas de biodesulfurización anóxica?"
