@@ -71,6 +71,57 @@ Después, actualizar el token en todos los clientes remotos (Obsidian, etc.).
 No hace falta tocar Ollama ni reiniciarlo — solo Caddy relee
 `config/.env.caddy_ollama` al arrancar.
 
+## Tools de Obsidian (`tools/obsidian.py`)
+
+El agente puede leer todo el vault de Obsidian y crear/anexar notas
+**solo** dentro de `00_Inbox/` (garantía a nivel de código en
+`_validar_ruta_escritura`, no de prompt — ver docstring del módulo). Cliente
+contra el plugin **Local REST API with MCP** (coddingtonbear), que debe estar
+activo en Obsidian y escuchando en `https://127.0.0.1:27124` (HTTPS
+autofirmado).
+
+### Configurar la API key
+
+1. En Obsidian: **Ajustes → Local REST API with MCP → API Key** (cópiala).
+2. `cp config/.env.obsidian.example config/.env.obsidian`
+3. Pega la key en `OBSIDIAN_API_KEY=` dentro de `config/.env.obsidian`.
+
+Igual que `config/.env.caddy_ollama`, es un secreto **aparte** de
+`config/.env`: aísla el token por proceso consumidor (`tools/obsidian.py` lo
+carga directamente, no pasa por el `.env` general). No versionado
+(`.gitignore`); plantilla versionada: `config/.env.obsidian.example`.
+
+Variables opcionales (normalmente no hace falta tocarlas):
+
+- `OBSIDIAN_BASE_URL` — por defecto `https://127.0.0.1:27124`.
+- `OBSIDIAN_CA_CERT` — ruta a un certificado CA si en el futuro se prefiere
+  verificar el TLS autofirmado del plugin en vez de desactivar la
+  verificación (comportamiento por defecto, `verify=False`, con el warning
+  de urllib3 suprimido solo en las llamadas de este módulo).
+
+### Si Obsidian está cerrado
+
+Cualquier tool devuelve un mensaje de error claro (p. ej. *"Obsidian no está
+corriendo en pciq22 — abre la app y reintenta"*) en vez de lanzar una
+excepción de red o colgar el bucle del agente. Timeout de 5 s por petición.
+
+### Alcance de las 4 tools
+
+| Tool | Alcance | Endpoint |
+|---|---|---|
+| `leer_nota(ruta)` | Todo el vault (solo lectura) | `GET /vault/{ruta}` |
+| `buscar_en_vault(query)` | Todo el vault (solo lectura) | `POST /search/simple/` |
+| `crear_nota_inbox(nombre, contenido, tags)` | Solo `00_Inbox/` | `PUT /vault/00_Inbox/{nombre}.md` |
+| `anexar_a_nota_inbox(ruta, contenido)` | Solo `00_Inbox/` | `POST /vault/{ruta}` |
+
+No hay tools de borrado ni de mover ficheros. `crear_nota_inbox` nunca
+sobrescribe: si el nombre ya existe, añade un sufijo `_AAAAMMDD_HHMMSS`.
+
+Nota: el registro de estas tools en un bucle de tool-calling (formato
+`tools=[...]` de la API de chat de Ollama, con `qwen3:14b` en el Ollama de
+`127.0.0.1:11435`) queda pendiente — de momento el módulo está listo para
+integrarse pero no hay un bucle de agente en el repo que lo consuma.
+
 ## Notas
 
 - Ollama en sí (`com.martin.ollama.plist`, fuera del repo en
