@@ -2,6 +2,20 @@
 > Histórico append-only (lo más nuevo arriba). Backlog: Mejoras_pendientes.md · Estado/arquitectura: ESTADO.md
 
 ---
+### ✅ Migración cron → launchd + WakeOnLaunchDate (2026-07-09)
+
+**Problema:** Pregunta diaria (06:00 todos los días) y Scopus (04:00 lunes) no se ejecutaban
+por sleep bloqueado — el Mac intentaba dormir cuando launchd/cron disparaba.
+
+**Solución:**
+- Eliminado cron de pregunta diaria (`crontab -l` vacío en pciq22)
+- Creado `com.research_agent.daily_question.plist` — launchd todos los días 06:00
+- Añadido `WakeOnLaunchDate: true` a ambos plists (Scopus + Pregunta)
+- Ambos despiertan el Mac si está durmiendo a la hora programada
+
+**Verificación:** `launchctl list | grep -E "scopus_weekly|daily_question"` muestra ambos.
+
+---
 
 ### ✅ Securización Ollama/GROBID — autenticación Bearer real vía Caddy (2026-07-08)
 
