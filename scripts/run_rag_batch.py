@@ -185,12 +185,18 @@ def run_question(idx, q_cfg, cfg, index, meta, bm25, client, embed_model,
     return filename
 
 
-def main():
-    ap = argparse.ArgumentParser(description="Batería de consultas RAG desatendida")
-    ap.add_argument("--config", required=True, help="Ruta al YAML de configuración")
-    args = ap.parse_args()
+def run_batch(cfg: dict, base: str = DEFAULT_BASE, progress_cb=None) -> dict:
+    """Ejecuta una batería de consultas RAG.
 
-    cfg = yaml.safe_load(Path(args.config).read_text(encoding="utf-8"))
+    ``cfg`` es el mismo dict que hoy sale del YAML (category, phase, top_k,
+    hybrid, year_start, year_end, sections, model, questions).
+
+    ``progress_cb(i, n, question, status, out_path)`` es opcional y se llama
+    tras cada pregunta con ``status`` "OK"/"ERROR" y la ruta del .md escrito.
+
+    Devuelve ``{"out_dir", "results": [{"q","status","path"}], "n_ok", "n_err"}``.
+    """
+    cfg = dict(cfg)  # no mutar el dict del caller
     cfg.setdefault("phase", "all")
     cfg.setdefault("top_k", 8)
     cfg.setdefault("hybrid", True)
@@ -198,8 +204,8 @@ def main():
     cfg.setdefault("model", "qwen2.5:14b-instruct")
 
     category = cfg["category"]
-    base = Path(DEFAULT_BASE)
-    emb_dir = base / category / "embeddings" / cfg["phase"]
+    base_path = Path(base)
+    emb_dir = base_path / category / "embeddings" / cfg["phase"]
 
     if not emb_dir.exists():
         raise SystemExit(f"No existe directorio de embeddings: {emb_dir}")
@@ -219,10 +225,10 @@ def main():
 
     index = faiss.read_index(str(index_path))
     meta = load_metadata(emb_dir)
-    papers_meta = load_papers_metadata(category, base)
+    papers_meta = load_papers_metadata(category, base_path)
 
-    bm25 = build_bm25([m.get("text", "") for m in meta]) if cfg.get("hybrid", True) else None
-    if cfg.get("hybrid", True) and bm25 is None:
+    bm25 = build_bm25([m.get("text", "") for m in meta]) if cfg["hybrid"] else None
+    if cfg["hybrid"] and bm25 is None:
         print("⚠️ rank-bm25 no instalado; usando solo denso.")
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M")
@@ -230,15 +236,21 @@ def main():
     out_dir.mkdir(parents=True, exist_ok=True)
 
     questions = cfg.get("questions", [])
+    n = len(questions)
+    results_log = []
     n_ok, n_error = 0, 0
 
     for i, q_cfg in enumerate(questions, start=1):
         query = q_cfg.get("q", f"pregunta_{i}")
         try:
             filename = run_question(i, q_cfg, cfg, index, meta, bm25, client,
-                                     embed_model, papers_meta, base, out_dir)
-            print(f"[{i}/{len(questions)}] OK  → {filename}")
+                                     embed_model, papers_meta, base_path, out_dir)
+            out_path = str(out_dir / filename)
+            print(f"[{i}/{n}] OK  → {filename}")
+            results_log.append({"q": query, "status": "OK", "path": out_path})
             n_ok += 1
+            if progress_cb:
+                progress_cb(i, n, query, "OK", out_path)
         except Exception:
             slug = slugify(query)
             err_filename = f"{i:02d}_{slug}.ERROR.md"
@@ -248,10 +260,25 @@ def main():
                 f"## Error\n\n```\n{traceback.format_exc()}\n```\n"
             )
             (out_dir / err_filename).write_text(err_text, encoding="utf-8")
-            print(f"[{i}/{len(questions)}] ERROR → {err_filename}")
+            err_path = str(out_dir / err_filename)
+            print(f"[{i}/{n}] ERROR → {err_filename}")
+            results_log.append({"q": query, "status": "ERROR", "path": err_path})
             n_error += 1
+            if progress_cb:
+                progress_cb(i, n, query, "ERROR", err_path)
 
     print(f"\n=== RESUMEN: {n_ok} OK / {n_error} ERROR — {out_dir} ===")
+    return {"out_dir": str(out_dir), "results": results_log,
+            "n_ok": n_ok, "n_err": n_error}
+
+
+def main():
+    ap = argparse.ArgumentParser(description="Batería de consultas RAG desatendida")
+    ap.add_argument("--config", required=True, help="Ruta al YAML de configuración")
+    args = ap.parse_args()
+
+    cfg = yaml.safe_load(Path(args.config).read_text(encoding="utf-8"))
+    run_batch(cfg)
 
 
 if __name__ == "__main__":

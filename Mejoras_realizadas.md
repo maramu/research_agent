@@ -2,6 +2,48 @@
 > Histórico append-only (lo más nuevo arriba). Backlog: Mejoras_pendientes.md · Estado/arquitectura: ESTADO.md
 
 ---
+### ✅ Página Streamlit "RAG múltiple" (edita, lanza y descarga baterías) (2026-07-09)
+
+**Motivación:** dar interfaz web a la batería de consultas RAG (`run_rag_batch.py`,
+misma sesión) para editar los parámetros, lanzarla y descargar los .md sin pasar
+por el YAML+CLI, reutilizando el motor headless sin duplicar lógica.
+
+**Solución — dos cambios, un solo motor:**
+
+1. **Refactor de `run_rag_batch.py`:** la carga de datos + el bucle por pregunta
+   + la escritura de .md se extrajeron a
+   `run_batch(cfg, base=DEFAULT_BASE, progress_cb=None) -> {"out_dir","results","n_ok","n_err"}`.
+   `cfg` es el mismo dict que salía del YAML (con `setdefault` de phase/top_k/
+   hybrid/sections/model aplicados dentro, sin mutar el dict del caller).
+   `progress_cb(i, n, question, status, out_path)` opcional se invoca tras cada
+   pregunta ("OK"/"ERROR"). `main()` queda como argparse → `yaml.safe_load` →
+   `run_batch(cfg)`, con salida por consola y formato/rutas de .md IDÉNTICOS a
+   antes. La plantilla `system_content` y el ensamblado de recuperación no se
+   tocaron. Sigue headless: `grep "import streamlit|app_utils"` vacío.
+
+2. **`scripts/streamlit_app/pages/13_RAG_multiple.py` (NUEVA, solo app privada):**
+   guard `is_public_app()` → `st.stop()` + `check_password("PRIVATE_APP_PASSWORD")`.
+   Añade `scripts/` a `sys.path` (mismo bloque que `2_RAG.py`) y hace
+   `from run_rag_batch import run_batch, DEFAULT_BASE`. Formulario con valores por
+   defecto del YAML de ejemplo (categoría vía `list_existing_categories`, phase,
+   top_k, hybrid, año desde/hasta opcionales, secciones vía `CANONICAL_SECTIONS`,
+   modelo vía `OLLAMA_MODELS_LLM`, preguntas una-por-línea). Al lanzar: construye
+   `cfg`, avisa de que la síntesis local puede tardar minutos/pregunta, y llama a
+   `run_batch(cfg, progress_cb=cb)` donde `cb` actualiza `st.progress` y añade un
+   `st.expander` con el .md por cada pregunta OK (o `st.error` por ERROR).
+   Al terminar, `st.success` con `out_dir`+resumen y un `st.download_button` con
+   un zip en memoria de los .md; `out_dir` se guarda en `st.session_state` para
+   que la descarga sobreviva al rerun del botón. Los .md quedan además en
+   `/Volumes/research/exports/`. El override de secciones por pregunta se deja
+   solo para el YAML+CLI (anotado en un `st.caption`).
+
+**Verificación (casa, sin NAS/Ollama/Streamlit):**
+`py_compile scripts/run_rag_batch.py scripts/streamlit_app/pages/13_RAG_multiple.py`
+OK; `grep "import streamlit|app_utils" run_rag_batch.py` vacío; `grep "def run_batch"`
+presente; `grep "from run_rag_batch import"` presente en la página. Pendiente de
+ejecución real en pciq22 (necesita NAS + Ollama + Streamlit).
+
+---
 ### ✅ Batería de consultas RAG desatendida → .md por pregunta (2026-07-09)
 
 **Motivación:** poder lanzar una lista de preguntas RAG sobre una categoría sin
