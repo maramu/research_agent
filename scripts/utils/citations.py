@@ -28,23 +28,61 @@ def load_papers_metadata(project: str, base: Path) -> Dict[str, dict]:
     """Lee `<base>/<project>/metadata/papers_metadata.jsonl`.
 
     Devuelve {paper_id: record}. Si el fichero no existe, devuelve {}.
+
+    La ruta es genérica en (base, project): sirve igual para las categorías de
+    artículos (base=.../categorias) que para libros (base=/Volumes/research,
+    project=libros_docencia). Para libros, además, se fusiona
+    `libros_metadata.jsonl` (clave book_id == paper_id) para tener autor/año/
+    título aunque no se haya derivado papers_metadata.jsonl.
     """
-    path = Path(base) / project / "metadata" / "papers_metadata.jsonl"
-    if not path.exists():
-        return {}
+    meta_dir = Path(base) / project / "metadata"
     out: Dict[str, dict] = {}
-    with path.open(encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                rec = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            pid = rec.get("paper_id")
-            if pid:
-                out[pid] = rec
+
+    path = meta_dir / "papers_metadata.jsonl"
+    if path.exists():
+        with path.open(encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                pid = rec.get("paper_id")
+                if pid:
+                    out[pid] = rec
+
+    # Respaldo/enriquecimiento para libros: libros_metadata.jsonl (book_id).
+    books_path = meta_dir / "libros_metadata.jsonl"
+    if books_path.exists():
+        with books_path.open(encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                bid = rec.get("book_id")
+                if not bid:
+                    continue
+                existing = out.get(bid)
+                if existing is None:
+                    out[bid] = {
+                        "paper_id": bid, "doi": "",
+                        "authors": rec.get("authors", []),
+                        "year": rec.get("year"),
+                        "title": rec.get("title", ""),
+                    }
+                else:
+                    # Completa huecos sin pisar lo derivado.
+                    existing.setdefault("title", rec.get("title", ""))
+                    if not existing.get("authors"):
+                        existing["authors"] = rec.get("authors", [])
+                    if not existing.get("year"):
+                        existing["year"] = rec.get("year")
     return out
 
 
@@ -150,17 +188,80 @@ CITE_PROMPT_RULES = (
 )
 
 
+_CHAP_NUM_RE = re.compile(r"^\s*(\d+)")
+
+
+def _chapter_ref(m: dict) -> str:
+    """Referencia de capítulo de un chunk de libro.
+
+    Capítulo = primer nivel de heading_path. Si empieza por número ('14.
+    Single-Cell Protein') -> 'cap. 14'; si no hay número, se usa el título de la
+    sección tal cual.
+    """
+    heading = m.get("heading_path") or ""
+    first = heading.split(" > ")[0].strip() if heading else ""
+    section = (m.get("section") or first).strip()
+    base = first or section
+    match = _CHAP_NUM_RE.match(base)
+    if match:
+        return f"cap. {match.group(1)}"
+    return section
+
+
+def _pages_ref(page_start, page_end) -> str:
+    """'p. <inicio>[-<fin>]' con la página FÍSICA del chunk. '' si no hay inicio."""
+    if page_start in (None, ""):
+        return ""
+    if page_end not in (None, "") and str(page_end) != str(page_start):
+        return f"p. {page_start}-{page_end}"
+    return f"p. {page_start}"
+
+
+def book_citation_key(m: dict, papers_meta: Dict[str, dict]) -> str:
+    """Clave de cita de un chunk de libro (doc_type=='book').
+
+    Formato: 'Autor (Año), <Libro>, cap. <N>, p. <inicio>[-<fin>]'. Autor, año y
+    título salen de papers_meta[book_id] (o libros_metadata.jsonl fusionado);
+    capítulo y páginas, del propio chunk.
+    """
+    pid = m.get("paper_id", "")
+    rec = papers_meta.get(pid) or {}
+    surname = first_author_surname(pid, papers_meta)
+    year = rec.get("year") or year_from_paper_id(pid)
+    year_str = str(year) if year else "s.f."
+    title = (rec.get("title") or pid).strip()
+
+    parts = [f"{surname} ({year_str})", title]
+    chapter = _chapter_ref(m)
+    if chapter:
+        parts.append(chapter)
+    pages = _pages_ref(m.get("page_start"), m.get("page_end"))
+    if pages:
+        parts.append(pages)
+    return ", ".join(parts)
+
+
+def citation_for_chunk(m: dict, papers_meta: Dict[str, dict]) -> str:
+    """Clave de cita de un chunk según su tipo. Centraliza el dispatch:
+    ``_cite`` explícito (adjuntos) > libro (doc_type=='book') > artículo."""
+    if m.get("_cite"):
+        return m["_cite"]
+    if m.get("doc_type") == "book":
+        return book_citation_key(m, papers_meta)
+    return citation_key(m.get("paper_id", ""), papers_meta)
+
+
 def build_cite_map(results, papers_meta: Dict[str, dict]) -> Dict[int, str]:
     """results: lista de tuplas (..., m) en el MISMO orden que el contexto [N].
 
-    Devuelve {N: '(Apellido, Año; DOI)'} con N empezando en 1. Si un chunk
-    trae su propia clave en ``m['_cite']`` (adjuntos efímeros), se usa esa.
+    Devuelve {N: clave} con N empezando en 1. La clave es la de artículo
+    '(Apellido, Año; DOI)', la de libro 'Autor (Año), Libro, cap. N, p. …', o la
+    de ``m['_cite']`` (adjuntos efímeros), según el chunk.
     """
     cmap: Dict[int, str] = {}
     for i, item in enumerate(results, 1):
         m = item[-1]  # el dict de metadata es el último elemento de la tupla
-        key = m.get("_cite") or citation_key(m.get("paper_id", ""), papers_meta)
-        cmap[i] = key
+        cmap[i] = citation_for_chunk(m, papers_meta)
     return cmap
 
 

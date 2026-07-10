@@ -64,6 +64,16 @@ except Exception as e:
 
 METADATOS_DIR   = NAS_ROOT / "metadatos"
 DOI_MANUAL_XLSX = METADATOS_DIR / "doi_manual.xlsx"
+
+# Colección de libros de docencia: vive bajo NAS_ROOT (no bajo categorias/).
+BOOKS_PROJECT = "libros_docencia"
+
+
+def project_base(project: str) -> Path:
+    """Raíz que contiene el proyecto: NAS_ROOT para la colección de libros,
+    CATEGORIAS_DIR para las categorías de artículos. Centraliza la diferencia
+    de base sin tocar el resto del flujo."""
+    return NAS_ROOT if project == BOOKS_PROJECT else CATEGORIAS_DIR
 RAG_USAGE_DIR   = METADATOS_DIR / "rag_usage"  # uno por mes: rag_usage_YYYY-MM.jsonl
 
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://127.0.0.1:11435")
@@ -513,9 +523,14 @@ def check_google_aistudio_api(api_key: str) -> Tuple[bool, str]:
 # ---------------------------------------------------------------------------
 
 def list_existing_categories() -> List[str]:
-    if not CATEGORIAS_DIR.exists():
-        return []
-    return sorted(d.name for d in CATEGORIAS_DIR.iterdir() if d.is_dir())
+    cats = []
+    if CATEGORIAS_DIR.exists():
+        cats = sorted(d.name for d in CATEGORIAS_DIR.iterdir() if d.is_dir())
+    # La colección de libros vive bajo NAS_ROOT; se ofrece como un proyecto más
+    # si tiene índice de embeddings construido.
+    if (NAS_ROOT / BOOKS_PROJECT / "embeddings").exists():
+        cats.append(BOOKS_PROJECT)
+    return cats
 
 
 def get_category_stats(category: str) -> Dict[str, Any]:
@@ -702,7 +717,7 @@ def list_embedding_phases(category: str) -> List[str]:
     Soporta múltiples modelos: subcarpetas pueden ser '<phase>' (default nomic) o
     '<phase>__<modelo>' (sufijo de modelo para alternativas como mxbai).
     """
-    emb_dir = CATEGORIAS_DIR / category / "embeddings"
+    emb_dir = project_base(category) / category / "embeddings"
     if not emb_dir.exists():
         return []
     return sorted(
@@ -713,7 +728,7 @@ def list_embedding_phases(category: str) -> List[str]:
 
 def embedding_phase_model(category: str, phase: str) -> str:
     """Devuelve el modelo de embedding declarado en config.json del índice."""
-    cfg_path = CATEGORIAS_DIR / category / "embeddings" / phase / "config.json"
+    cfg_path = project_base(category) / category / "embeddings" / phase / "config.json"
     if not cfg_path.exists():
         return "?"
     try:

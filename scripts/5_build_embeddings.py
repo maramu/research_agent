@@ -90,6 +90,7 @@ _SCRIPTS_DIR = Path(__file__).parent
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
 from utils.constants import OLLAMA_MODEL_EMBED, year_from_paper_id, MAX_EMBED_CHARS  # noqa: E402
+from utils.embeddings import embed_texts  # noqa: E402  (núcleo compartido con books/embed.py)
 
 DEFAULT_BASE       = "/Volumes/research/categorias"
 DEFAULT_MODEL      = OLLAMA_MODEL_EMBED
@@ -183,29 +184,6 @@ def iter_chunks(chunks_dir: Path, phase_filter: str):
                 if "phase" not in rec:
                     rec["phase"] = path_phase
                 yield rec
-
-
-def embed_texts(client: ollama.Client, texts: list, model: str) -> list:
-    """Embeddea uno a uno. Si un chunk excede el contexto del modelo, lo trunca
-    progresivamente (2/3 cada vez) y reintenta: la densidad en tokens del texto
-    con fórmulas/subíndices puede superar el contexto aun con pocos caracteres."""
-    out = []
-    for text in texts:
-        t = text if len(text) <= MAX_EMBED_CHARS else text[:MAX_EMBED_CHARS]
-        for _ in range(8):
-            try:
-                resp = client.embeddings(model=model, prompt=t)
-                out.append(np.array(resp["embedding"], dtype="float32"))
-                break
-            except Exception as e:
-                if "context length" in str(e).lower() and len(t) > 400:
-                    t = t[: max(400, (len(t) * 2) // 3)]
-                    print(f"  ⚠️ chunk excede contexto; truncado a {len(t)} chars y reintentando")
-                else:
-                    raise
-        else:
-            raise RuntimeError("No se pudo embeber un chunk ni tras truncarlo al mínimo")
-    return out
 
 
 def _model_suffix(model: str) -> str:

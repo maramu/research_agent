@@ -8,7 +8,7 @@
 4. ~~Item 44 — fix `_clean_doi` (recorta sufijos DOI de 3+ letras)~~ — ✅ **CERRADO 2026-06-13**. Verificado en pciq22: DOIs con `:` y barra final se normalizan; `10.1023/B:HYDR.0000008620.87704.3b` se preserva; 53 tests pasan.
 5. Item 45 — consolidar utilidades de texto duplicadas pdf_utils↔1_rename. **Nota 2026-06-13:** el trabajo de hoy sobre DOIs tocó ambos ficheros (`normalize_doi`, `normalize_stem`, lookups por stem/título en `doi_manual`). Revisar si introdujo nueva divergencia antes de consolidar.
 6. ~~Item 41 — índice viejo all__bge-m3.~~ ✅ COMPLETADO 2026-06-16.
-7. Item 35 — OCR (si hay escaneados). Item 31 — MVP libros, tras el 37.
+7. Item 35 — OCR (si hay escaneados). ~~Item 31 — MVP libros~~ ✅ **MVP HECHO 2026-07-10** (falta eval Hit@k/MRR con golden manual).
 - ~~Item 49 — completar Hermes Agent (Discord + MCPs)~~ — ✅ **MAYORMENTE COMPLETADO 2026-06-25** (operativo 24/7 con Notion/Calendar/Gmail/Tavily; residuales: override modelo local para Gmail y aplicar plist ingesta 04:00 en pciq22).
 - ~~Timeout job semanal: subir `SCOPUS_TIMEOUT` de 2700 a 5400 (45→90 min)~~ — ✅ **COMPLETADO 2026-06-15** — `run_weekly_scopus.py`: `SCOPUS_TIMEOUT = 5400`; `WEEKLY_CATEGORIES` ampliada con `anoxic_biogas_biodesulfurization`.
 
@@ -81,28 +81,35 @@ parar ante 403/429.
 - **Política de uso**: no descargas masivas, no saltarse paywalls, no compartir
   PDFs fuera del grupo si la licencia no lo permite, respetar acceso institucional.
 
-### 31. Pipeline para libros de docencia — futuro
+### 31. Pipeline para libros de docencia — ✅ MVP hecho (2026-07-10) / eval pendiente
 
-Pipeline paralelo a categorias/ para 30+ libros de bioprocesos (texto
-extraíble, inglés). Estructura propuesta: libros_docencia/bioprocesos/.
+**MVP funcional** (detalle en Mejoras_realizadas.md y ESTADO.md): estructura NAS
+`/Volumes/research/libros_docencia/`, `scripts/books/{process,embed,query}.py`
+(PyMuPDF+TOC, limpieza, skip de front/back matter, índice bge-m3/FAISS propio con
+borrado incremental), citas de libro (`Autor (Año), Libro, cap., p.`) vía
+`citation_for_chunk`, y página "Preparar clase" (contraste manual↔papers). Validado
+con **1 libro** (Najafpour 2007, 153 chunks).
 
-Diferencias con el pipeline actual:
-- Parser: pymupdf en lugar de GROBID (libros no son papers)
-- TOC del PDF → metadata jerárquica (capítulo, sección, páginas) por chunk
-- Sin 4_extract_metadata.py ni 3b_summarize.py (no aplican a libros)
-- Reutiliza: bge-m3, FAISS, infraestructura Streamlit
+Diseño confirmado en el MVP:
+- Parser: pymupdf en lugar de GROBID ✅
+- TOC del PDF → metadata jerárquica (capítulo, páginas físicas) por chunk ✅
+- Sin 4_extract_metadata.py ni 3b_summarize.py ✅
+- Reutiliza: bge-m3, FAISS, infraestructura Streamlit ✅
 
-Casos de uso:
-- RAG con citas precisas (libro, capítulo, página) para preparar clases
-- Comparar tratamiento de un mismo concepto en varios libros
-- Página "Preparar clase" que consulta libros + papers de las categorías
-  relevantes (microalgae, biogas_upgrading, etc.) y sintetiza
-  "manual dice X, papers recientes matizan Y"
+**Pendiente — hardening / fase 2:**
+- **Evaluación Hit@k/MRR** con **golden manual** (8-12 preguntas escritas a mano)
+  — bloqueante para dar el item por cerrado del todo.
+- **Ingesta epub opcional**: usar epub si el PDF es malo/escaneado o si el epub trae
+  `page-list` con las páginas de la edición impresa; si no, seguir con PDF.
+- Evaluar **PyMuPDF4LLM** o **Docling** como extractor alternativo para libros
+  difíciles.
+- Mapear **página IMPRESA** (page labels del PDF) además de la física.
+- **Render LaTeX** en "Preparar clase": convertir `\( \)` → `$ $` para que Streamlit
+  renderice las ecuaciones.
+- **Deduplicar citas repetidas** del mismo capítulo/páginas en el render de
+  referencias.
 
-MVP: 2-3 libros como proyecto ad-hoc adaptado, validar utilidad antes
-de productizar.
-
-Considerar primero: terminar items 4, 7, 15, 17-25, 30.
+Escalar de 1 → 30+ libros de bioprocesos cuando la evaluación valide la calidad.
 
 ---
 

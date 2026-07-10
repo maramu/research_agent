@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Dict, List
 
 from utils.constants import year_from_paper_id
+from utils.citations import citation_for_chunk
 
 
 def load_papers(jsonl_path: Path) -> List[Dict]:
@@ -221,6 +222,12 @@ def build_chunks_markdown(results, project, categorias_dir, papers_meta,
         if paper_id == "__attachment__":
             cite = m.get("_cite") or "Adjunto efímero"
             lines.append(f"- **Referencia:** {cite}")
+        elif m.get("doc_type") == "book":
+            # Libro: referencia con capítulo + página física (formato de libro).
+            lines.append(f"- **Referencia:** {citation_for_chunk(m, papers_meta)}")
+            lines.append(f"- **Capítulo:** {m.get('heading_path', '—')}")
+            lines.append(f"- **Páginas:** {m.get('page_start', '—')}–{m.get('page_end', '—')}")
+            lines.append(f"- **book_id:** `{paper_id}`")
         else:
             rec = papers_meta.get(paper_id, {})
             title = rec.get("title") or "—"

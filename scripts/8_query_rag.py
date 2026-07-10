@@ -60,7 +60,7 @@ from dotenv import load_dotenv
 
 sys.path.insert(0, str(Path(__file__).parent))
 from utils.constants import OLLAMA_MODEL_EMBED, year_from_paper_id
-from utils.citations import load_papers_metadata, citation_key
+from utils.citations import load_papers_metadata, citation_for_chunk
 from utils.retrieval import (build_bm25, dense_rank, bm25_rank,
                              rrf_fuse, passes_filters, pool_size)
 
@@ -103,7 +103,8 @@ def main():
                     help="Etiqueta de fase del índice a consultar (nombre de categoría, o 'all')")
     ap.add_argument("--k",       type=int, default=DEFAULT_K, help="Número de resultados")
     ap.add_argument("--type",    default="", help="Filtrar por type: text|table (opcional)")
-    ap.add_argument("--paper",   default="", help="Filtrar por paper_id contiene (opcional)")
+    ap.add_argument("--doc-type", default="", help="Filtrar por doc_type: article|book (opcional)")
+    ap.add_argument("--paper",   default="", help="Filtrar por paper_id/book_id contiene (opcional)")
     ap.add_argument("--sections", default="",
                     help="Filtrar por section_canonical, separadas por coma "
                          "(p.ej. methods,results,table). Vacío = todas.")
@@ -147,7 +148,7 @@ def main():
         print("⚠️ rank-bm25 no instalado; usando solo denso.")
 
     qv         = embed_query(client, args.query, model).reshape(1, -1)
-    has_filter = bool(args.type or args.paper or allowed_sections
+    has_filter = bool(args.type or args.doc_type or args.paper or allowed_sections
                       or args.year_start or args.year_end)
     pool = pool_size(args.k, index.ntotal, has_filter)
     d_idx, dist_map = dense_rank(index, qv, pool)
@@ -164,7 +165,8 @@ def main():
         if not passes_filters(m, type_=args.type or None,
                               paper=args.paper or None,
                               sections=allowed_sections or None,
-                              year_start=args.year_start, year_end=args.year_end):
+                              year_start=args.year_start, year_end=args.year_end,
+                              doc_type=args.doc_type or None):
             continue
         results.append((score, idx, m))
         if len(results) >= args.k:
@@ -178,12 +180,16 @@ def main():
     for rank, (score, idx, m) in enumerate(results, start=1):
         phase_tag = f"[{m.get('phase', '?')}] " if args.phase == "all" else ""
         year = m.get("year") or year_from_paper_id(m.get("paper_id", ""))
-        cite = citation_key(m.get("paper_id", ""), papers_meta)
+        cite = citation_for_chunk(m, papers_meta)
         print(
             f"[{rank}] {score_label}={score:.4f} | {phase_tag}"
             f"paper_id={m.get('paper_id')} | year={year} | cite={cite} | "
             f"section={m.get('section')} ({m.get('section_canonical','?')}) | type={m.get('type')}"
         )
+        hp = m.get("heading_path")
+        if hp:  # chunks de libro (doc_type="book"): ruta de capítulo + páginas
+            pages = f"{m.get('page_start', '?')}-{m.get('page_end', '?')}"
+            print(f"     ↳ {hp}  [pp. {pages}]")
         snippet = m.get("text", "")[:700].replace("\n", " ")
         print(f"     {snippet}…")
         print("")

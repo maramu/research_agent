@@ -338,6 +338,58 @@ python run_pipeline.py adhoc --name revision_metanol --pdfs ~/papers_metanol
 python 8_query_rag.py --project revision_metanol "tu pregunta"
 ```
 
+## Pipeline de libros de docencia (item 31)
+
+Pipeline **paralelo** al de artículos para libros de texto docentes, reutilizando
+bge-m3 + FAISS + Streamlit. NO usa GROBID (solo PDF de texto extraíble).
+
+**Layout NAS** — bajo `/Volumes/research/libros_docencia/` (fuera de `categorias/`):
+`pdfs/ md_clean/ chunks/ embeddings/ metadata/ logs/`.
+
+**Scripts** (`scripts/books/`):
+- `process.py` — PDF → texto por página con **PyMuPDF**; TOC vía `doc.get_toc()`
+  (fallback a detección de encabezados por tamaño de fuente, marcado
+  `toc_source="heuristic"`). Limpieza: une guiones de fin de línea, elimina
+  cabeceras/pies recurrentes (detección posicional en bordes) y números de página
+  sueltos, re-fluye párrafos. **Ordena las entradas del TOC por página** antes de
+  segmentar (evita rangos corruptos por bookmarks desordenados). **Salta el
+  front/back matter** (índice, prefacio, etc.) para no trocear ruido. Si el PDF no
+  tiene texto → `text_extractable=false` (candidato a OCR, no se procesa).
+  Idempotente por sha256 del fichero de chunks; `--force` reprocesa.
+- `embed.py` — índice bge-m3/FAISS **propio** en `embeddings/all/`, reutilizando el
+  núcleo de embedding compartido (`utils/embeddings.py`, mismo que artículos).
+  Incremental por hash de libro (`indexed_books.json` + caché `_vectors/*.npy`) con
+  **borrado**: un libro que cambia re-embebe y sus vectores viejos desaparecen; uno
+  eliminado sale del índice. **Preserva el `year`** del chunk (no lo recalcula).
+- `query.py` — wrapper fino sobre `8_query_rag.py` (`--project libros_docencia`),
+  retrieval puro sin LLM.
+
+**Esquema de chunk de libro**: `paper_id=book_id`, `doc_type="book"`,
+`heading_path` (ruta de capítulo), `page_start`/`page_end` (página **física** del
+PDF), `section_canonical="chapter"` (centinela, NO en `CANONICAL_SECTIONS` → los
+libros no se filtran por IMRaD), `year` **denormalizado** desde
+`libros_metadata.jsonl`, `chunk_hash`. Metadata de libro en
+`metadata/libros_metadata.jsonl` (título/autor/año/isbn/sha256/quality_score/toc);
+título/autores se derivan del nombre de archivo (`AÑO_Autor_Título`) cuando el PDF
+no es fiable. Se deriva `papers_metadata.jsonl` para que citas y año funcionen sin
+tocar el código de artículos.
+
+**Citas de libro**: `citation_for_chunk()` (en `utils/citations.py`) despacha por
+`doc_type`: libro → `Autor (Año), <Libro>, cap. <N>, p. <inicio-fin>`; artículo →
+`(Apellido, Año; DOI)` como siempre. `passes_filters` admite filtrar por `doc_type`.
+
+**Página "Preparar clase"** (`streamlit_app/pages/14_Preparar_clase.py`, solo app
+privada): recupera de libros + categorías de papers y **fusiona con cupo mínimo
+garantizado para libros** (mismo patrón que los adjuntos, `fuse_results`); sintetiza
+**contrastando manual↔papers** ("según el manual …; los papers recientes matizan …")
+con citas en su formato, y distingue 📘 libro vs 📄 paper en el panel. El núcleo RAG
+(índices, proveedores, síntesis, export) se extrajo a `streamlit_app/rag_core.py`,
+compartido con `2_RAG.py` (cero duplicación).
+
+**Estado**: MVP funcional con **1 libro indexado** (Najafpour 2007, *Biochemical
+Engineering and Biotechnology*, 439 pág → **153 chunks**, dim 1024). **Evaluación
+formal Hit@k/MRR pendiente** (falta golden manual).
+
 ## Interfaz web (Streamlit)
 
 Todos los flujos del pipeline son accesibles desde la web, además de

@@ -64,15 +64,20 @@ def rrf_fuse(*ranked_lists, k=RRF_K):
 
 
 def passes_filters(m, type_=None, paper=None, sections=None,
-                   year_start=None, year_end=None):
+                   year_start=None, year_end=None, doc_type=None):
     """True si el chunk m pasa los filtros. Centraliza la lógica de items 32/34.
 
     ``paper`` admite dos formas:
       - str  -> match por substring case-insensitive sobre paper_id (uso UI).
       - colección (set/list/tuple) -> match EXACTO contra ese conjunto de
         paper_id (uso de la consulta premium "profundizar en estos papers").
+    ``doc_type`` (p.ej. "book"/"article") filtra por el tipo de documento; el
+    filtro por book_id ya lo cubre ``paper`` (paper_id == book_id). Ninguno
+    afecta a los filtros IMRaD de artículos cuando se deja en None.
     """
     from utils.constants import year_from_paper_id
+    if doc_type and m.get("doc_type") != doc_type:
+        return False
     if type_ and m.get("type") != type_:
         return False
     if paper:

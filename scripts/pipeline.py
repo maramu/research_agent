@@ -47,6 +47,7 @@ NAS_ROOT = Path("/Volumes/research")
 CATEGORIAS_DIR = NAS_ROOT / "categorias"
 INBOX_DIR = NAS_ROOT / "inbox"
 INBOX_CSV_DIR = NAS_ROOT / "inbox_csv"
+BOOKS_ROOT = NAS_ROOT / "libros_docencia"  # pipeline paralelo de libros (item 31)
 KNOWN_DOIS_FILE  = NAS_ROOT / "metadatos" / "doi_registry.txt"
 QUARANTINE_DIR = NAS_ROOT / "quarantine" / "duplicates"
 _KEYWORDS_PATH   = SCRIPTS_DIR.parent / "config" / "keywords.yml"
@@ -1054,6 +1055,41 @@ def run_adhoc(
         log.info("  python 8_query_rag.py --project %s \"tu pregunta\"", name)
 
     return summary
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# FLUJO F — Libros de docencia (item 31)
+# ═══════════════════════════════════════════════════════════════════════════
+
+def run_books(
+    collection: str = "libros_docencia",
+    pdf_dir: Optional[str] = None,
+    on_output: Optional[Callable[[str], None]] = None,
+) -> Dict[str, Any]:
+    """Flujo F: PDFs de libros de texto → colección de libros → procesado + embeddings.
+
+    Paralelo a run_adhoc(), pero SIN GROBID y con raíz NAS propia (BOOKS_ROOT,
+    no bajo categorias/). Cadena propia (NO usa _PROCESS_CHAIN):
+        books/process.py  → md_clean + chunks + libros_metadata.jsonl
+                             + metadata/papers_metadata.jsonl (derivado)
+        books/embed.py     → índice FAISS (reutiliza la lógica de artículos,
+                             preservando el year denormalizado del chunk)
+
+    NO ejecuta summarize (3b), extract_metadata (4), make_packages (6) ni
+    master_index (7). La consulta se hace con books/query.py (wrapper sobre
+    8_query_rag.py con --project libros_docencia).
+
+    Args:
+        collection: nombre de la colección (subcarpeta bajo BOOKS_ROOT)
+        pdf_dir:    carpeta con los PDFs de origen (None = BOOKS_ROOT/<collection>/pdfs)
+        on_output:  callback para líneas de salida
+
+    Returns:
+        {"status": ..., "collection": collection, "steps": {...}}
+
+    NOTA: esqueleto. Sin lógica todavía.
+    """
+    raise NotImplementedError
 
 
 # ═══════════════════════════════════════════════════════════════════════════

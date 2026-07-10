@@ -3,6 +3,8 @@
 
 from utils.citations import (
     citation_key,
+    book_citation_key,
+    citation_for_chunk,
     build_cite_map,
     apply_citations,
     strip_reference_section,
@@ -92,3 +94,57 @@ class TestBuildCiteMap:
         cmap = build_cite_map(results, meta)
         assert cmap[1] == "(Garcia, 2020; 10.x)"
         assert cmap[2] == "(Reiter, 2015)"
+
+
+_BOOK_META = {
+    "2007_Najafpour_Biochemical_Engineering_and_Biotechnology": {
+        "year": 2007,
+        "title": "Biochemical Engineering and Biotechnology",
+        "authors": [{"full": "Najafpour", "surname": "Najafpour", "forename": ""}],
+    }
+}
+
+
+def _book_chunk(heading="14. Single-Cell Protein", ps=349, pe=358, section=None):
+    return {
+        "paper_id": "2007_Najafpour_Biochemical_Engineering_and_Biotechnology",
+        "doc_type": "book",
+        "heading_path": heading,
+        "section": section if section is not None else heading,
+        "page_start": ps, "page_end": pe,
+    }
+
+
+class TestBookCitation:
+    def test_book_key_format(self):
+        assert book_citation_key(_book_chunk(), _BOOK_META) == (
+            "Najafpour (2007), Biochemical Engineering and Biotechnology, "
+            "cap. 14, p. 349-358")
+
+    def test_single_page(self):
+        m = _book_chunk(heading="6. Bioreactor Design", ps=159, pe=159)
+        assert book_citation_key(m, _BOOK_META).endswith("cap. 6, p. 159")
+
+    def test_chapter_without_number_uses_section_title(self):
+        m = _book_chunk(heading="Appendix", ps=433, pe=434, section="Appendix")
+        key = book_citation_key(m, _BOOK_META)
+        assert "Appendix, p. 433-434" in key
+        assert "cap." not in key
+
+    def test_dispatch_book_vs_article(self):
+        # doc_type=="book" → formato libro
+        book = citation_for_chunk(_book_chunk(), _BOOK_META)
+        assert book.startswith("Najafpour (2007),")
+        # sin doc_type → formato artículo intacto (no regresión)
+        art = citation_for_chunk({"paper_id": "2020_garcia_x"},
+                                 {"2020_garcia_x": {"doi": "10.x", "year": 2020,
+                                                    "authors": []}})
+        assert art == "(Garcia, 2020; 10.x)"
+
+    def test_apply_citations_distributes_book_keys(self):
+        results = [(0.1, 0, _book_chunk(heading="6. Bioreactor Design",
+                                        ps=159, pe=186))]
+        cmap = build_cite_map(results, _BOOK_META)
+        out = apply_citations("El biorreactor es el corazón del proceso [1].", cmap)
+        assert ("(Najafpour (2007), Biochemical Engineering and Biotechnology, "
+                "cap. 6, p. 159-186)") in out

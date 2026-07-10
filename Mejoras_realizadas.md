@@ -2,6 +2,47 @@
 > Histórico append-only (lo más nuevo arriba). Backlog: Mejoras_pendientes.md · Estado/arquitectura: ESTADO.md
 
 ---
+### ✅ MVP pipeline de libros de docencia (item 31) (2026-07-10)
+
+**Motivación:** poder consultar libros de texto docentes en el mismo motor RAG
+que los papers y contrastar "lo que dice el manual" con "lo que matizan los
+papers recientes", reutilizando bge-m3 + FAISS + Streamlit y SIN GROBID (solo
+PDF de texto extraíble).
+
+**Qué se hizo (extremo a extremo):**
+- **Estructura NAS** `/Volumes/research/libros_docencia/` (fuera de `categorias/`)
+  y `run_books()` en `pipeline.py` (flujo propio, sin GROBID/summarize/master).
+- **`scripts/books/process.py`** — PDF → texto por página (PyMuPDF) + TOC
+  (`get_toc`, fallback por tamaño de fuente marcado `heuristic`). Limpieza
+  (dehyphenation, headers/footers recurrentes, números de página), **orden del
+  TOC por página** (arregla rangos corruptos por bookmarks desordenados), **skip
+  de front/back matter** (índice/prefacio), idempotencia por sha256. Deriva
+  `libros_metadata.jsonl` + `papers_metadata.jsonl`; título/autores del nombre de
+  archivo cuando el PDF no es fiable. Reutiliza `chunk_text`/`_split_to_max_chars`
+  de `3_process_corpus`.
+- **`scripts/books/embed.py`** — índice bge-m3/FAISS propio, incremental por hash
+  de libro con **borrado** y **preservando el `year`** del chunk. Núcleo de
+  embedding extraído a **`utils/embeddings.py`** (compartido con
+  `5_build_embeddings.py`, comportamiento de artículos intacto).
+- **`scripts/books/query.py`** — wrapper fino sobre `8_query_rag.py`.
+- **Citas de libro**: `citation_for_chunk()` en `utils/citations.py` despacha por
+  `doc_type` → `Autor (Año), Libro, cap. N, p. inicio-fin`; artículos sin cambio.
+  `passes_filters` acepta `doc_type`; `export_refs` y `8_query_rag.py` muestran la
+  cita de libro (cap.+página). `doc_type="article"` por defecto en chunks nuevos
+  de artículos (diff de 1 línea en `3_process_corpus.py`).
+- **Página "Preparar clase"** (`pages/14_Preparar_clase.py`, solo app privada):
+  recupera de libros + categorías y **fusiona con cupo mínimo de libro**
+  (`fuse_results`, mismo patrón que los adjuntos); sintetiza **contrastando
+  manual↔papers** con citas en su formato y distingue 📘/📄 en el panel. El núcleo
+  RAG se extrajo a **`streamlit_app/rag_core.py`** (compartido con `2_RAG.py`, cero
+  duplicación).
+
+**Verificado:** 1 libro indexado (Najafpour 2007, 439 pág → **153 chunks**, dim
+1024); síntesis con cita de libro + de paper en el mismo texto (proveedor
+Anthropic por defecto). Tests: `test_books_process.py` (9) + citas de libro en
+`test_citations.py`; suite **182 passed**. **Evaluación Hit@k/MRR pendiente**.
+
+---
 ### ✅ Timeout de síntesis configurable en la batería RAG + cierre de la sesión de esta tarde (2026-07-10)
 
 **Motivación:** el `timeout=300` fijo del cliente Ollama en `run_batch()` podía
