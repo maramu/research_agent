@@ -235,6 +235,56 @@ def test_front_back_matter_not_chunked():
     assert recs, "el capítulo real debe seguir generando chunks"
 
 
+def test_toc_label_filename_suffix_normalized():
+    """Libros ensamblados de PDFs sueltos traen el TOC con los NOMBRES DE FICHERO
+    como etiquetas ('Chapter 1.pdf', 'Prelims.pdf', …). Se debe retirar el sufijo
+    '.pdf' para que heading_path/section lleven el título real (no 'C'), y para
+    que el chequeo de front/back matter reconozca Prelims/Index."""
+    # Normalización de la etiqueta.
+    assert bp.normalize_toc_title("Chapter 1.pdf") == "Chapter 1"
+    assert bp.normalize_toc_title("Prelims.pdf") == "Prelims"
+    assert bp.normalize_toc_title("Index.pdf") == "Index"
+    assert bp.normalize_toc_title("Appendix.pdf") == "Appendix"
+    assert bp.normalize_toc_title("  Chapter 3.PDF  ") == "Chapter 3"  # case-insensitive
+    assert bp.normalize_toc_title("Chapter 2") == "Chapter 2"  # sin sufijo: intacto
+
+    # Front/back matter tras normalizar: Prelims e Index se saltan; el capítulo no.
+    assert bp.is_front_back_matter(bp.normalize_toc_title("Prelims.pdf"))
+    assert bp.is_front_back_matter(bp.normalize_toc_title("Index.pdf"))
+    assert not bp.is_front_back_matter(bp.normalize_toc_title("Chapter 1.pdf"))
+    # Guard de falso positivo conservado.
+    assert not bp.is_front_back_matter("Refractive Index Measurement")
+
+    # Appendix: se CONSERVA como contenido (no front/back matter) pero no es capítulo.
+    assert not bp.is_front_back_matter("Appendix")
+    assert bp.is_supplementary_section("Appendix")
+    assert not bp.is_supplementary_section("Chapter 1")
+
+    # count_chapters cuenta solo los 'Chapter N' (excluye Prelims/Index/Appendix).
+    sections = [
+        {"title": "Prelims"}, {"title": "Chapter 1"}, {"title": "Chapter 2"},
+        {"title": "Chapter 3"}, {"title": "Chapter 4"}, {"title": "Chapter 5"},
+        {"title": "Chapter 6"}, {"title": "Appendix"}, {"title": "Index"},
+    ]
+    assert bp.count_chapters(sections) == 6
+
+
+def test_toc_extraction_strips_pdf_suffix():
+    """get_toc_entries debe entregar las etiquetas ya sin '.pdf'."""
+    doc = fitz.open()
+    for _ in range(4):
+        doc.new_page().insert_text((72, 100), "texto de relleno " * 20, fontsize=11)
+    doc.set_toc([
+        [1, "Prelims.pdf", 1],
+        [1, "Chapter 1.pdf", 2],
+        [1, "Index.pdf", 4],
+    ])
+    entries, source = bp.get_toc_entries(doc)
+    doc.close()
+    assert source == "pdf"
+    assert [e[1] for e in entries] == ["Prelims", "Chapter 1", "Index"]
+
+
 def test_non_text_pdf_flagged_ocr(tmp_path):
     """Un PDF vacío (sin texto) no debe considerarse extraíble."""
     p = tmp_path / "scanned.pdf"

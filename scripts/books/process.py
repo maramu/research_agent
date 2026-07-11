@@ -92,10 +92,17 @@ _FRONT_BACK_MATTER = (
     # Inglés
     "table of contents", "contents", "index", "indices", "preface", "foreword",
     "front matter", "acknowledgements", "acknowledgments", "acknowledgement",
-    "list of figures", "list of tables",
+    "list of figures", "list of tables", "prelims", "preliminaries",
     # Español (variantes evidentes)
     "indice", "indice general", "contenidos", "tabla de contenidos", "prefacio",
-    "prologo", "agradecimientos",
+    "prologo", "agradecimientos", "preliminares",
+)
+
+# Secciones suplementarias que SÍ se conservan como contenido (se trocean) pero
+# NO cuentan como capítulos en n_chapters (apéndices, anexos). Mismo criterio de
+# comparación que _FRONT_BACK_MATTER (normalizado, por igualdad o prefijo).
+_SUPPLEMENTARY_SECTIONS = (
+    "appendix", "appendices", "apendice", "apendices", "anexo", "anexos",
 )
 
 _ISBN_RE = re.compile(
@@ -152,18 +159,52 @@ def _norm_title(title: str) -> str:
     return re.sub(r"\s+", " ", t.lower()).strip()
 
 
+def normalize_toc_title(title: str) -> str:
+    """Normaliza la etiqueta cruda de una entrada del TOC.
+
+    Algunos libros se ensamblan a partir de PDFs sueltos y el TOC hereda los
+    NOMBRES DE FICHERO como etiquetas ('Chapter 1.pdf', 'Prelims.pdf', …). Se
+    limpia el espaciado y se retira un único sufijo '.pdf' (case-insensitive)
+    para que heading_path/section y el chequeo de front/back matter operen sobre
+    el título real, no sobre el nombre del fichero.
+    """
+    t = (title or "").strip()
+    if t.lower().endswith(".pdf"):
+        t = t[:-4].strip()
+    return t
+
+
+def _matches_section_group(title: str, group: Tuple[str, ...]) -> bool:
+    """True si el título normalizado coincide (igualdad o prefijo de palabra) con
+    alguna entrada del grupo. Evita falsos positivos como 'Indexation strategies'
+    o 'Refractive index measurement'."""
+    n = _norm_title(title)
+    return any(n == p or n.startswith(p + " ") for p in group)
+
+
 def is_front_back_matter(title: str) -> bool:
-    """True si el título es front/back matter (índice, prefacio, etc.).
+    """True si el título es front/back matter (índice, prefacio, prelims, etc.).
 
     No se trocean estas secciones (generan ruido: puntos guía del índice, etc.).
     Coincide por igualdad o por prefijo de palabra (evita falsos positivos como
     'Indexation strategies' o 'Refractive index measurement').
     """
-    n = _norm_title(title)
-    for p in _FRONT_BACK_MATTER:
-        if n == p or n.startswith(p + " "):
-            return True
-    return False
+    return _matches_section_group(title, _FRONT_BACK_MATTER)
+
+
+def is_supplementary_section(title: str) -> bool:
+    """True si el título es una sección suplementaria (apéndice/anexo): se
+    CONSERVA como contenido pero no cuenta como capítulo en n_chapters."""
+    return _matches_section_group(title, _SUPPLEMENTARY_SECTIONS)
+
+
+def count_chapters(sections: List[Dict]) -> int:
+    """Nº de capítulos reales: secciones que no son front/back matter ni
+    suplementarias (apéndices). Excluye el 'Front matter' sintético."""
+    return sum(
+        1 for s in sections
+        if not is_front_back_matter(s["title"]) and not is_supplementary_section(s["title"])
+    )
 
 
 def write_jsonl(path: Path, records: List[Dict]) -> None:
@@ -368,10 +409,12 @@ def get_toc_entries(doc: "fitz.Document") -> Tuple[List[List], str]:
     """
     toc = doc.get_toc(simple=True) or []
     entries = [
-        [int(lvl), (title or "").strip(), int(pg)]
+        [int(lvl), normalize_toc_title(title), int(pg)]
         for lvl, title, pg in toc
         if title and int(pg) >= 1
     ]
+    # Descarta entradas que quedaron sin título tras normalizar (p.ej. ".pdf").
+    entries = [e for e in entries if e[1]]
     if entries:
         return entries, "pdf"
     heur = detect_headings_by_font(doc)
@@ -764,7 +807,7 @@ def process_book(
 
             meta = build_book_metadata(
                 doc, book_id=book_id, pdf_path=pdf_path, sha256=sha,
-                n_pages=n_pages, n_chapters=len(sections), toc=entries,
+                n_pages=n_pages, n_chapters=count_chapters(sections), toc=entries,
                 toc_source=toc_source, text_extractable=True,
                 first_pages_text=first_pages_text,
             )

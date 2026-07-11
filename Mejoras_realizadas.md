@@ -2,6 +2,53 @@
 > Histórico append-only (lo más nuevo arriba). Backlog: Mejoras_pendientes.md · Estado/arquitectura: ESTADO.md
 
 ---
+### ✅ Fix TOC tipo "nombre de fichero.pdf" en libros (item 31) (2026-07-11)
+
+**Contexto:** añadido el 2º libro (Burstein 2011, *MATLAB in Bioscience and
+Biotechnology*, 248 pág). Procesa y embebe, pero se ensambló a partir de PDFs
+sueltos y su TOC (`doc.get_toc`) traía como etiquetas los NOMBRES DE FICHERO
+(`"Prelims.pdf"`, `"Chapter 1.pdf"`, …, `"Appendix.pdf"`, `"Index.pdf"`). Eso
+destapó dos bugs reales en `scripts/books/process.py`:
+
+- **Bug 1 — sufijo `.pdf` no normalizado.** La etiqueta cruda del TOC se
+  propagaba entera (con `.pdf`) a `heading_path`, `section` y al campo `toc` de
+  `libros_metadata.jsonl`. (El "truncado a 1 carácter" observado NO estaba en el
+  código: era un artefacto de inspeccionar `heading_path[0]` — que es un
+  **string** completo, no una lista — mostrando su primer carácter `'C'`/`'P'`.)
+- **Bug 2 — front/back matter no saltado.** `is_front_back_matter()` recibía la
+  etiqueta sin normalizar: `"Prelims"` no estaba en el set, e `"Index.pdf"` no
+  casaba contra `"index"` por el sufijo. Resultado: 4 chunks de Prelims + 3 de
+  Index entraban como cuerpo (ruido).
+- **Colateral:** `n_chapters` = `len(sections)` inflaba (contaba front/back
+  matter y apéndices).
+
+**Fix (mínimo y general):**
+- `normalize_toc_title()` — `strip()` + retira un sufijo `.pdf` (case-insensitive)
+  al leer el TOC en `get_toc_entries()`; limpia de golpe `heading_path`,
+  `section` y el `toc` de metadata. Entradas que quedan vacías se descartan.
+- `is_front_back_matter()` opera sobre la etiqueta ya normalizada; añadidos
+  `prelims`/`preliminaries`/`preliminares` al set. Guard de falsos positivos
+  conservado (`"Refractive Index Measurement"` NO salta).
+- `count_chapters()` — cuenta solo capítulos reales (ni front/back matter ni
+  suplementarios). Apéndices (`appendix`/`apéndice`/`anexo`) se **conservan como
+  contenido** pero no cuentan como capítulo → `n_chapters` correcto.
+- `year` del chunk intacto (invariante cerrado: nunca se recalcula por
+  `year_from_paper_id` en libros).
+- Test de regresión en `tests/test_books_process.py` (11 ✓): `"Chapter 1.pdf"`
+  → `heading_path` `"Chapter 1"` (no `"C"`); `"Prelims.pdf"`/`"Index.pdf"` son
+  front/back matter; `"Refractive Index Measurement"` no lo es; `count_chapters`
+  = 6.
+
+**Verificado (reproceso + re-embed):** Burstein **63 → 56 chunks** (−4 Prelims,
+−3 Index; Appendix conservado), 6 `Chapter N` con etiqueta completa, cero
+Prelims/Index en chunks, `n_chapters=6`, `year=2011` intacto, TOC de metadata sin
+`.pdf`, sin duplicación en `md_clean`. Najafpour sin regresión (153 chunks,
+`year=2007`; `n_chapters` ahora 17 real, antes inflado por el Appendix). Los 3
+⚠️ de truncado de Burstein durante el embed son el truncado reactivo esperado de
+`embed_texts` sobre contenido MATLAB denso en tokens (no afecta al texto guardado
+en `metadata.jsonl` ni a `md_clean`).
+
+---
 ### ✅ MVP pipeline de libros de docencia (item 31) (2026-07-10)
 
 **Motivación:** poder consultar libros de texto docentes en el mismo motor RAG

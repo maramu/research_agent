@@ -386,9 +386,19 @@ con citas en su formato, y distingue 📘 libro vs 📄 paper en el panel. El n�
 (índices, proveedores, síntesis, export) se extrajo a `streamlit_app/rag_core.py`,
 compartido con `2_RAG.py` (cero duplicación).
 
-**Estado**: MVP funcional con **1 libro indexado** (Najafpour 2007, *Biochemical
-Engineering and Biotechnology*, 439 pág → **153 chunks**, dim 1024). **Evaluación
-formal Hit@k/MRR pendiente** (falta golden manual).
+**Estado**: MVP funcional con **2 libros indexados** (Najafpour 2007,
+*Biochemical Engineering and Biotechnology*, 439 pág → **153 chunks**; Burstein
+2011, *MATLAB in Bioscience and Biotechnology*, 248 pág → **56 chunks**; dim 1024;
+209 vectores). **Evaluación formal Hit@k/MRR pendiente** (falta golden manual).
+
+**Nota TOC tipo fichero (fix 2026-07-11)**: libros ensamblados de PDFs sueltos
+traen el TOC con los nombres de fichero como etiquetas (`"Chapter 1.pdf"`,
+`"Prelims.pdf"`…). `normalize_toc_title()` retira el sufijo `.pdf` al leer el TOC,
+así que `heading_path`/`section`/`toc` quedan con el título real; `prelims`/`index`
+se saltan como front/back matter; apéndices se conservan como contenido pero no
+cuentan en `n_chapters` (`count_chapters()`). Los libros de código (MATLAB) disparan
+el **truncado reactivo** de `embed_texts` (chunks muy densos en tokens): es
+esperado y NO afecta al texto guardado en `metadata.jsonl`/`md_clean`.
 
 ## Interfaz web (Streamlit)
 
