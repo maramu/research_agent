@@ -958,50 +958,60 @@ if not PUBLIC:
                            "re-ejecuta el validador para refrescar el sidecar.")
 
             # ── (ii) Adopción MASIVA de autores por categoría (preview→confirmar) ──
+            # Candidatos = authors_mismatch ya detectado en el sidecar (última
+            # pasada --crossref), no un barrido en vivo de todos los DOI de la
+            # categoría: evita re-consultar Crossref para papers que ya
+            # coinciden o no han cambiado desde el último "🔄 Re-validar".
             st.markdown("---")
             st.markdown("**Adopción masiva de autores de Crossref** "
-                        "(todos los papers con DOI de esta categoría)")
+                        "(según el sidecar — pulsa \"🔄 Re-validar esta categoría\" "
+                        "arriba si quieres refrescarlo antes)")
             prev_key = f"authors_preview_{sel}"
 
-            if st.button("👁 Previsualizar adopción de autores", key=f"prev_btn_{sel}"):
-                with st.spinner("Consultando Crossref por DOI…"):
+            authors_candidates = [
+                pid for pid, row in sidecar.items()
+                if (pid, "authors") not in dismissed
+                and any(i.get("code") == "authors_mismatch"
+                        for i in (row.get("crossref") or {}).get("issues", []))]
+
+            if st.button(f"👁 Previsualizar adopción de autores "
+                         f"({len(authors_candidates)} candidato(s) del sidecar)",
+                         key=f"prev_btn_{sel}", disabled=not authors_candidates):
+                with st.spinner(f"Consultando Crossref para "
+                                 f"{len(authors_candidates)} paper(s)…"):
                     preview = []
-                    for r in all_rows:
-                        pid = r["paper_id"]
-                        if (pid, "authors") in dismissed:
-                            continue
+                    for pid in authors_candidates:
+                        r = by_pid.get(pid, {})
                         doi = str(r.get("doi") or "").strip()
                         if not doi:
-                            preview.append({"paper_id": pid, "estado": "sin DOI",
-                                            "actual": r.get("authors", ""),
-                                            "crossref": "", "cambia": False})
                             continue
                         work = fetch_work(doi)
                         cr_auth = _cr_authors_to_writer((work or {}).get("authors") or [])
                         if not cr_auth:
-                            preview.append({"paper_id": pid, "estado": "sin fuente",
-                                            "actual": r.get("authors", ""),
-                                            "crossref": "", "cambia": False})
                             continue
                         cr_txt = "; ".join(a["full"] for a in cr_auth)
+                        actual = str(r.get("authors") or "").strip()
+                        if cr_txt.strip() == actual:
+                            continue  # ya coincide con el valor vigente
                         preview.append({
-                            "paper_id": pid, "estado": "ok",
-                            "actual": r.get("authors", ""), "crossref": cr_txt,
-                            "cambia": cr_txt.strip() != str(r.get("authors") or "").strip(),
-                            "_authors": cr_auth})
+                            "paper_id": pid, "actual": r.get("authors", ""),
+                            "crossref": cr_txt, "cambia": True, "_authors": cr_auth})
                 st.session_state[prev_key] = preview
                 st.rerun()
 
             preview = st.session_state.get(prev_key)
-            if preview:
+            if preview is not None:
                 n_cambia = sum(1 for p in preview if p["cambia"])
-                n_sin = sum(1 for p in preview if p["estado"] != "ok")
-                st.caption(f"**{n_cambia}** paper(s) se actualizarán · "
-                           f"{n_sin} sin fuente/DOI (se saltan).")
-                st.dataframe(
-                    pd.DataFrame([{k: v for k, v in p.items() if not k.startswith("_")}
-                                  for p in preview]),
-                    hide_index=True, use_container_width=True)
+                if not preview:
+                    st.caption("Sin autores por adoptar (ya coinciden con Crossref).")
+                else:
+                    st.caption(f"**{n_cambia}** paper(s) se actualizarán "
+                               f"(de {len(authors_candidates)} candidato(s) del sidecar).")
+                if preview:
+                    st.dataframe(
+                        pd.DataFrame([{k: v for k, v in p.items() if not k.startswith("_")}
+                                      for p in preview]),
+                        hide_index=True, use_container_width=True)
 
                 cambia_rows = [p for p in preview if p["cambia"]]
                 if cambia_rows:
