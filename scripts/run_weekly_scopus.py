@@ -93,6 +93,11 @@ def _count_chunks(cat: str) -> int:
 
 
 def _load_pending_dois() -> list[dict]:
+    n_reconciliados = download_registry.reconcile_with_corpus()
+    if n_reconciliados:
+        logging.getLogger("weekly_scopus").info(
+            "Reconciliados %d DOI(s) pendientes ya presentes en el corpus "
+            "(ingesta fuera de 3a_download_pdfs.py).", n_reconciliados)
     df = download_registry.load()
     if df.empty:
         return []

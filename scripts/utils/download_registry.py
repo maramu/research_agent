@@ -12,14 +12,16 @@ y por el futuro subagente navegador (item 28) como fuente de trabajo.
 """
 from __future__ import annotations
 
+import json
 from datetime import date, timedelta
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional, Set
 
 import pandas as pd
 
 NAS_ROOT = Path("/Volumes/research")
 REGISTRY_PATH = NAS_ROOT / "metadatos" / "pendientes_descarga.csv"
+CATEGORIAS_DIR = NAS_ROOT / "categorias"
 
 _COLS = [
     "doi", "title", "year", "category",
@@ -106,6 +108,62 @@ def mark_downloaded(dois: List[str]) -> None:
             df.loc[mask, "status"] = "downloaded"
             df.loc[mask, "last_checked"] = today
     save(df)
+
+
+def _corpus_dois(categorias_dir: Optional[Path] = None) -> Set[str]:
+    """DOIs (normalizados: strip+lower) presentes en papers_metadata.jsonl de
+    todas las CANONICAL_CATEGORIES — para cotejar contra el registro."""
+    from utils.constants import CANONICAL_CATEGORIES
+    base = Path(categorias_dir) if categorias_dir else CATEGORIAS_DIR
+    dois: Set[str] = set()
+    for cat in CANONICAL_CATEGORIES:
+        jsonl = base / cat / "metadata" / "papers_metadata.jsonl"
+        if not jsonl.exists():
+            continue
+        with jsonl.open(encoding="utf-8") as f:
+            for line in f:
+                s = line.strip()
+                if not s:
+                    continue
+                try:
+                    rec = json.loads(s)
+                except ValueError:
+                    continue
+                doi = str(rec.get("doi") or "").strip().lower()
+                if doi:
+                    dois.add(doi)
+    return dois
+
+
+def reconcile_with_corpus(categorias_dir: Optional[Path] = None) -> int:
+    """Marca 'downloaded' los DOI 'pending' del registro que YA están en el
+    corpus (papers_metadata.jsonl de alguna categoría).
+
+    mark_downloaded() solo la llama 3a_download_pdfs.py; un DOI ingestado por
+    otra vía (p.ej. PDF subido a mano, source_type="manual") nunca pasa por
+    ahí y se queda "pending" para siempre aunque el paper ya exista. Esto
+    cierra ese hueco. No toca papers_metadata.jsonl, solo el registro.
+    Devuelve el nº de filas reconciliadas."""
+    if not REGISTRY_PATH.exists():
+        return 0
+    df = load()
+    pending_mask = df["status"] == "pending"
+    if not pending_mask.any():
+        return 0
+    corpus = _corpus_dois(categorias_dir)
+    if not corpus:
+        return 0
+    doi_norm = df["doi"].astype(str).str.strip().str.lower()
+    match_mask = pending_mask & doi_norm.isin(corpus)
+    affected = int(match_mask.sum())
+    if affected:
+        today = date.today().isoformat()
+        df.loc[match_mask, "status"] = "downloaded"
+        df.loc[match_mask, "last_checked"] = today
+        df.loc[match_mask, "notes"] = ("reconciliado: DOI ya en el corpus "
+                                        "(ingesta fuera de 3a_download_pdfs.py)")
+        save(df)
+    return affected
 
 
 def pending_active(df: pd.DataFrame, today: date | None = None) -> pd.DataFrame:

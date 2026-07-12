@@ -34,6 +34,12 @@ if not check_password("PRIVATE_APP_PASSWORD"):
 
 st.title("😴 DOIs pendientes")
 
+n_reconciliados = download_registry.reconcile_with_corpus()
+if n_reconciliados:
+    st.info(f"🔄 {n_reconciliados} DOI(s) reconciliado(s) automáticamente: "
+            "ya estaban en el corpus (ingesta manual u otra vía distinta de "
+            "la descarga automática) y se han marcado como descargados.")
+
 mostrar_pospuestos = st.toggle("Mostrar pospuestos", value=False)
 
 df = download_registry.load()

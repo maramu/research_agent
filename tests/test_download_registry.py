@@ -98,6 +98,80 @@ class TestMigration:
         assert reloaded.iloc[0]["snooze_until"] == ""
 
 
+class TestReconcileWithCorpus:
+    """DOIs 'pending' que ya están en algún papers_metadata.jsonl del corpus
+    (ingesta fuera de 3a_download_pdfs.py, p.ej. subida manual) deben pasar
+    a 'downloaded' sin intervención manual."""
+
+    def _write_corpus(self, tmp_path, category, dois):
+        import json
+        meta_dir = tmp_path / category / "metadata"
+        meta_dir.mkdir(parents=True)
+        jsonl = meta_dir / "papers_metadata.jsonl"
+        with jsonl.open("w", encoding="utf-8") as f:
+            for i, doi in enumerate(dois):
+                f.write(json.dumps({"paper_id": f"p{i}", "doi": doi}) + "\n")
+
+    def test_pending_doi_ya_en_corpus_se_marca_downloaded(self, tmp_path, monkeypatch):
+        from utils.constants import CANONICAL_CATEGORIES
+        cat = CANONICAL_CATEGORIES[0]
+        self._write_corpus(tmp_path, cat, ["10.1016/j.wasman.2026.115484"])
+
+        df = pd.DataFrame([_row(doi="10.1016/j.wasman.2026.115484")])
+        dr.save(df)
+
+        affected = dr.reconcile_with_corpus(categorias_dir=tmp_path)
+        assert affected == 1
+
+        reloaded = dr.load()
+        row = reloaded[reloaded["doi"] == "10.1016/j.wasman.2026.115484"].iloc[0]
+        assert row["status"] == "downloaded"
+
+    def test_pending_doi_ausente_del_corpus_no_cambia(self, tmp_path, monkeypatch):
+        from utils.constants import CANONICAL_CATEGORIES
+        cat = CANONICAL_CATEGORIES[0]
+        self._write_corpus(tmp_path, cat, ["10.1016/otro.doi"])
+
+        df = pd.DataFrame([_row(doi="10.1016/j.wasman.2026.115484")])
+        dr.save(df)
+
+        affected = dr.reconcile_with_corpus(categorias_dir=tmp_path)
+        assert affected == 0
+
+        reloaded = dr.load()
+        row = reloaded[reloaded["doi"] == "10.1016/j.wasman.2026.115484"].iloc[0]
+        assert row["status"] == "pending"
+
+    def test_reconcile_es_case_insensitive(self, tmp_path):
+        from utils.constants import CANONICAL_CATEGORIES
+        cat = CANONICAL_CATEGORIES[0]
+        self._write_corpus(tmp_path, cat, ["10.1016/J.WASMAN.2026.115484"])
+
+        df = pd.DataFrame([_row(doi="10.1016/j.wasman.2026.115484")])
+        dr.save(df)
+
+        affected = dr.reconcile_with_corpus(categorias_dir=tmp_path)
+        assert affected == 1
+
+    def test_reconcile_no_toca_snooze_ni_downloaded_previos(self, tmp_path):
+        from utils.constants import CANONICAL_CATEGORIES
+        cat = CANONICAL_CATEGORIES[0]
+        self._write_corpus(tmp_path, cat, ["10.1016/ya.descargado"])
+
+        df = pd.DataFrame([
+            _row(doi="10.1016/ya.descargado", status="downloaded"),
+            _row(doi="10.1016/pospuesto", snooze_until="2099-01-01"),
+        ])
+        dr.save(df)
+
+        affected = dr.reconcile_with_corpus(categorias_dir=tmp_path)
+        assert affected == 0
+        reloaded = dr.load()
+        pospuesto = reloaded[reloaded["doi"] == "10.1016/pospuesto"].iloc[0]
+        assert pospuesto["snooze_until"] == "2099-01-01"
+        assert pospuesto["status"] == "pending"
+
+
 class TestUpsertSnoozeSafe:
     def test_upsert_does_not_clear_snooze_until(self):
         future = (date.today() + timedelta(days=730)).isoformat()
