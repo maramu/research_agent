@@ -80,6 +80,10 @@ página `15_Pendientes.py`) para sacar del email semanal los DOIs sin
 interés/acceso — detalle en `Mejoras_realizadas.md`. El subagente OpenClaw
 (item 28) seguiría alimentándose de `pending_active()`, así no intentaría
 descargas de DOIs ya descartados/pospuestos por el usuario.
+**Verificación pendiente en pciq22:** `py_compile`+`pytest` ya en verde en
+producción; falta el round-trip funcional contra un DOI real (snooze →
+`run_weekly_scopus.py --dry-run` lo excluye → unsnooze) y la comprobación
+manual de la página en el navegador.
 
 ### 30. Documentación para el grupo — ALTA si se comparte
 
@@ -362,6 +366,11 @@ Botones "✋ Mantener {campo}" junto a cada "Adoptar", incluido el lote masivo d
 año ±1 (antes solo-lectura) y los "saltados" (sin DOI/miss/sin año, con
 "🚫 No reintentar año"). Panel "🔓 Campos marcados como verificados" con
 "↩ Revertir" para deshacer. Detalle en Mejoras_realizadas.md.
+**Verificación pendiente en pciq22:** `py_compile`+`pytest` ya en verde en
+producción; falta el round-trip funcional contra el sidecar real (marcar
+"Mantener" → re-ejecutar `validate_metadata.py --crossref` → confirmar que
+el issue no reaparece en origen → revertir) y la comprobación manual de los
+botones nuevos en `11_Articulos.py` en el navegador.
 
 ### 43. Verificaciones pendientes de la revisión 2026-06-12 — seguimiento
 3_process_corpus.py (canonical_section vs CANONICAL_SECTIONS), ~~1_rename_papers_by_doi.py (nombre

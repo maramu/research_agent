@@ -53,6 +53,13 @@ pciq22, o cada vez que se pulsa "👁 Previsualizar").
   campo verificado deja el sidecar; otros campos del mismo paper no se ven
   afectados; un mismatch de Crossref verificado no flaggea el paper.
 
+**Verificación pciq22 (2026-07-12):** `py_compile` de los 7 ficheros tocados
+por este item + el de snooze (item 15/28) y `pytest tests/ -q` (203 tests)
+en verde en la máquina de producción. **Pendiente:** validación funcional
+contra datos reales del NAS (regenerar sidecar → marcar "Mantener" →
+confirmar que el issue no reaparece en origen → revertir) y comprobación
+manual en el navegador de los botones nuevos en `11_Articulos.py`.
+
 ---
 ### ✅ Posponer DOIs pendientes sin interés/acceso (snooze 2 años) (item 15/28) (2026-07-12)
 
@@ -90,6 +97,12 @@ para el usuario.
   excluido si no es `pending`), `snooze`/`unsnooze`, migración de CSV sin la
   columna, y regresión clave: `upsert()` sobre un DOI ya pospuesto no le
   cambia `snooze_until`.
+
+**Verificación pciq22 (2026-07-12):** `py_compile` + `pytest tests/ -q` (203
+tests) en verde en la máquina de producción. **Pendiente:** snoozear un DOI
+pendiente real, confirmar que `run_weekly_scopus.py --dry-run` deja de
+listarlo, revertir con `unsnooze` y comprobación manual de la página
+`15_Pendientes.py` en el navegador.
 
 ---
 ### ✅ Fix TOC tipo "nombre de fichero.pdf" en libros (item 31) (2026-07-11)
