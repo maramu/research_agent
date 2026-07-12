@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import argparse
 import concurrent.futures
-import csv
 import logging
 import os
 import smtplib
@@ -46,6 +45,7 @@ from dotenv import load_dotenv  # noqa: E402
 load_dotenv(CONFIG_DIR / ".env")
 
 from pipeline import run_scopus  # noqa: E402
+from utils import download_registry  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Categorías a procesar cada semana
@@ -93,15 +93,10 @@ def _count_chunks(cat: str) -> int:
 
 
 def _load_pending_dois() -> list[dict]:
-    csv_path = METADATOS_DIR / "pendientes_descarga.csv"
-    if not csv_path.exists():
+    df = download_registry.load()
+    if df.empty:
         return []
-    rows: list[dict] = []
-    with open(csv_path, encoding="utf-8-sig") as fh:
-        reader = csv.DictReader(fh)
-        for row in reader:
-            if row.get("status", "").strip() == "pending":
-                rows.append(dict(row))
+    rows = download_registry.pending_active(df).to_dict("records")
     # Ordenar: categoría ascendente, last_checked descendente (stable sort en 2 pasos)
     rows.sort(key=lambda r: r.get("last_checked", ""), reverse=True)
     rows.sort(key=lambda r: r.get("category", ""))

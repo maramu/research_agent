@@ -74,6 +74,13 @@ Entrada: `pendientes_descarga.csv` (item 15, prerequisito).
 Reglas: sin saltarse paywalls, sin captchas, pausas entre accesos, límite por sesión,
 parar ante 403/429.
 
+**2026-07-12 (item 15):** añadido snooze de 2 años (`snooze_until` +
+`pending_active()`/`snooze()`/`unsnooze()` en `download_registry.py` +
+página `15_Pendientes.py`) para sacar del email semanal los DOIs sin
+interés/acceso — detalle en `Mejoras_realizadas.md`. El subagente OpenClaw
+(item 28) seguiría alimentándose de `pending_active()`, así no intentaría
+descargas de DOIs ya descartados/pospuestos por el usuario.
+
 ### 30. Documentación para el grupo — ALTA si se comparte
 
 - **Guía rápida**: cómo buscar artículos, cómo hacer buenas preguntas RAG,

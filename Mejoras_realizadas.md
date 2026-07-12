@@ -2,6 +2,44 @@
 > Histórico append-only (lo más nuevo arriba). Backlog: Mejoras_pendientes.md · Estado/arquitectura: ESTADO.md
 
 ---
+### ✅ Posponer DOIs pendientes sin interés/acceso (snooze 2 años) (item 15/28) (2026-07-12)
+
+**Contexto:** el email semanal (`run_weekly_scopus.py`) lista todos los DOIs con
+`status=="pending"` de `pendientes_descarga.csv`, sin distinguir los que
+simplemente no tienen acceso (paywall) o no interesan de los realmente
+accionables. Cada semana volvían a salir los mismos DOIs "muertos", con ruido
+para el usuario.
+
+**Fix:**
+- `utils/download_registry.py`: nueva columna `snooze_until` en `_COLS`
+  (`load()` la rellena a `""` para CSVs antiguos → migración automática, sin
+  script aparte).
+  - `pending_active(df, today=None)` — fuente ÚNICA de verdad de "qué es un
+    pendiente activo" (`status=="pending"` y `snooze_until` vacío o vencido).
+    La usan tanto `run_weekly_scopus.py` como la página nueva, para que email
+    y UI no diverjan.
+  - `snooze(dois, years=2, note="")` — fija `snooze_until = hoy + years*365
+    días`; no toca `status` (sigue `pending`).
+  - `unsnooze(dois)` — limpia `snooze_until`.
+  - `upsert()` no se tocó: al no escribir la columna `snooze_until` en las
+    filas ya existentes, el snooze **sobrevive** a la re-ejecución de Scopus
+    (la ingesta semanal no des-pospone DOIs ya pospuestos). Verificado con
+    test de regresión dedicado.
+- `run_weekly_scopus.py`: `_load_pending_dois()` ahora usa
+  `download_registry.load()` + `pending_active(df)` en vez del filtro
+  `status=="pending"` leído a pelo del CSV.
+- Página nueva `streamlit_app/pages/15_Pendientes.py` (solo app privada):
+  toggle "Mostrar pospuestos" (OFF por defecto), `st.data_editor` con
+  checkbox de selección, DOI como `LinkColumn`, resto de campos solo-lectura;
+  botones "😴 Posponer 2 años seleccionados" y "🔄 Reactivar seleccionados".
+- Tests nuevos en `tests/test_download_registry.py` (8 ✓, tmp_path +
+  monkeypatch de `REGISTRY_PATH`, nada de NAS real): `pending_active` (activo
+  sin snooze / excluido con snooze vigente / incluido con snooze vencido /
+  excluido si no es `pending`), `snooze`/`unsnooze`, migración de CSV sin la
+  columna, y regresión clave: `upsert()` sobre un DOI ya pospuesto no le
+  cambia `snooze_until`.
+
+---
 ### ✅ Fix TOC tipo "nombre de fichero.pdf" en libros (item 31) (2026-07-11)
 
 **Contexto:** añadido el 2º libro (Burstein 2011, *MATLAB in Bioscience and

@@ -12,7 +12,7 @@ y por el futuro subagente navegador (item 28) como fuente de trabajo.
 """
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Dict, List
 
@@ -24,6 +24,7 @@ REGISTRY_PATH = NAS_ROOT / "metadatos" / "pendientes_descarga.csv"
 _COLS = [
     "doi", "title", "year", "category",
     "landing_url", "status", "reason", "last_checked", "notes",
+    "snooze_until",
 ]
 
 # Estados que se consideran resueltos (no se sobreescriben al hacer upsert)
@@ -105,3 +106,52 @@ def mark_downloaded(dois: List[str]) -> None:
             df.loc[mask, "status"] = "downloaded"
             df.loc[mask, "last_checked"] = today
     save(df)
+
+
+def pending_active(df: pd.DataFrame, today: date | None = None) -> pd.DataFrame:
+    """Filas 'pending' que siguen activas: snooze_until vacío o ya vencido.
+
+    Fuente única de verdad de "qué es un pendiente activo" — la usan tanto
+    el email semanal (run_weekly_scopus.py) como la página de gestión, para
+    que no diverjan sobre qué DOIs se consideran pendientes.
+    """
+    if today is None:
+        today = date.today()
+    today_iso = today.isoformat()
+    snooze = df["snooze_until"].astype(str).str.strip()
+    is_active_snooze = (snooze == "") | (snooze <= today_iso)
+    return df[(df["status"] == "pending") & is_active_snooze]
+
+
+def snooze(dois: List[str], years: int = 2, note: str = "") -> int:
+    """Pospone `dois` fijando snooze_until = hoy + years*365 días.
+
+    No cambia `status` (sigue 'pending'); pending_active() es quien decide
+    si una fila pospuesta debe salir en el email. Devuelve el nº de filas
+    afectadas.
+    """
+    if not dois:
+        return 0
+    df = load()
+    mask = df["doi"].isin(dois)
+    affected = int(mask.sum())
+    if affected:
+        until = (date.today() + timedelta(days=365 * years)).isoformat()
+        df.loc[mask, "snooze_until"] = until
+        if note:
+            df.loc[mask, "notes"] = note
+        save(df)
+    return affected
+
+
+def unsnooze(dois: List[str]) -> int:
+    """Reactiva `dois` pospuestos (snooze_until = ""). Devuelve filas afectadas."""
+    if not dois:
+        return 0
+    df = load()
+    mask = df["doi"].isin(dois)
+    affected = int(mask.sum())
+    if affected:
+        df.loc[mask, "snooze_until"] = ""
+        save(df)
+    return affected
