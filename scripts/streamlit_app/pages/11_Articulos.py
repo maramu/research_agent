@@ -929,10 +929,23 @@ if not PUBLIC:
                             st.rerun()
 
                     if local_issues:
-                        st.markdown("**Diagnóstico local (Nivel 1)** — solo lectura:")
-                        for iss in local_issues:
-                            st.markdown(f"- `{iss.get('code')}` "
+                        st.markdown("**Diagnóstico local (Nivel 1)**:")
+                        for k, iss in enumerate(local_issues):
+                            field = iss.get("field") or ""
+                            cL, cR = st.columns([4, 1])
+                            cL.markdown(f"- `{iss.get('code')}` "
                                         f"({iss.get('severity')}): {iss.get('msg')}")
+                            if field in validation_overrides.FIELDS:
+                                if cR.button(
+                                        "✋ Mantener",
+                                        key=f"keep_local_{sel}_{pid}_{field}_{iss.get('code')}_{k}"):
+                                    validation_overrides.dismiss(
+                                        sel, pid, field,
+                                        note=f"rechazado diagnóstico local "
+                                             f"{iss.get('code')}: {iss.get('msg')}")
+                                    st.success(f"✓ {field} marcado como verificado "
+                                               "— no se volverá a avisar.")
+                                    st.rerun()
 
                     if cr_block is None:
                         st.caption("ℹ Re-ejecuta el validador con `--crossref` "
