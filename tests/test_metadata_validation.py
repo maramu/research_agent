@@ -455,6 +455,39 @@ def test_validate_category_crossref_dismissed_excluye_mismatch(tmp_path):
     assert flagged_dismissed == []
 
 
+def test_validate_category_crossref_entra_por_miss_aislado(tmp_path):
+    """Un paper sin ningún otro issue, pero cuyo DOI (correcto) no resuelve
+    en Crossref, también debe entrar al sidecar — si no, es invisible para
+    el botón "Mantener DOI" de 11_Articulos.py."""
+    cat = "l2miss"
+    rows = [
+        {"paper_id": "p1", "doi": "10.9999/correct-but-unindexed",
+         "title": "A Correct DOI Not Indexed", "journal": "Some Journal",
+         "year": 2020, "authors": []},
+    ]
+    base = _write_jsonl(tmp_path, cat, rows)
+    flagged = validate_category_crossref(cat, base, fetch=_fetch(None))
+    assert len(flagged) == 1
+    assert flagged[0]["crossref"]["fetched"] is False
+    assert "crossref_miss" in _codes(flagged[0]["crossref"]["issues"])
+
+
+def test_validate_category_crossref_dismissed_doi_excluye_miss_aislado(tmp_path):
+    """Marcar "doi" como verificado silencia el miss y, si era el único
+    motivo de entrada, el paper deja de aparecer en el sidecar."""
+    cat = "l2missdismiss"
+    rows = [
+        {"paper_id": "p1", "doi": "10.9999/correct-but-unindexed",
+         "title": "A Correct DOI Not Indexed", "journal": "Some Journal",
+         "year": 2020, "authors": []},
+    ]
+    base = _write_jsonl(tmp_path, cat, rows)
+    dismissed = {("p1", "doi")}
+    flagged = validate_category_crossref(
+        cat, base, fetch=_fetch(None), dismissed=dismissed)
+    assert flagged == []
+
+
 def test_validate_category_crossref_limit(tmp_path):
     """--limit topa las llamadas: con limit=1 solo el primer paper trae bloque."""
     cat = "l2lim"

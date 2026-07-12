@@ -27,9 +27,11 @@ OVERRIDES_PATH = NAS_ROOT / "metadatos" / "validation_overrides.csv"
 _COLS = ["category", "paper_id", "field", "date", "note"]
 
 # Campos sobre los que tiene sentido "mantener" (llevan sugerencia Crossref
-# accionable en el listado por-campo o en una adopción masiva). doi/crossref_miss
-# quedan fuera: ahí no hay botón "adoptar/mantener".
-FIELDS = {"title", "journal", "year", "authors"}
+# accionable en el listado por-campo, en una adopción masiva, o un aviso
+# informativo como crossref_miss). "doi" cubre el caso "DOI correcto pero no
+# resuelto en Crossref (404/miss)" — mantenerlo no cambia el valor del DOI,
+# solo silencia el aviso.
+FIELDS = {"title", "journal", "year", "authors", "doi"}
 
 
 def load() -> pd.DataFrame:

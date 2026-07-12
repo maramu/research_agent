@@ -122,12 +122,20 @@ def crossref_suggest(title: str, mailto: str = "",
     return out
 
 
+# Campos que se pueden dejar vacíos explícitamente al editar (p.ej. journal
+# en un book chapter, o quitar un DOI incorrecto). title/year/authors quedan
+# protegidos: un valor vacío ahí nunca se escribe (evita vaciados accidentales
+# por un fallo de UI o un borrado sin querer).
+CLEARABLE_FIELDS = {"journal", "doi"}
+
+
 def update_metadata_fields(category: str, updates: dict) -> int:
     """Actualiza title/doi/year/authors/journal en papers_metadata.jsonl y doi_manual.xlsx.
 
     updates: {paper_id: {field: value, ...}} donde field ∈ {title, doi, year, authors, journal}.
-    Escribe solo los campos presentes y no vacíos. Backup .bak previo.
-    Devuelve el número de registros modificados en el jsonl.
+    Escribe los campos presentes; journal/doi (CLEARABLE_FIELDS) se pueden
+    vaciar explícitamente, el resto solo se escribe si no está vacío. Backup
+    .bak previo. Devuelve el número de registros modificados en el jsonl.
     """
     if not updates:
         return 0
@@ -150,9 +158,15 @@ def update_metadata_fields(category: str, updates: dict) -> int:
                     modified = False
                     for field in ("title", "doi", "year", "authors", "journal"):
                         v = patch.get(field)
-                        if v is not None and v != "" and v != []:
-                            d[field] = v
-                            modified = True
+                        if v is None:
+                            continue
+                        if v == "" or v == []:
+                            if field in CLEARABLE_FIELDS and d.get(field) not in (None, "", []):
+                                d[field] = "" if v == "" else []
+                                modified = True
+                            continue
+                        d[field] = v
+                        modified = True
                     if modified:
                         changed += 1
                 lines.append(json.dumps(d, ensure_ascii=False))
@@ -213,6 +227,20 @@ def update_metadata_fields(category: str, updates: dict) -> int:
             wb.save(doi_xlsx)
 
     return changed
+
+
+def _cell(row, field: str) -> str:
+    """Lee una celda de una fila de st.data_editor como texto seguro.
+
+    Las columnas tipadas "string" (pandas StringDtype) devuelven pd.NA —no
+    None ni ""— cuando el usuario borra el contenido de la celda. str(pd.NA)
+    da la cadena literal "<NA>", que un `if valor:` trata como no-vacía y
+    acababa escribiéndose tal cual en papers_metadata.jsonl. Aquí se
+    normaliza pd.NA/None a "" antes de comparar o guardar."""
+    v = row.get(field)
+    if v is None or pd.isna(v):
+        return ""
+    return str(v).strip()
 
 
 def _parse_authors_text(text: str) -> list[dict]:
@@ -699,19 +727,19 @@ if not PUBLIC:
                         for _, row in edited.iterrows():
                             pid = row["paper_id"]; o = orig.get(pid, {})
                             u = {}
-                            ti_v = str(row.get("title", "")).strip()
+                            ti_v = _cell(row, "title")
                             if ti_v != str(o.get("title") or "").strip():
                                 u["title"] = ti_v
-                            doi_v = str(row.get("doi", "")).strip()
-                            if doi_v and doi_v != str(o.get("doi") or "").strip():
+                            doi_v = _cell(row, "doi")
+                            if doi_v != str(o.get("doi") or "").strip():
                                 u["doi"] = doi_v
-                            yr_v = str(row.get("year", "")).strip()
+                            yr_v = _cell(row, "year")
                             if yr_v != ("" if o.get("year") in (None, "") else str(o.get("year"))):
                                 u["year"] = int(yr_v) if yr_v.isdigit() else (yr_v or None)
-                            au_v = str(row.get("authors", "")).strip()
+                            au_v = _cell(row, "authors")
                             if au_v != str(o.get("authors") or "").strip():
                                 u["authors"] = _parse_authors_text(au_v)
-                            jr_v = str(row.get("journal", "")).strip()
+                            jr_v = _cell(row, "journal")
                             if jr_v != str(o.get("journal") or "").strip():
                                 u["journal"] = jr_v
                             if u:
@@ -811,6 +839,10 @@ if not PUBLIC:
                             and i.get("field") in ("title", "journal", "year")]
                 authors_iss = [i for i in cr_issues
                                if i.get("code") == "authors_mismatch"]
+                # DOI correcto pero no resuelto en Crossref (404/miss) — no es
+                # una sugerencia de valor, solo un aviso informativo que
+                # también se puede "mantener" (dejar de mostrar).
+                doi_miss = bool(cr_block) and not cr_block.get("fetched", True)
 
                 # Verificados: el usuario ya revisó y descartó estas
                 # sugerencias — no volver a mostrarlas (utils.validation_overrides).
@@ -820,6 +852,8 @@ if not PUBLIC:
                                 if (pid, i.get("field")) not in dismissed]
                 if (pid, "authors") in dismissed:
                     authors_iss = []
+                if (pid, "doi") in dismissed:
+                    doi_miss = False
 
                 # Desaparición en vivo: omite issues que ya no aplican al
                 # registro vigente (sugerencia adoptada / campo cambiado). El
@@ -832,7 +866,7 @@ if not PUBLIC:
                                 if not issue_is_stale(i, cur_rec, row)]
                 stale_aqui = n_antes - len(suggests) - len(local_issues)
                 n_resueltos += stale_aqui
-                if not suggests and not local_issues and not authors_iss:
+                if not suggests and not local_issues and not authors_iss and not doi_miss:
                     if stale_aqui:
                         with st.expander(f"✓ `{pid}` — {title_txt} "
                                          f"(resuelto en esta sesión)"):
@@ -881,8 +915,18 @@ if not PUBLIC:
                                 note="rechazada propuesta de adopción masiva de autores")
                             st.success("✓ autores marcados como verificados.")
                             st.rerun()
-                    if cr_block is not None and not cr_block.get("fetched", True):
-                        st.caption("↳ DOI no resuelto en Crossref (miss).")
+                    if doi_miss:
+                        st.caption("↳ DOI no resuelto en Crossref (miss/404) — "
+                                   "puede ser un DOI correcto que Crossref no "
+                                   "indexa (p.ej. capítulo de libro).")
+                        if st.button("✋ Mantener DOI (no volver a marcar como no resuelto)",
+                                     key=f"keep_doi_miss_{sel}_{pid}"):
+                            validation_overrides.dismiss(
+                                sel, pid, "doi",
+                                note="DOI confirmado correcto pese a miss/404 en Crossref")
+                            st.success("✓ DOI marcado como verificado — no se "
+                                       "volverá a avisar de este miss.")
+                            st.rerun()
 
                     if local_issues:
                         st.markdown("**Diagnóstico local (Nivel 1)** — solo lectura:")
@@ -893,7 +937,7 @@ if not PUBLIC:
                     if cr_block is None:
                         st.caption("ℹ Re-ejecuta el validador con `--crossref` "
                                    "para ver sugerencias de Crossref.")
-                    elif not suggests and not authors_iss and not local_issues:
+                    elif not suggests and not authors_iss and not local_issues and not doi_miss:
                         st.caption("Sin discrepancias accionables en este pase.")
 
             if n_resueltos:

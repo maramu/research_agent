@@ -23,9 +23,16 @@ class TestDismissUndismiss:
         assert ("p1", "year") in vo.dismissed_set("cat1")
 
     def test_dismiss_invalid_field_rejected(self):
-        affected = vo.dismiss("cat1", "p1", "doi")
+        affected = vo.dismiss("cat1", "p1", "not_a_real_field")
         assert affected == 0
         assert vo.dismissed_set("cat1") == set()
+
+    def test_dismiss_doi_accepted(self):
+        # "doi" cubre el aviso crossref_miss (DOI correcto no resuelto en
+        # Crossref) — mantenerlo silencia el aviso sin tocar el valor del DOI.
+        affected = vo.dismiss("cat1", "p1", "doi", note="miss confirmado ok")
+        assert affected == 1
+        assert ("p1", "doi") in vo.dismissed_set("cat1")
 
     def test_dismiss_is_idempotent_upsert(self):
         vo.dismiss("cat1", "p1", "year", note="primero")

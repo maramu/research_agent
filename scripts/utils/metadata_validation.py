@@ -441,9 +441,9 @@ def _sidecar_row(rec: dict, issues: List[dict], crossref: Optional[dict] = None)
 def _drop_dismissed(issues: List[dict], paper_id: str,
                     dismissed: Optional[Set[Tuple[str, str]]]) -> List[dict]:
     """Quita issues cuyo (paper_id, field) esté marcado como verificado
-    (utils.validation_overrides). Los issues de campo "doi" (p.ej.
-    crossref_miss) nunca se marcan como verificados, así que no se ven
-    afectados."""
+    (utils.validation_overrides). Incluye field="doi" (p.ej. crossref_miss:
+    DOI correcto que Crossref no resuelve) — mantenerlo silencia el aviso sin
+    tocar el valor del DOI."""
     if not dismissed:
         return issues
     return [i for i in issues if (paper_id, i.get("field")) not in dismissed]
@@ -476,13 +476,17 @@ def validate_category_crossref(category: str, categorias_dir,
                                ) -> List[dict]:
     """Nivel 1 + Nivel 2: enriquece el sidecar con un bloque
     `crossref:{fetched, issues}` por paper con DOI válido. Un paper entra si
-    tiene issues locales medium/high (Nivel 1) O algún issue Crossref con
-    kind ∈ {mismatch, recover, fill}.
+    tiene issues locales medium/high (Nivel 1), algún issue Crossref con
+    kind ∈ {mismatch, recover, fill}, O el DOI no se resolvió en Crossref
+    (crossref_miss) — un DOI correcto pero no indexado también necesita
+    revisión humana (botón "Mantener DOI" en 11_Articulos.py), aunque no
+    tenga ningún otro problema.
 
     `limit` topa el nº de llamadas a Crossref en la categoría (los papers no
     consultados quedan sin bloque crossref). `fetch` inyectable para tests.
     `dismissed` — ver validate_category(); se aplica tanto a issues locales
-    como a los de Crossref antes de decidir si el paper entra al sidecar."""
+    como a los de Crossref antes de decidir si el paper entra al sidecar (un
+    DOI ya marcado "mantener" no vuelve a flaggear el paper solo por miss)."""
     jsonl = Path(categorias_dir) / category / "metadata" / "papers_metadata.jsonl"
     if fetch is None:
         from utils.crossref import fetch_work as fetch
@@ -502,7 +506,8 @@ def validate_category_crossref(category: str, categorias_dir,
 
         cr_flag = bool(cr_block) and any(
             i.get("kind") in _CROSSREF_REPAIR_KINDS for i in cr_block["issues"])
+        cr_miss_flag = bool(cr_block) and not cr_block["fetched"]
 
-        if local_flag or cr_flag:
+        if local_flag or cr_flag or cr_miss_flag:
             flagged.append(_sidecar_row(rec, local, crossref=cr_block))
     return flagged
