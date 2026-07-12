@@ -2,6 +2,172 @@
 > Histórico append-only (lo más nuevo arriba). Backlog: Mejoras_pendientes.md · Estado/arquitectura: ESTADO.md
 
 ---
+### ✅ Reconciliar `pendientes_descarga.csv` contra el corpus real (item 15/28) (2026-07-12, cont.)
+
+**Contexto:** el usuario reportó que `15_Pendientes.py` listaba 35 DOI "pendientes
+activos" cuando al menos dos (`10.1016/j.wasman.2026.115484`,
+`10.1016/j.biortech.2026.134926`) ya estaban ingestados en el corpus.
+
+**Causa raíz:** `mark_downloaded()` solo la llama `3a_download_pdfs.py`. Ambos
+DOI habían fallado su descarga automática (Elsevier API: "PDF sospechoso 1
+página", ScienceDirect HTTP 403) y quedaron `pending`, pero el paper se
+ingestó después por otra vía (`source_type: "manual"`, PDF subido a mano) que
+nunca pasa por `3a_download_pdfs.py` — el registro y el corpus quedan
+desincronizados para siempre, sin ningún mecanismo que los reconcilie.
+
+**Fix:** nueva `download_registry.reconcile_with_corpus(categorias_dir=None)`
+— cruza los DOI `status=="pending"` del registro contra el DOI (normalizado
+strip+lower) de `papers_metadata.jsonl` de las `CANONICAL_CATEGORIES`; los que
+ya están en el corpus pasan a `status="downloaded"` con nota
+`"reconciliado: DOI ya en el corpus…"`. No toca `snooze_until` ni estados ya
+resueltos, no escribe nada en `papers_metadata.jsonl`. Se ejecuta
+automáticamente:
+- Al abrir `15_Pendientes.py` (aviso visible "🔄 N reconciliado(s)
+  automáticamente" si `n>0`).
+- Al principio de `_load_pending_dois()` en `run_weekly_scopus.py`, para que
+  el email semanal tampoco arrastre falsos pendientes.
+
+Tests nuevos en `tests/test_download_registry.py` (+4 ✓, tmp_path): DOI
+pendiente ya en el corpus → `downloaded`; DOI ausente del corpus → sin
+cambios; comparación case-insensitive; no toca snooze ni `downloaded` previos.
+
+**Ejecutado ya una vez contra el NAS real:** **37 DOI(s) reconciliados**. De
+los 35 "pendientes activos" que reportaba la página, **34 ya estaban en el
+corpus** — solo quedaba 1 genuinamente pendiente
+(`10.1021/acs.energyfuels.7b00120`, "No se pudo resolver la landing page").
+El bug era mucho más grande de lo que sugería el reporte inicial del usuario.
+
+---
+### ✅ Adopción masiva de autores/año: candidatos desde el sidecar, no barrido en vivo (2026-07-12, cont.)
+
+**Contexto:** en `11_Articulos.py`, "Previsualizar adopción de autores/año"
+consultaba Crossref para **todos** los papers con DOI de la categoría en cada
+clic, aunque la mayoría ya coincidieran con Crossref o estuvieran
+descartados (`validation_overrides`) — cientos de llamadas de red repetidas
+en categorías grandes, en vez de reutilizar el trabajo que
+`validate_metadata.py --crossref` ya hizo.
+
+**Fix — autores:** candidatos = `crossref.issues` con `code=="authors_mismatch"`
+del sidecar (`validation_<cat>.jsonl`), filtrados por `dismissed`. Solo se
+consulta Crossref en vivo para ESE subconjunto (no para toda la categoría) —
+necesario porque el sidecar solo guarda el nombre ya aplanado a texto
+(`"Given Family; …"`) y hace falta el `given`/`family` estructurado de
+Crossref para no perder fidelidad al escribir en `papers_metadata.jsonl`
+(`_cr_authors_to_writer`).
+
+**Fix — año:** candidatos = `year_mismatch` con `suggested_source=="crossref"`
+del sidecar. Aquí NO hace falta ni siquiera la consulta en vivo: el sidecar ya
+trae `stored`/`suggested` como `int`. Se aplica `issue_is_stale()` a cada
+candidato antes de incluirlo (evita re-sugerir algo ya adoptado desde la
+última pasada `--crossref`, algo que el barrido en vivo anterior no
+necesitaba porque siempre leía el valor fresco en el momento del clic). El
+panel "Saltados" (sin DOI / miss Crossref) se reconstruye igual de barato:
+sin DOI es un filtro local sobre `all_rows`, y miss Crossref ya lo sabe el
+sidecar (`crossref.fetched==False`) — sigue permitiendo "🚫 No reintentar año"
+sin tocar la red.
+
+Ambos botones ahora muestran el nº de candidatos y se atenúan si no hay
+ninguno; si el sidecar está desactualizado, se ve claramente (0 candidatos)
+en vez de disparar un barrido completo — hay que pulsar "🔄 Re-validar esta
+categoría" primero.
+
+Verificado: 210/210 tests, `py_compile`, y test funcional offline del filtro
+de candidatos (dismissed + `authors_mismatch`/`year_mismatch`
+`suggested_source=="crossref"`) contra la estructura real del sidecar.
+
+---
+### ✅ Fix bug `<NA>` literal + DOI roto sin forma de validar (2026-07-12, cont. item 51)
+
+**Contexto:** dos reportes del usuario sobre `11_Articulos.py` → "Editar/
+Eliminar artículos": (1) al dejar un campo vacío en el editor, se guardaba la
+cadena literal `"<NA>"` en vez de vaciar el campo — problemático para book
+chapters legítimamente sin revista; (2) un DOI correcto
+(`10.22034.gjesm.2026.03.10` en el paper `2026_srithong_isolation_
+application_indigenous_H2S_removal_biogas`, categoría
+`anoxic_biogas_biodesulfurization`) que Crossref no resolvía no se podía
+marcar como revisado.
+
+**Bug 1 — `<NA>` real, no solo visual:** `st.data_editor` con columnas
+`"string"` (pandas `StringDtype`) devuelve `pd.NA` al borrar una celda;
+`str(pd.NA)` es literalmente la cadena `"<NA>"` (4 caracteres, truthy), que
+pasaba el guardia `v != ""` de `update_metadata_fields()` y se escribía tal
+cual en `papers_metadata.jsonl`. Nuevo helper `_cell(row, field)` normaliza
+`pd.NA`/`None` a `""` antes de comparar/guardar. Además, `journal` y `doi`
+ahora se pueden dejar vacíos EXPLÍCITAMENTE (`CLEARABLE_FIELDS` en
+`update_metadata_fields`) — antes cualquier valor vacío se ignoraba
+silenciosamente por diseño (protección anti-vaciado-accidental que impedía
+incluso un vaciado deliberado). `title`/`year`/`authors` siguen protegidos.
+
+**Bug 2 — DOI "roto" en tres capas, no una:**
+1. El DOI guardado (`10.22034.gjesm.2026.03.10`) le faltaba la barra
+   obligatoria entre prefijo y sufijo — confirmado con `doi.org`: la versión
+   con barra (`10.22034/gjesm.2026.03.10`) resuelve (302 → `gjesm.net`); la de
+   puntos da 404. Corregido directamente en `papers_metadata.jsonl` (backup
+   `.bak`, un único campo tocado, verificado con diff).
+2. `doi` estaba excluido a propósito de `validation_overrides.FIELDS` — sin
+   botón "mantener" posible para `crossref_miss` (DOI correcto no indexado en
+   Crossref). Añadido `doi` a `FIELDS`; botón "✋ Mantener DOI" junto al aviso
+   "DOI no resuelto en Crossref".
+3. **Hallazgo más profundo:** un paper cuyo ÚNICO problema es `crossref_miss`
+   nunca entraba al sidecar en ningún sitio (ni CLI ni Streamlit) — el
+   criterio de flagging de `validate_category_crossref` solo contaba
+   `kind ∈ {mismatch,recover,fill}`, no `miss`. Invisible en todo el
+   pipeline, literalmente nada que "mantener". Ampliado el criterio para
+   incluir `crossref_miss` aislado.
+4. Extra (no pedido, hallado al arreglar el DOI de arriba): los diagnósticos
+   LOCALES (Nivel 1 — `doi_malformed`, `title_eq_journal`,
+   `authors_affiliation`, `year_implausible`…) eran de solo lectura; ahora
+   cada uno con `field` en `validation_overrides.FIELDS` también tiene botón
+   "✋ Mantener", igual que las sugerencias de Crossref.
+
+Tests nuevos: `test_validation_overrides.py` (`doi` aceptado),
+`test_metadata_validation.py` (+2: miss aislado flaggea el paper; dismiss de
+`doi` lo vuelve a ocultar). Suite: 206/206 antes de los fixes de rendimiento
+de arriba.
+
+---
+### ✅ Verificación funcional real (round-trip) de items 51 y 15/28 + recreación `.venv` (2026-07-12)
+
+**Contexto:** las dos sesiones previas (snooze de pendientes item 15/28,
+"mantener campo" item 51) habían quedado con `py_compile`+`pytest` en verde
+pero sin probar el round-trip contra datos REALES del NAS, algo que no se
+pudo hacer en local hasta esta sesión con acceso a `/Volumes/research`.
+
+**Entorno:** el `.venv` del propio repo (documentado como "residual, no
+tocar" — ver nota anterior) apuntaba a `python@3.14` de Homebrew, ya
+desinstalado (symlink roto). Con autorización del usuario: instalación
+temporal en `/usr/bin/python3` (3.9) para las primeras pruebas, y
+**recreación completa del `.venv` con `python@3.13`** (mismo Python que el
+venv de producción `~/venvs/rag_papers`) al final de la sesión —
+`pip install -r requirements.txt` sin errores, **206→210/210 tests** en
+verde (incluidos 2 que fallaban en Python 3.9 por sintaxis `str | None`).
+Streamlit (privado :8501 + público :8502, LaunchAgents) reiniciado tras cada
+tanda de cambios vía `launchctl kickstart -k`; verificado HTTP 200 y logs
+limpios en cada reinicio.
+
+**Bloque A — "mantener campo" (item 51):** categoría real
+`biological_gas_odor_treatment` (8 papers). Sidecar generado con
+`validate_metadata.py --crossref`. Paper elegido:
+`2004_kanagawa_biological_treatment_ammonia_gas_high_loading`, campo
+`authors` (único issue del paper: `crossref.authors_mismatch`). `dismiss()`
+→ fila en `validation_overrides.csv` → re-validar → sidecar pasó de
+8→7 `flagged`/`authors_mismatch` y el paper dejó de aparecer del todo →
+`undismiss()` + regenerar sidecar → estado idéntico al original.
+**Confirmado: el filtro actúa en origen (sidecar), no solo en la UI.**
+
+**Bloque B — snooze de pendientes (item 15/28):** DOI real
+`10.1016/j.wasman.2026.115484` (`bioleaching_critical_materials`), pendiente
+activo. `snooze(years=2)` → desapareció de `pending_active()` y del email
+dry-run (`run_weekly_scopus.py --dry-run`) → `unsnooze()` → reapareció.
+`pendientes_descarga.csv` verificado **byte-idéntico** (mismo MD5) al backup
+tomado antes de la prueba.
+
+**Limpieza:** `validation_overrides.csv` no existía antes de la prueba →
+eliminado tras el test (no dejado con solo cabecera). Ambos ficheros de
+producción confirmados en su estado original al cierre del bloque de
+verificación.
+
+---
 ### ✅ "Mantener campo, no volver a sugerir" en Validación de metadata (item 51) (2026-07-12)
 
 **Contexto:** en la sección "🔬 Validación de metadata (Crossref)" de
@@ -55,10 +221,17 @@ pciq22, o cada vez que se pulsa "👁 Previsualizar").
 
 **Verificación pciq22 (2026-07-12):** `py_compile` de los 7 ficheros tocados
 por este item + el de snooze (item 15/28) y `pytest tests/ -q` (203 tests)
-en verde en la máquina de producción. **Pendiente:** validación funcional
-contra datos reales del NAS (regenerar sidecar → marcar "Mantener" →
-confirmar que el issue no reaparece en origen → revertir) y comprobación
-manual en el navegador de los botones nuevos en `11_Articulos.py`.
+en verde en la máquina de producción.
+
+**✅ Round-trip funcional verificado (2026-07-12, cont.)** contra datos
+reales del NAS — ver "Verificación funcional real (round-trip) de items 51
+y 15/28…" más arriba: sidecar real regenerado, "Mantener" marcado sobre un
+issue real (categoría `biological_gas_odor_treatment`, paper
+`2004_kanagawa_biological_treatment_ammonia_gas_high_loading`, campo
+`authors`), confirmado que el issue no reaparece en origen tras
+re-validar, y reversión limpia. El propio flujo de comprobación destapó y
+cerró además el bug del `<NA>` y el hueco de `crossref_miss`/diagnósticos
+Nivel 1 sin botón "Mantener" (ver entradas de arriba).
 
 ---
 ### ✅ Posponer DOIs pendientes sin interés/acceso (snooze 2 años) (item 15/28) (2026-07-12)
@@ -99,10 +272,17 @@ para el usuario.
   cambia `snooze_until`.
 
 **Verificación pciq22 (2026-07-12):** `py_compile` + `pytest tests/ -q` (203
-tests) en verde en la máquina de producción. **Pendiente:** snoozear un DOI
-pendiente real, confirmar que `run_weekly_scopus.py --dry-run` deja de
-listarlo, revertir con `unsnooze` y comprobación manual de la página
-`15_Pendientes.py` en el navegador.
+tests) en verde en la máquina de producción.
+
+**✅ Round-trip funcional verificado (2026-07-12, cont.)** contra un DOI
+pendiente real — ver "Verificación funcional real (round-trip)…" más
+arriba: `10.1016/j.wasman.2026.115484` pospuesto, confirmado que desaparece
+de `pending_active()`/`run_weekly_scopus.py --dry-run`, y reactivado sin
+dejar rastro en `pendientes_descarga.csv` (MD5 idéntico al estado previo).
+**Hallazgo derivado de esta verificación:** el registro de pendientes
+llevaba desincronizado del corpus real — ver "Reconciliar
+`pendientes_descarga.csv` contra el corpus real" más arriba (item 15/28,
+cont.): 34 de 35 "pendientes activos" ya estaban ingestados.
 
 ---
 ### ✅ Fix TOC tipo "nombre de fichero.pdf" en libros (item 31) (2026-07-11)

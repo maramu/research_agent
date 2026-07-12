@@ -80,10 +80,21 @@ página `15_Pendientes.py`) para sacar del email semanal los DOIs sin
 interés/acceso — detalle en `Mejoras_realizadas.md`. El subagente OpenClaw
 (item 28) seguiría alimentándose de `pending_active()`, así no intentaría
 descargas de DOIs ya descartados/pospuestos por el usuario.
-**Verificación pendiente en pciq22:** `py_compile`+`pytest` ya en verde en
-producción; falta el round-trip funcional contra un DOI real (snooze →
-`run_weekly_scopus.py --dry-run` lo excluye → unsnooze) y la comprobación
-manual de la página en el navegador.
+**✅ Verificado en pciq22 (2026-07-12, cont.):** round-trip funcional contra
+un DOI real (snooze → excluido de `run_weekly_scopus.py --dry-run` →
+unsnooze → reaparece), `pendientes_descarga.csv` confirmado intacto tras la
+prueba. Detalle en `Mejoras_realizadas.md`.
+
+**✅ CERRADO 2026-07-12 (cont.) — desincronización registro↔corpus:** la
+propia verificación destapó que `mark_downloaded()` solo la llama
+`3a_download_pdfs.py`; DOIs ingestados por otra vía (PDF manual) se
+quedaban `pending` para siempre aunque el paper ya existiera. Nueva
+`download_registry.reconcile_with_corpus()` cruza pendientes contra
+`papers_metadata.jsonl` de todas las categorías y marca `downloaded` los ya
+ingestados; corre automáticamente en `15_Pendientes.py` (aviso visible) y
+antes del email semanal. Ejecutada ya contra el NAS real: **37
+reconciliados** — de 35 "pendientes activos" reportados por el usuario, 34
+ya estaban en el corpus. Detalle en `Mejoras_realizadas.md`.
 
 ### 30. Documentación para el grupo — ALTA si se comparte
 
@@ -366,11 +377,34 @@ Botones "✋ Mantener {campo}" junto a cada "Adoptar", incluido el lote masivo d
 año ±1 (antes solo-lectura) y los "saltados" (sin DOI/miss/sin año, con
 "🚫 No reintentar año"). Panel "🔓 Campos marcados como verificados" con
 "↩ Revertir" para deshacer. Detalle en Mejoras_realizadas.md.
-**Verificación pendiente en pciq22:** `py_compile`+`pytest` ya en verde en
-producción; falta el round-trip funcional contra el sidecar real (marcar
-"Mantener" → re-ejecutar `validate_metadata.py --crossref` → confirmar que
-el issue no reaparece en origen → revertir) y la comprobación manual de los
-botones nuevos en `11_Articulos.py` en el navegador.
+**✅ Verificado en pciq22 (2026-07-12, cont.):** round-trip funcional contra
+el sidecar real (categoría `biological_gas_odor_treatment`) — marcar
+"Mantener" → re-ejecutar `validate_metadata.py --crossref` → confirmado que
+el issue no reaparece en origen → revertido sin dejar rastro. Detalle en
+`Mejoras_realizadas.md`.
+
+**✅ CERRADO 2026-07-12 (cont.) — bugs destapados por la propia
+verificación:** (1) dejar un campo vacío en el editor guardaba la cadena
+literal `"<NA>"` (bug real de `pd.NA`+`str()`, no solo visual) —
+`journal`/`doi` ahora se pueden vaciar de verdad, `title`/`year`/`authors`
+siguen protegidos; (2) un DOI correcto no resuelto en Crossref
+(`crossref_miss`) no tenía forma de marcarse como revisado — `doi` añadido
+a `validation_overrides.FIELDS`, botón "✋ Mantener DOI", y el criterio de
+flagging ampliado (antes un miss aislado sin otro issue era invisible en
+todo el pipeline); (3) los diagnósticos locales Nivel 1 (`doi_malformed`,
+`title_eq_journal`…) eran de solo lectura, ahora también tienen "Mantener".
+Además, un DOI real mal extraído (punto en vez de barra,
+`10.22034.gjesm.2026.03.10`) corregido en el NAS tras confirmar con
+`doi.org` que la versión con barra resuelve. Detalle en
+`Mejoras_realizadas.md`.
+
+**✅ CERRADO 2026-07-12 (cont.) — rendimiento adopción masiva:** "Previsualizar
+adopción de autores/año" barría TODOS los DOI de la categoría en cada clic;
+ahora los candidatos salen del sidecar (`authors_mismatch` /
+`year_mismatch` con `suggested_source=="crossref"`) y solo se consulta
+Crossref en vivo (autores) o nada en absoluto (año, ya viene como `int` en
+el sidecar) para el subconjunto que de verdad difiere. Detalle en
+`Mejoras_realizadas.md`.
 
 ### 43. Verificaciones pendientes de la revisión 2026-06-12 — seguimiento
 3_process_corpus.py (canonical_section vs CANONICAL_SECTIONS), ~~1_rename_papers_by_doi.py (nombre
