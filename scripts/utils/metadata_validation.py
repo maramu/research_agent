@@ -19,7 +19,7 @@ import json
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set, Tuple
 
 from utils.constants import year_from_paper_id
 from utils.pdf_utils import normalize_stem
@@ -438,42 +438,65 @@ def _sidecar_row(rec: dict, issues: List[dict], crossref: Optional[dict] = None)
     return row
 
 
-def validate_category(category: str, categorias_dir) -> List[dict]:
+def _drop_dismissed(issues: List[dict], paper_id: str,
+                    dismissed: Optional[Set[Tuple[str, str]]]) -> List[dict]:
+    """Quita issues cuyo (paper_id, field) esté marcado como verificado
+    (utils.validation_overrides). Los issues de campo "doi" (p.ej.
+    crossref_miss) nunca se marcan como verificados, así que no se ven
+    afectados."""
+    if not dismissed:
+        return issues
+    return [i for i in issues if (paper_id, i.get("field")) not in dismissed]
+
+
+def validate_category(category: str, categorias_dir,
+                      dismissed: Optional[Set[Tuple[str, str]]] = None) -> List[dict]:
     """Valida papers_metadata.jsonl de una categoría (Nivel 1 puro). Devuelve
     SOLO los registros con >=1 issue de severidad en SIDECAR_MIN_SEVERITY (lista
     "a revisar", no el corpus entero). Los issues "info" se listan en el
-    registro si el paper ya entró por otro motivo, pero no lo flaggean solos."""
+    registro si el paper ya entró por otro motivo, pero no lo flaggean solos.
+
+    `dismissed` — {(paper_id, field), ...} de utils.validation_overrides: esos
+    issues se descartan ANTES de decidir si el paper entra al sidecar (así un
+    paper marcado como verificado en su único campo problemático deja de
+    aparecer, no solo de sugerir)."""
     jsonl = Path(categorias_dir) / category / "metadata" / "papers_metadata.jsonl"
     flagged = []
     for rec in load_jsonl(jsonl):
-        issues = validate_record(rec)
+        pid = rec.get("paper_id", "")
+        issues = _drop_dismissed(validate_record(rec), pid, dismissed)
         if any(i["severity"] in SIDECAR_MIN_SEVERITY for i in issues):
             flagged.append(_sidecar_row(rec, issues))
     return flagged
 
 
 def validate_category_crossref(category: str, categorias_dir,
-                               limit: Optional[int] = None, fetch=None) -> List[dict]:
+                               limit: Optional[int] = None, fetch=None,
+                               dismissed: Optional[Set[Tuple[str, str]]] = None,
+                               ) -> List[dict]:
     """Nivel 1 + Nivel 2: enriquece el sidecar con un bloque
     `crossref:{fetched, issues}` por paper con DOI válido. Un paper entra si
     tiene issues locales medium/high (Nivel 1) O algún issue Crossref con
     kind ∈ {mismatch, recover, fill}.
 
     `limit` topa el nº de llamadas a Crossref en la categoría (los papers no
-    consultados quedan sin bloque crossref). `fetch` inyectable para tests."""
+    consultados quedan sin bloque crossref). `fetch` inyectable para tests.
+    `dismissed` — ver validate_category(); se aplica tanto a issues locales
+    como a los de Crossref antes de decidir si el paper entra al sidecar."""
     jsonl = Path(categorias_dir) / category / "metadata" / "papers_metadata.jsonl"
     if fetch is None:
         from utils.crossref import fetch_work as fetch
     flagged, calls = [], 0
     for rec in load_jsonl(jsonl):
-        local = validate_record(rec)
+        pid = rec.get("paper_id", "")
+        local = _drop_dismissed(validate_record(rec), pid, dismissed)
         local_flag = any(i["severity"] in SIDECAR_MIN_SEVERITY for i in local)
 
         cr_block = None
         doi_valid = bool((rec.get("doi") or "").strip()) and not check_doi_format(rec)
         if doi_valid and (limit is None or calls < limit):
             calls += 1
-            cr_issues = compare_with_crossref(rec, fetch=fetch)
+            cr_issues = _drop_dismissed(compare_with_crossref(rec, fetch=fetch), pid, dismissed)
             fetched = not any(i["code"] == "crossref_miss" for i in cr_issues)
             cr_block = {"fetched": fetched, "issues": cr_issues}
 

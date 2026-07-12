@@ -398,6 +398,63 @@ def test_validate_category_crossref_entra_por_mismatch(tmp_path):
     assert "title_mismatch" in _codes(flagged[0]["crossref"]["issues"])
 
 
+def test_validate_category_dismissed_excluye_issue_y_paper(tmp_path):
+    """Un paper cuyo ÚNICO issue medium/high es el campo marcado como
+    verificado deja de entrar al sidecar (Nivel 1 puro)."""
+    cat = "dismissed_l1"
+    rows = [
+        {"paper_id": "p1", "title": "Water Research", "journal": "Water Research",
+         "year": 2020, "doi": "10.1016/j.watres.2020.1"},
+    ]
+    base = _write_jsonl(tmp_path, cat, rows)
+
+    # Sin dismissed: title_eq_journal (high) flaggea el paper.
+    assert len(validate_category(cat, base)) == 1
+
+    # Con "title" verificado: el único issue medium/high desaparece.
+    dismissed = {("p1", "title")}
+    assert validate_category(cat, base, dismissed=dismissed) == []
+
+
+def test_validate_category_dismissed_deja_otros_issues_intactos(tmp_path):
+    """Verificar un campo no afecta a issues de otros campos del mismo paper."""
+    cat = "dismissed_l1b"
+    rows = [
+        {"paper_id": "h1", "title": "Water Research", "journal": "Water Research",
+         "year": 1700, "doi": "10.1016/j.watres.2020.1"},
+    ]
+    base = _write_jsonl(tmp_path, cat, rows)
+    dismissed = {("h1", "title")}
+    flagged = validate_category(cat, base, dismissed=dismissed)
+    assert len(flagged) == 1
+    codes = {i["code"] for i in flagged[0]["issues"]}
+    assert "title_eq_journal" not in codes
+    assert "year_implausible" in codes
+
+
+def test_validate_category_crossref_dismissed_excluye_mismatch(tmp_path):
+    """Un mismatch de Crossref marcado como verificado no entra al sidecar
+    (ni flaggea el paper si era el único motivo)."""
+    cat = "dismissed_l2"
+    rows = [
+        {"paper_id": "p1", "doi": "10.1016/j.watres.2020.1",
+         "title": "Anaerobic digestion of manure", "journal": "Water Research",
+         "year": 2020, "authors": [{"forename": "Ana", "surname": "Lopez"}]},
+    ]
+    base = _write_jsonl(tmp_path, cat, rows)
+    work = {"title": "A totally different title string", "authors": [],
+            "journal": "Water Research", "journal_short": "", "year": 2020}
+
+    flagged = validate_category_crossref(cat, base, fetch=_fetch(work))
+    assert len(flagged) == 1
+    assert "title_mismatch" in _codes(flagged[0]["crossref"]["issues"])
+
+    dismissed = {("p1", "title")}
+    flagged_dismissed = validate_category_crossref(
+        cat, base, fetch=_fetch(work), dismissed=dismissed)
+    assert flagged_dismissed == []
+
+
 def test_validate_category_crossref_limit(tmp_path):
     """--limit topa las llamadas: con limit=1 solo el primer paper trae bloque."""
     cat = "l2lim"

@@ -2,6 +2,58 @@
 > Histórico append-only (lo más nuevo arriba). Backlog: Mejoras_pendientes.md · Estado/arquitectura: ESTADO.md
 
 ---
+### ✅ "Mantener campo, no volver a sugerir" en Validación de metadata (item 51) (2026-07-12)
+
+**Contexto:** en la sección "🔬 Validación de metadata (Crossref)" de
+`11_Articulos.py`, algunas sugerencias de Crossref (título/revista/año) o de
+las adopciones masivas (autores, año) son incorrectas y el usuario las
+rechaza — pero como no hay memoria de esa decisión, la misma sugerencia
+vuelve a aparecer en cada re-escaneo (`validate_metadata.py --crossref` en
+pciq22, o cada vez que se pulsa "👁 Previsualizar").
+
+**Fix:**
+- `utils/validation_overrides.py` (nuevo, mismo patrón que
+  `download_registry.py`): registro persistente en
+  `/Volumes/research/metadatos/validation_overrides.csv` de tuplas
+  `(category, paper_id, field)` marcadas como verificadas. `field` ∈
+  `{title, journal, year, authors}` (los únicos con sugerencia accionable;
+  `doi`/`crossref_miss` quedan fuera). `dismiss()` es upsert idempotente
+  (re-marcar solo refresca fecha/nota); `undismiss()`; `dismissed_set(cat)`
+  para lookup O(1); `list_dismissed(cat)` para auditar/revertir. **No** se
+  guarda dentro de `papers_metadata.jsonl`: un flag ahí se podría perder
+  silenciosamente en la próxima re-extracción desde TEI
+  (`4_extract_metadata.py` solo protege `PRESERVE_FIELDS`, no campos nuevos).
+- `utils/metadata_validation.py`: `validate_category()` y
+  `validate_category_crossref()` aceptan `dismissed: set[(paper_id, field)]`
+  y descartan esos issues **antes** de decidir si el paper entra al sidecar
+  — un paper cuyo único problema era el campo verificado deja de aparecer
+  del todo, no solo de sugerir el cambio.
+- `validate_metadata.py`: cada categoría carga su `dismissed_set()` antes de
+  validar y lo pasa a ambas funciones. Filtrado en origen: el sidecar
+  (`validation_<cat>.jsonl`) generado en pciq22 ya no contiene lo verificado.
+- `11_Articulos.py`: filtrado también en cliente (para efecto inmediato sin
+  esperar a re-validar) en las 3 zonas:
+  1. **Listado por-campo**: cada botón "Adoptar {campo}" tiene ahora un
+     hermano "✋ Mantener {campo} (no volver a sugerir)"; igual para el
+     aviso informativo de autores.
+  2. **Adopción masiva de autores**: la preview salta los ya-verificados al
+     generarse (no gasta llamada Crossref); cada fila con cambio pendiente
+     tiene botón "✋ Mantener autores" que la retira de la preview en vivo.
+  3. **Adopción masiva de año**: igual para el lote ±1 (`ymass`, antes
+     tabla de solo lectura → ahora fila a fila con "✋ Mantener año"), para
+     "Revisar individualmente" (`yreview`, ya era fila a fila — se añade el
+     botón hermano) y para "Saltados" (`yskip`: sin DOI/miss/sin año, ahora
+     con botón "🚫 No reintentar año" en vez de tabla estática).
+  4. **Panel de auditoría** "🔓 Campos marcados como verificados" al final
+     de la sección, con nota y botón "↩ Revertir" por fila.
+- Tests: `tests/test_validation_overrides.py` (8 ✓, tmp_path + monkeypatch
+  de `OVERRIDES_PATH`) — dismiss/undismiss, upsert idempotente, campo
+  inválido rechazado, aislamiento por categoría, listado. `tests/
+  test_metadata_validation.py` (+3 ✓) — un paper cuyo único issue es el
+  campo verificado deja el sidecar; otros campos del mismo paper no se ven
+  afectados; un mismatch de Crossref verificado no flaggea el paper.
+
+---
 ### ✅ Posponer DOIs pendientes sin interés/acceso (snooze 2 años) (item 15/28) (2026-07-12)
 
 **Contexto:** el email semanal (`run_weekly_scopus.py`) lista todos los DOIs con

@@ -40,6 +40,7 @@ from app_utils import (
     check_password, is_public_app,
     list_existing_categories, get_categories_summary,
 )
+from utils import validation_overrides
 from utils.crossref import fetch_work
 from utils.metadata_validation import build_validate_cmd, issue_is_stale, year_delta_severity
 
@@ -757,6 +758,11 @@ if not PUBLIC:
                 f"No hay `validation_{sel}.jsonl`. Genéralo en pciq22 con "
                 f"`python3 scripts/validate_metadata.py --category {sel} --crossref`.")
         else:
+            # Campos marcados "verificado, no volver a sugerir" (persiste en
+            # metadatos/validation_overrides.csv; filtra listado por-campo Y
+            # las adopciones masivas de abajo).
+            dismissed = validation_overrides.dismissed_set(sel)
+
             solo_disc = st.checkbox(
                 "⚠ Solo con discrepancias (del sidecar)", value=True,
                 key=f"solo_disc_{sel}")
@@ -806,6 +812,15 @@ if not PUBLIC:
                 authors_iss = [i for i in cr_issues
                                if i.get("code") == "authors_mismatch"]
 
+                # Verificados: el usuario ya revisó y descartó estas
+                # sugerencias — no volver a mostrarlas (utils.validation_overrides).
+                suggests = [i for i in suggests
+                            if (pid, i.get("field")) not in dismissed]
+                local_issues = [i for i in local_issues
+                                if (pid, i.get("field")) not in dismissed]
+                if (pid, "authors") in dismissed:
+                    authors_iss = []
+
                 # Desaparición en vivo: omite issues que ya no aplican al
                 # registro vigente (sugerencia adoptada / campo cambiado). El
                 # sidecar en disco no se toca — es la foto del último pase.
@@ -817,13 +832,13 @@ if not PUBLIC:
                                 if not issue_is_stale(i, cur_rec, row)]
                 stale_aqui = n_antes - len(suggests) - len(local_issues)
                 n_resueltos += stale_aqui
-                if stale_aqui and not suggests and not local_issues \
-                        and not authors_iss:
-                    with st.expander(f"✓ `{pid}` — {title_txt} "
-                                     f"(resuelto en esta sesión)"):
-                        st.caption("Los campos adoptados ya coinciden con la "
-                                   "sugerencia; re-ejecuta el validador para "
-                                   "refrescar el sidecar.")
+                if not suggests and not local_issues and not authors_iss:
+                    if stale_aqui:
+                        with st.expander(f"✓ `{pid}` — {title_txt} "
+                                         f"(resuelto en esta sesión)"):
+                            st.caption("Los campos adoptados ya coinciden con la "
+                                       "sugerencia; re-ejecuta el validador para "
+                                       "refrescar el sidecar.")
                     continue
 
                 label = (f"`{pid}` — {title_txt}  "
@@ -837,7 +852,8 @@ if not PUBLIC:
                             f"**{field}** ({iss['code']}, fuente {src})  \n"
                             f"- actual: `{iss.get('stored')}`  \n"
                             f"- sugerido: `{iss.get('suggested')}`")
-                        if st.button(f"Adoptar {field} ({src})",
+                        cA, cB = st.columns(2)
+                        if cA.button(f"Adoptar {field} ({src})",
                                      key=f"adopt_{sel}_{pid}_{field}_{src}_{k}"):
                             val = iss["suggested"]
                             if field == "year":
@@ -846,10 +862,25 @@ if not PUBLIC:
                             st.success(f"✓ {field} adoptado (backup .bak).")
                             load_articles.clear(); _summary_rows.clear()
                             st.rerun()
+                        if cB.button(f"✋ Mantener {field} (no volver a sugerir)",
+                                     key=f"keep_{sel}_{pid}_{field}_{src}_{k}"):
+                            validation_overrides.dismiss(
+                                sel, pid, field,
+                                note=f"rechazada sugerencia {src}: {iss.get('suggested')}")
+                            st.success(f"✓ {field} marcado como verificado — "
+                                       "no se volverá a sugerir.")
+                            st.rerun()
 
                     if authors_iss:
                         st.caption("↳ Autores difieren de Crossref — se reparan con "
                                    "la adopción masiva de abajo, no campo a campo.")
+                        if st.button("✋ Mantener autores (no volver a sugerir)",
+                                     key=f"keep_authors_field_{sel}_{pid}"):
+                            validation_overrides.dismiss(
+                                sel, pid, "authors",
+                                note="rechazada propuesta de adopción masiva de autores")
+                            st.success("✓ autores marcados como verificados.")
+                            st.rerun()
                     if cr_block is not None and not cr_block.get("fetched", True):
                         st.caption("↳ DOI no resuelto en Crossref (miss).")
 
@@ -880,6 +911,8 @@ if not PUBLIC:
                     preview = []
                     for r in all_rows:
                         pid = r["paper_id"]
+                        if (pid, "authors") in dismissed:
+                            continue
                         doi = str(r.get("doi") or "").strip()
                         if not doi:
                             preview.append({"paper_id": pid, "estado": "sin DOI",
@@ -912,6 +945,25 @@ if not PUBLIC:
                     pd.DataFrame([{k: v for k, v in p.items() if not k.startswith("_")}
                                   for p in preview]),
                     hide_index=True, use_container_width=True)
+
+                cambia_rows = [p for p in preview if p["cambia"]]
+                if cambia_rows:
+                    st.caption("Descarta aquí los que NO quieras aplicar "
+                               "(no se volverán a sugerir):")
+                    for p in cambia_rows:
+                        pid_a = p["paper_id"]
+                        cc1, cc2 = st.columns([6, 2])
+                        cc1.markdown(f"`{pid_a}` — actual: `{p['actual']}` "
+                                     f"→ Crossref: `{p['crossref']}`")
+                        if cc2.button("✋ Mantener autores",
+                                      key=f"keep_authors_mass_{sel}_{pid_a}"):
+                            validation_overrides.dismiss(
+                                sel, pid_a, "authors",
+                                note=f"rechazada propuesta masiva: {p['crossref']}")
+                            st.session_state[prev_key] = [
+                                x for x in preview if x["paper_id"] != pid_a]
+                            st.rerun()
+
                 conf = st.checkbox("Confirmar adopción de autores",
                                    key=f"conf_authors_{sel}")
                 if st.button("✅ Confirmar adopción", key=f"do_authors_{sel}",
@@ -942,6 +994,8 @@ if not PUBLIC:
                     ymass, yreview, yskip = [], [], []
                     for r in all_rows:
                         pid = r["paper_id"]
+                        if (pid, "year") in dismissed:
+                            continue
                         doi = str(r.get("doi") or "").strip()
                         if not doi:
                             yskip.append({"paper_id": pid, "motivo": "sin DOI"})
@@ -985,8 +1039,23 @@ if not PUBLIC:
                            f"grande a revisar aparte · {len(yskip)} se saltan "
                            f"(sin DOI / miss / sin año).")
                 if ymass:
-                    st.dataframe(pd.DataFrame(ymass), hide_index=True,
-                                 use_container_width=True)
+                    st.caption("Descarta aquí los que NO quieras aplicar "
+                               "(no se volverán a sugerir):")
+                    for p in ymass:
+                        pid_m = p["paper_id"]
+                        mc1, mc2, mc3, mc4 = st.columns([4, 2, 3, 2])
+                        mc1.markdown(f"`{pid_m}`")
+                        mc2.markdown(f"actual: `{p['año actual']}`")
+                        mc3.markdown(f"Crossref: `{p['año Crossref']}` "
+                                     f"(Δ {p['delta']})")
+                        if mc4.button("✋ Mantener año",
+                                      key=f"keep_year_mass_{sel}_{pid_m}"):
+                            validation_overrides.dismiss(
+                                sel, pid_m, "year",
+                                note=f"rechazada propuesta masiva ±1: {p['año Crossref']}")
+                            ydata["mass"] = [x for x in ymass if x["paper_id"] != pid_m]
+                            st.session_state[year_prev_key] = ydata
+                            st.rerun()
                     conf_y = st.checkbox("Confirmar adopción de año (solo ±1)",
                                          key=f"conf_year_{sel}")
                     if st.button("✅ Confirmar adopción de año",
@@ -1019,7 +1088,7 @@ if not PUBLIC:
                                    "resueltos en esta sesión.")
                     for p in vivos:
                         pid_y = p["paper_id"]
-                        c1, c2, c3, c4 = st.columns([5, 2, 3, 2])
+                        c1, c2, c3, c4, c5 = st.columns([4, 2, 3, 2, 2])
                         c1.markdown(f"`{pid_y}`")
                         c2.markdown(f"actual: `{p['año actual']}`")
                         c3.markdown(f"Crossref: `{p['año Crossref']}` "
@@ -1031,7 +1100,46 @@ if not PUBLIC:
                             st.success("✓ año adoptado (backup .bak).")
                             load_articles.clear(); _summary_rows.clear()
                             st.rerun()
+                        if c5.button("✋ Mantener año",
+                                     key=f"keep_year_review_{sel}_{pid_y}"):
+                            validation_overrides.dismiss(
+                                sel, pid_y, "year",
+                                note=f"rechazada propuesta Δ{p['delta']}: {p['año Crossref']}")
+                            ydata["review"] = [x for x in yreview if x["paper_id"] != pid_y]
+                            st.session_state[year_prev_key] = ydata
+                            st.rerun()
                 if yskip:
                     with st.expander(f"Saltados ({len(yskip)})"):
-                        st.dataframe(pd.DataFrame(yskip), hide_index=True,
-                                     use_container_width=True)
+                        st.caption("Sin DOI / miss Crossref / sin año — marca "
+                                   "'no reintentar' si ya sabes que no hay nada "
+                                   "que hacer con este paper.")
+                        for p in yskip:
+                            pid_s = p["paper_id"]
+                            sc1, sc2, sc3 = st.columns([5, 3, 2])
+                            sc1.markdown(f"`{pid_s}`")
+                            sc2.markdown(p["motivo"])
+                            if sc3.button("🚫 No reintentar año",
+                                          key=f"keep_year_skip_{sel}_{pid_s}"):
+                                validation_overrides.dismiss(
+                                    sel, pid_s, "year", note=f"saltado: {p['motivo']}")
+                                ydata["skip"] = [x for x in yskip if x["paper_id"] != pid_s]
+                                st.session_state[year_prev_key] = ydata
+                                st.rerun()
+
+            # ── (iv) Campos marcados como verificados — revisar/revertir ──
+            st.markdown("---")
+            overrides_df = validation_overrides.list_dismissed(sel)
+            with st.expander(f"🔓 Campos marcados como verificados "
+                             f"({len(overrides_df)})"):
+                if overrides_df.empty:
+                    st.caption("Ninguno en esta categoría.")
+                else:
+                    for _, r in overrides_df.iterrows():
+                        oc1, oc2, oc3, oc4 = st.columns([3, 2, 4, 2])
+                        oc1.markdown(f"`{r['paper_id']}`")
+                        oc2.markdown(f"**{r['field']}**")
+                        oc3.caption(r.get("note", "") or "—")
+                        if oc4.button("↩ Revertir",
+                                      key=f"undismiss_{sel}_{r['paper_id']}_{r['field']}"):
+                            validation_overrides.undismiss(sel, r["paper_id"], r["field"])
+                            st.rerun()

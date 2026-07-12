@@ -350,6 +350,19 @@ botón de adopción masiva de año análogo al de autores (preview → confirmar
 canónico published-print (`_pick_year` en `utils/crossref.py`). Detalle en
 Mejoras_realizadas.md.
 
+**~~Deferred — "mantener campo, no volver a sugerir"~~ ✅ COMPLETADO
+2026-07-12:** las sugerencias Crossref rechazadas (título/revista/año/autores)
+reaparecían en cada re-escaneo, tanto en el listado por-campo como en las
+adopciones masivas de autores y año. Registro nuevo `utils/validation_overrides.py`
+(`metadatos/validation_overrides.csv`) marca `(categoría, paper_id, campo)` como
+verificado; filtrado tanto en `validate_metadata.py`/`metadata_validation.py`
+(no entra al sidecar en origen) como en `11_Articulos.py` (oculta al instante,
+sin esperar a re-validar; evita re-consultar Crossref en las previews masivas).
+Botones "✋ Mantener {campo}" junto a cada "Adoptar", incluido el lote masivo de
+año ±1 (antes solo-lectura) y los "saltados" (sin DOI/miss/sin año, con
+"🚫 No reintentar año"). Panel "🔓 Campos marcados como verificados" con
+"↩ Revertir" para deshacer. Detalle en Mejoras_realizadas.md.
+
 ### 43. Verificaciones pendientes de la revisión 2026-06-12 — seguimiento
 3_process_corpus.py (canonical_section vs CANONICAL_SECTIONS), ~~1_rename_papers_by_doi.py (nombre
 largo Scopus en descarga)~~ ✅ CUBIERTO 2026-06-13 (renombrado por DOI antes de reprocesar en Coherencia PDF/MD + tab Pendientes), 4_extract_metadata.py (_norm vs 6_Mantenimiento), 5_build_embeddings.py

@@ -8,6 +8,11 @@ CATEGORIAS_DIR/<cat>/metadata/validation_<cat>.jsonl (una línea por paper
 flagged; sobrescribe el anterior). SOLO ESCRIBE el sidecar; NUNCA toca
 papers_metadata.jsonl.
 
+Los campos marcados como "verificados" desde 11_Articulos.py
+(utils/validation_overrides.py, metadatos/validation_overrides.csv) NO
+vuelven a entrar al sidecar: el usuario ya revisó esa sugerencia y la
+descartó.
+
 Uso:
     python3 scripts/validate_metadata.py --category biogas_upgrading_biomethanation
     python3 scripts/validate_metadata.py --all
@@ -31,6 +36,7 @@ from utils.metadata_validation import (
     validate_category_crossref,
     validate_record,
 )
+from utils.validation_overrides import dismissed_set
 
 # Misma raíz que pipeline.py (no se importa pipeline para no arrastrar deps).
 CATEGORIAS_DIR = Path("/Volumes/research/categorias")
@@ -46,10 +52,12 @@ def run_category(category: str, use_crossref: bool = False,
 
     records = load_jsonl(jsonl)
     total = len(records)
+    dismissed = dismissed_set(category)
     if use_crossref:
-        flagged = validate_category_crossref(category, CATEGORIAS_DIR, limit=limit)
+        flagged = validate_category_crossref(category, CATEGORIAS_DIR, limit=limit,
+                                             dismissed=dismissed)
     else:
-        flagged = validate_category(category, CATEGORIAS_DIR)
+        flagged = validate_category(category, CATEGORIAS_DIR, dismissed=dismissed)
 
     sidecar = meta_dir / f"validation_{category}.jsonl"
     with sidecar.open("w", encoding="utf-8") as f:
