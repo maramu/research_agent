@@ -1044,56 +1044,75 @@ if not PUBLIC:
                     st.rerun()
 
             # ── (iii) Adopción MASIVA de año por categoría (preview→confirmar).
+            # Candidatos = year_mismatch de fuente Crossref ya detectado en el
+            # sidecar (última pasada --crossref) — no un barrido en vivo de
+            # todos los DOI. El sidecar ya trae stored/suggested como int, así
+            # que no hace falta re-consultar Crossref en el preview.
             # SOLO entra el lote severity "low" (|delta|==1, online-temprano vs
             # print): los |delta|>=2 se muestran aparte y se adoptan uno a uno
             # en el listado por-campo de arriba (caso passalacqua: print alto
             # defendible pero no automático).
             st.markdown("---")
             st.markdown("**Adopción masiva de año de Crossref** "
-                        "(papers con DOI de esta categoría; año canónico = "
+                        "(según el sidecar — pulsa \"🔄 Re-validar esta categoría\" "
+                        "arriba si quieres refrescarlo antes; año canónico = "
                         "published-print; solo desfases ±1 — los saltos "
                         "grandes se revisan uno a uno)")
             year_prev_key = f"year_preview_{sel}"
 
-            if st.button("👁 Previsualizar adopción de año",
+            year_candidates = [
+                pid for pid, row in sidecar.items()
+                if (pid, "year") not in dismissed
+                and any(i.get("code") == "year_mismatch"
+                        and i.get("suggested_source") == "crossref"
+                        for i in (row.get("crossref") or {}).get("issues", []))]
+
+            if st.button(f"👁 Previsualizar adopción de año "
+                         f"({len(year_candidates)} candidato(s) del sidecar)",
                          key=f"year_prev_btn_{sel}"):
-                with st.spinner("Consultando Crossref por DOI…"):
-                    ymass, yreview, yskip = [], [], []
-                    for r in all_rows:
-                        pid = r["paper_id"]
-                        if (pid, "year") in dismissed:
-                            continue
-                        doi = str(r.get("doi") or "").strip()
-                        if not doi:
-                            yskip.append({"paper_id": pid, "motivo": "sin DOI"})
-                            continue
-                        work = fetch_work(doi)
-                        if not work:
-                            yskip.append({"paper_id": pid,
-                                          "motivo": "miss Crossref"})
-                            continue
-                        cr_year = work.get("year")
-                        if not cr_year:
-                            yskip.append({"paper_id": pid,
-                                          "motivo": "sin año Crossref"})
-                            continue
-                        try:
-                            local = int(r.get("year"))
-                        except (TypeError, ValueError):
-                            local = None
-                        if local == cr_year:
-                            continue  # ya coincide: nada que adoptar
-                        delta = (cr_year - local) if local is not None else None
-                        entry = {"paper_id": pid, "año actual": local,
-                                 "año Crossref": int(cr_year), "delta": delta}
-                        if year_delta_severity(delta) == "low":
-                            ymass.append(entry)
-                        else:
-                            yreview.append(entry)
-                    ymass.sort(key=lambda p: p["paper_id"])
-                    yreview.sort(key=lambda p: p["paper_id"])
-                    st.session_state[year_prev_key] = {
-                        "mass": ymass, "review": yreview, "skip": yskip}
+                # "Saltados": sin DOI (local, gratis) o DOI con miss Crossref
+                # (ya lo sabe el sidecar) — para poder marcar "no reintentar"
+                # sin tener que volver a consultar Crossref.
+                yskip = []
+                for r in all_rows:
+                    pid_s = r["paper_id"]
+                    if (pid_s, "year") in dismissed:
+                        continue
+                    doi_s = str(r.get("doi") or "").strip()
+                    if not doi_s:
+                        yskip.append({"paper_id": pid_s, "motivo": "sin DOI"})
+                        continue
+                    cr_block_s = (sidecar.get(pid_s) or {}).get("crossref")
+                    if cr_block_s is not None and not cr_block_s.get("fetched", True):
+                        yskip.append({"paper_id": pid_s, "motivo": "miss Crossref"})
+
+                ymass, yreview = [], []
+                for pid in year_candidates:
+                    row = sidecar[pid]
+                    iss = next(i for i in row["crossref"]["issues"]
+                               if i.get("code") == "year_mismatch"
+                               and i.get("suggested_source") == "crossref")
+                    cur_rec = by_pid.get(pid, {})
+                    if issue_is_stale(iss, cur_rec):
+                        continue  # ya coincide en el registro vigente
+                    try:
+                        local = int(cur_rec.get("year"))
+                    except (TypeError, ValueError):
+                        local = None
+                    cr_year = iss.get("suggested")
+                    if not cr_year or local == cr_year:
+                        continue
+                    delta = (cr_year - local) if local is not None else None
+                    entry = {"paper_id": pid, "año actual": local,
+                             "año Crossref": int(cr_year), "delta": delta}
+                    if year_delta_severity(delta) == "low":
+                        ymass.append(entry)
+                    else:
+                        yreview.append(entry)
+                ymass.sort(key=lambda p: p["paper_id"])
+                yreview.sort(key=lambda p: p["paper_id"])
+                st.session_state[year_prev_key] = {
+                    "mass": ymass, "review": yreview, "skip": yskip}
                 st.rerun()
 
             ydata = st.session_state.get(year_prev_key)
@@ -1104,7 +1123,8 @@ if not PUBLIC:
                 st.caption(f"**{len(ymass)}** paper(s) +1 se actualizarán "
                            f"(adopción masiva) · **{len(yreview)}** con salto "
                            f"grande a revisar aparte · {len(yskip)} se saltan "
-                           f"(sin DOI / miss / sin año).")
+                           f"(sin DOI / miss) (de "
+                           f"{len(year_candidates)} candidato(s) del sidecar).")
                 if ymass:
                     st.caption("Descarta aquí los que NO quieras aplicar "
                                "(no se volverán a sugerir):")
