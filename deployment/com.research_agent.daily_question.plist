@@ -4,6 +4,8 @@
 <dict>
 	<key>Label</key>
 	<string>com.research_agent.daily_question</string>
+	<key>UserName</key>
+	<string>martinramirez</string>
 	<key>WakeOnLaunchDate</key>
 	<true/>
 	<key>StartCalendarInterval</key>
@@ -70,6 +72,11 @@
 		<string>/bin/bash</string>
 		<string>/Users/martinramirez/claude-scheduled/scheduled-claude.sh</string>
 	</array>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>HOME</key>
+		<string>/Users/martinramirez</string>
+	</dict>
 	<key>StandardOutPath</key>
 	<string>/Users/martinramirez/Library/Logs/research_agent/daily_question.log</string>
 	<key>StandardErrorPath</key>

@@ -242,7 +242,8 @@ research_agent/
 ├── deployment/
 │   ├── com.research_agent.streamlit.plist        ← LaunchAgent Streamlit privado (8501)
 │   ├── com.research_agent.streamlit_public.plist ← LaunchAgent Streamlit público (8502)
-│   └── com.research_agent.scopus_weekly.plist    ← LaunchAgent ingesta semanal (lunes 06:00)
+│   ├── com.research_agent.scopus_weekly.plist    ← LaunchAgent ingesta semanal (lunes 06:00)
+│   └── com.research_agent.daily_question.plist   ← LaunchDaemon pregunta diaria tiempo/mareas (06:00 todos los días) — excepción, ver abajo
 ├── logs/                             ← logs antiguos de scripts numerados
 ├── tests/                            ← suite pytest (item 39)
 │   ├── conftest.py                   ← añade scripts/ a sys.path
@@ -499,6 +500,51 @@ Consumo idle ≈ 5-10W.
 | Schedule | Lunes a las **04:00** (`StartCalendarInterval`) — plist del repo actualizado; pendiente aplicar en pciq22 |
 | RunAtLoad | false |
 | KeepAlive | false |
+
+**Pregunta diaria tiempo/mareas (`~/claude-scheduled/scheduled-claude.sh`, fuera del repo)**
+
+> ⚠️ **Único LaunchDaemon del proyecto — no LaunchAgent.** Un LaunchAgent
+> normal está atado a la sesión gráfica (Aqua) del usuario
+> (`monitor = com.apple.UserEventAgent-Aqua`); si el Mac se reinicia (crash,
+> corte...) y nadie inicia sesión gráfica antes de las 06:00, el disparador
+> de `StartCalendarInterval` se pierde sin más — launchd no lo reintenta.
+> Pasó de verdad dos veces (16 y 18 de julio de 2026, ver
+> `Mejoras_realizadas.md` → sesión 2026-07-18). Instalado como LaunchDaemon
+> en `/Library/LaunchDaemons/` (dominio `system`) con `UserName` =
+> `martinramirez` para correr con permisos de usuario sin sesión gráfica
+> activa. `WakeOnLaunchDate` solo tiene efecto real en LaunchDaemons —
+> en el LaunchAgent anterior (desde 2026-07-09) era una clave inerte.
+
+| Aspecto | Valor |
+|---|---|
+| Plist en repo | `deployment/com.research_agent.daily_question.plist` |
+| Instalado en | `/Library/LaunchDaemons/com.research_agent.daily_question.plist` (root:wheel, 644) |
+| Etiqueta | `com.research_agent.daily_question` |
+| Dominio launchd | `system` (no `gui/<uid>`) |
+| UserName | `martinramirez` — el daemon corre como este usuario, no como root |
+| EnvironmentVariables | `HOME=/Users/martinramirez` — **obligatorio**: un LaunchDaemon con `UserName` no hereda `$HOME` automáticamente; sin esto el script no encuentra `~/claude-scheduled/question.md` ni el resto de rutas |
+| Comando | `/bin/bash /Users/martinramirez/claude-scheduled/scheduled-claude.sh` |
+| Logs | `~/Library/Logs/research_agent/daily_question.{log,err.log}` |
+| Schedule | Todos los días **06:00** (`StartCalendarInterval`, un dict por weekday 1-7) |
+| WakeOnLaunchDate | true — efectivo ahora que es LaunchDaemon |
+| RunAtLoad | false |
+| LaunchAgent viejo | Desactivado, no borrado: `~/Library/LaunchAgents/com.research_agent.daily_question.plist.disabled` |
+
+Credenciales de `claude` CLI (llavero de inicio de sesión `Claude Code-credentials`
++ `~/.claude/.credentials.json`) verificadas empíricamente accesibles sin sesión
+gráfica activa (`launchctl kickstart` en frío generó respuesta real y envió el
+email — sin error de autenticación).
+
+Reinstalar tras editar el plist (requiere `sudo`, dominio `system` — ver
+`deployment/README.md` para el bloque completo):
+
+```bash
+sudo cp deployment/com.research_agent.daily_question.plist /Library/LaunchDaemons/
+sudo chown root:wheel /Library/LaunchDaemons/com.research_agent.daily_question.plist
+sudo chmod 644 /Library/LaunchDaemons/com.research_agent.daily_question.plist
+sudo launchctl bootout system/com.research_agent.daily_question 2>/dev/null
+sudo launchctl bootstrap system /Library/LaunchDaemons/com.research_agent.daily_question.plist
+```
 
 Comandos día a día:
 

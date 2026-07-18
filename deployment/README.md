@@ -11,11 +11,47 @@ Caddy para los servicios de `research_agent` en pciq22.
 | `com.research_agent.streamlit_public.plist` | Streamlit pública, puerto 8502 |
 | `com.research_agent.scopus_weekly.plist` | Ingesta semanal Scopus (lunes) |
 | `com.research_agent.caddy_ollama.plist` | Proxy Caddy con auth Bearer delante de Ollama, puerto 11434 |
+| `com.research_agent.daily_question.plist` | Pregunta diaria (tiempo/mareas) por email, 06:00 todos los días — **LaunchDaemon**, no LaunchAgent (ver abajo) |
 
 Todos siguen el mismo patrón: `PATH` fijado a mano en el plist (launchd no
 carga `.zprofile`) con `/opt/homebrew/bin` incluido, y logs en
 `~/Library/Logs/research_agent/` (**nunca** en `/Volumes/*`: TCC bloquea la
 escritura de logs de launchd ahí).
+
+### Por qué `daily_question` es un LaunchDaemon y no un LaunchAgent
+
+Un LaunchAgent normal vive en `~/Library/LaunchAgents/` y está atado a la
+sesión gráfica (Aqua) del usuario (`monitor = com.apple.UserEventAgent-Aqua`
+en `launchctl print`). Si el Mac se reinicia (crash, corte, lo que sea) y
+nadie inicia sesión gráfica antes de las 06:00, el disparador de esa hora se
+pierde sin más — launchd no reintenta triggers de `StartCalendarInterval`
+perdidos. Esto pasó de verdad dos veces (16 y 18 de julio de 2026): el Mac
+mini está siempre encendido y sin sesión gráfica hasta que alguien se conecta
+por Screen Sharing, así que un LaunchAgent es la elección equivocada aquí.
+
+Por eso `daily_question` está instalado como **LaunchDaemon** en
+`/Library/LaunchDaemons/` (dominio `system`, no `gui/<uid>`), con `UserName`
+puesto a `martinramirez` para que corra con los permisos del usuario (acceso
+a `~/claude-scheduled/`, credenciales de `claude` CLI) sin necesitar sesión
+gráfica activa. Verificado empíricamente que `claude --print` se autentica
+bien en este contexto (no depende del desbloqueo del llavero de sesión).
+
+Un LaunchDaemon con `UserName` **no hereda `$HOME`** — hay que fijarlo a mano
+en `EnvironmentVariables`, si no el script no encuentra
+`~/claude-scheduled/question.md` ni el resto de rutas.
+
+Reinstalar tras editar el plist (requiere `sudo`, dominio `system`):
+
+```bash
+sudo cp deployment/com.research_agent.daily_question.plist /Library/LaunchDaemons/
+sudo chown root:wheel /Library/LaunchDaemons/com.research_agent.daily_question.plist
+sudo chmod 644 /Library/LaunchDaemons/com.research_agent.daily_question.plist
+sudo launchctl bootout system/com.research_agent.daily_question 2>/dev/null
+sudo launchctl bootstrap system /Library/LaunchDaemons/com.research_agent.daily_question.plist
+```
+
+El LaunchAgent viejo (`~/Library/LaunchAgents/com.research_agent.daily_question.plist.disabled`)
+se dejó renombrado en vez de borrado, por si hiciera falta revertir.
 
 ## Reinstalar / actualizar el servicio Caddy (proxy Ollama)
 

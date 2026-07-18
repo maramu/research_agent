@@ -2,6 +2,63 @@
 > Histórico append-only (lo más nuevo arriba). Backlog: Mejoras_pendientes.md · Estado/arquitectura: ESTADO.md
 
 ---
+### ✅ Corrección: `daily_question` migrado a LaunchDaemon — el fix de WakeOnLaunchDate del 09-07 no funcionaba (2026-07-18)
+
+**Contexto:** el usuario reportó que la pregunta diaria (tiempo/mareas,
+06:00) no se ejecutó el 18 de julio. La sesión "Migración cron → launchd +
+WakeOnLaunchDate" (2026-07-09, más abajo) daba por resuelto el problema con
+`WakeOnLaunchDate: true` en el plist — **ese diagnóstico era incompleto para
+`daily_question`** (sí es válido y suficiente para `scopus_weekly`, que
+corre en horario laborable con la máquina ya en uso).
+
+**Primera hipótesis descartada con evidencia:** se sospechó inicialmente que
+el Mac dormía a las 06:00. `pmset -g log` lo desmintió: `Sleep/Wakes since
+boot: 0` — la máquina no se ha dormido ni una vez. `pmset -g sched` confirmó
+además que no había NINGÚN wake programado, pese a `WakeOnLaunchDate: true`.
+
+**Causa raíz real:** `daily_question` estaba instalado como **LaunchAgent**
+(`~/Library/LaunchAgents/`), atado a la sesión gráfica (Aqua) del usuario
+(`monitor = com.apple.UserEventAgent-Aqua` en `launchctl print`).
+`WakeOnLaunchDate` solo tiene efecto en LaunchDaemons — en un LaunchAgent
+launchd la ignora en silencio, de ahí que `pmset -g sched` no mostrara nada.
+Si el Mac se reinicia y nadie inicia sesión gráfica antes de la hora del
+disparador, el trigger de `StartCalendarInterval` se pierde sin más (launchd
+no reintenta triggers perdidos). `last` confirmó el patrón exacto, dos veces:
+- Reinicio (`crash` de la sesión de consola) el 17-jul a las 20:55; sin
+  sesión gráfica hasta la reconexión por Screen Sharing el 18-jul a las
+  12:29 → falta `response_2026-07-18_*.md`.
+- Mismo patrón el 15→16 de julio (reinicio 15-jul 22:47, sesión no activa
+  hasta 16-jul 10:25) → falta `response_2026-07-16_*.md`.
+Los días que sí funcionó fue porque la sesión ya llevaba abierta desde la
+noche anterior.
+
+**Fix:** migrado a **LaunchDaemon** en `/Library/LaunchDaemons/` (dominio
+`system`, no `gui/<uid>`), con `UserName=martinramirez` (corre con permisos
+de usuario, no root) y `EnvironmentVariables.HOME` fijado a mano (un
+LaunchDaemon con `UserName` no hereda `$HOME` automáticamente — sin esto el
+script no encuentra `~/claude-scheduled/question.md` ni el resto de rutas).
+`WakeOnLaunchDate` se conserva y ahora sí es efectivo. LaunchAgent viejo
+desactivado, no borrado (`~/Library/LaunchAgents/com.research_agent.daily_question.plist.disabled`),
+por si hace falta revertir. Detalle completo (tabla de campos, comandos de
+reinstalación) en `ESTADO.md` → sección Streamlit/despliegue, y en
+`deployment/README.md`.
+
+**Riesgo evaluado y descartado:** un LaunchDaemon corre fuera de cualquier
+sesión de usuario, lo que en macOS suele bloquear el acceso al llavero de
+inicio de sesión (`claude` CLI usa `Claude Code-credentials` en
+`login.keychain-db` además de `~/.claude/.credentials.json`). Verificado
+empíricamente con `sudo launchctl kickstart -k system/com.research_agent.daily_question`:
+generó una respuesta real (tiempo/mareas correctos) y envió el email, sin
+error de autenticación — no hizo falta ningún cambio adicional de
+credenciales.
+
+**Pendiente no accionado:** `scopus_weekly` sigue siendo LaunchAgent con
+`WakeOnLaunchDate` igualmente inerte; no se ha tocado porque corre en
+horario laborable (lunes 04:00→visto en horas de uso) y no ha mostrado el
+mismo síntoma, pero comparte la misma fragilidad de fondo si el patrón de
+uso de la máquina cambia.
+
+---
 ### ✅ Reconciliar `pendientes_descarga.csv` contra el corpus real (item 15/28) (2026-07-12, cont.)
 
 **Contexto:** el usuario reportó que `15_Pendientes.py` listaba 35 DOI "pendientes
