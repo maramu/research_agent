@@ -12,6 +12,19 @@
 - ~~Item 49 — completar Hermes Agent (Discord + MCPs)~~ — ✅ **MAYORMENTE COMPLETADO 2026-06-25** (operativo 24/7 con Notion/Calendar/Gmail/Tavily; residuales: override modelo local para Gmail y aplicar plist ingesta 04:00 en pciq22).
 - ~~Timeout job semanal: subir `SCOPUS_TIMEOUT` de 2700 a 5400 (45→90 min)~~ — ✅ **COMPLETADO 2026-06-15** — `run_weekly_scopus.py`: `SCOPUS_TIMEOUT = 5400`; `WEEKLY_CATEGORIES` ampliada con `anoxic_biogas_biodesulfurization`.
 
+## Orden de prioridad (revisión 2026-07-20 — auditoría externa Kimi K2)
+> Detalle y justificación: `docs/auditorias/2026-07-20_auditoria_externa.md`.
+> Items 52–61 nuevos (bloque al final); el resto son anotaciones fechadas dentro de items existentes. El orden 2026-06-25 sigue vigente para lo no tocado aquí.
+
+1. **Item 52 (P0) — `num_ctx` + `temperature` en las DOS rutas de síntesis.** Verificar antes en pciq22 (`ollama ps`, columna CONTEXT); fix de 30 min. Degradación silenciosa potencialmente activa hoy.
+2. **Item 53 — default `hybrid` → `False` en `run_rag_batch.py`** (verificar `grep setdefault`). 2 min.
+3. **Item 33 (anotado) — tokenizer BM25** (acrónimos/fórmulas/tildes/griegas, índice + query) → re-correr eval denso/híbrido después.
+4. **Item 54 — `run_weekly_scopus`:** aplicar plist 04:00 + LaunchDaemon + timeout con kill real.
+5. **Item 55 — integridad índice↔metadata:** norma de embeddings (verificar `np.linalg.norm`) + `assert ntotal==len(meta)` + orden de escritura de `indexed_papers.json`.
+6. **Item 37 (anotado) — harness de eval:** Wilson/McNemar/Recall/Precision/arquetipo/deriva + excluir preguntas sin relevantes.
+7. **Item 57 — desduplicar el núcleo RAG** antes del primer uso investigativo de la batería.
+8. **Items 56, 58, 59, 60, 61** — higiene de pipeline, TLS del Bearer, observabilidad, reproducibilidad y fiabilidad de citas (P1–P2, ver bloque final).
+
 ## Hallazgos pendientes (revisión 2026-06-12)
 - ~~`detect_affected_categories` compara stems por igualdad exacta sin `_norm` → riesgo de reproceso
   por puntuación/guiones.~~ ✅ RESUELTO 2026-06-13.
@@ -60,6 +73,12 @@ Extender los backups `.bak` actuales a:
 `keywords.yml`, `scopus_queries.yml`, `.env.example` (sin claves), `doi_manual.xlsx`, manifests.
 
 Ruta: `/Volumes/research/metadatos/backups_config/`
+- **Auditoría externa 2026-07-20:** añadir (a) **copia cifrada del `config/.env`** (age/gpg,
+  passphrase en gestor externo) como paso de `12_Backup.py` — hoy es la ÚNICA copia de todas
+  las API keys/passwords, fuera de git y del rsync de `/Volumes/research/`; (b) versionar la
+  infra que solo vive en pciq22: `~/grobid-compose.yml` y
+  `~/Library/LaunchAgents/com.martin.ollama.plist` → `deployment/` (no llevan secretos). Ver
+  también item 60.
 
 ### 28. Subagente navegador OpenClaw — Bloque C
 
@@ -95,6 +114,10 @@ ingestados; corre automáticamente en `15_Pendientes.py` (aviso visible) y
 antes del email semanal. Ejecutada ya contra el NAS real: **37
 reconciliados** — de 35 "pendientes activos" reportados por el usuario, 34
 ya estaban en el corpus. Detalle en `Mejoras_realizadas.md`.
+- **Auditoría externa 2026-07-20 — recomendación: CONGELAR (de-scope).** Tras la
+  reconciliación registro↔corpus (34/35 ya estaban en el corpus), los pendientes reales son
+  ~1 → el ROI del subagente navegador se desploma. Mantener en espera hasta que haya un
+  volumen de descargas fallidas que lo justifique.
 
 ### 30. Documentación para el grupo — ALTA si se comparte
 
@@ -102,6 +125,12 @@ ya estaban en el corpus. Detalle en `Mejoras_realizadas.md`.
   cómo exportar papers, cómo citar correctamente.
 - **Política de uso**: no descargas masivas, no saltarse paywalls, no compartir
   PDFs fuera del grupo si la licencia no lo permite, respetar acceso institucional.
+- **Auditoría externa 2026-07-20 — subir a P1, prerrequisito de difundir `:8502`:** la app
+  pública ya está desplegada (password compartida + Gemini BYOK) sin guía ni política, y
+  registra consultas (`rag_queries_*.jsonl`) sin aviso de transparencia. Mínimo antes de
+  difusión amplia: `st.caption` permanente "verifica cada afirmación contra el fragmento
+  citado", nota de registro de consultas y normas de licencia. Quick-win con mayor ratio
+  protección/esfuerzo del backlog (medio día).
 
 ### 31. Pipeline para libros de docencia — ✅ MVP hecho (2026-07-10) / eval pendiente
 
@@ -132,6 +161,9 @@ Diseño confirmado en el MVP:
   referencias.
 
 Escalar de 1 → 30+ libros de bioprocesos cuando la evaluación valide la calidad.
+- **Auditoría externa 2026-07-20:** hacer "Mapear página IMPRESA (page labels)" **antes** de
+  escalar de 1 a 30 libros — re-procesar 30 libros después es evitable. La detección barata de
+  escaneado (texto≈0 → cuarentena, items 18/35) puede implementarse ya.
 
 ---
 
@@ -210,6 +242,23 @@ Ligado al item 37 — sin set de evaluación no se puede medir, y el soporte de 
   (H2S, TiO2, NR-SOB) en `utils/retrieval.py`; (2) fusión ponderada a nivel de score
   (α·denso+(1-α)·bm25) o RRF con k bajo (10-20) en vez de k=60 sobre pools diminutos.
 
+- **Auditoría externa 2026-07-20 (`docs/auditorias/2026-07-20_auditoria_externa.md`):**
+  confirmado en código que `tokenize` = `re.findall(r"[a-z0-9]+", text.lower())` destruye
+  `NR-SOB`, `Fe(II)`, cargas, letras griegas (α/β/μ) y parte palabras con tilde
+  (`desulfurización`→`desulfurizaci`+`n`), **tanto en el texto indexado como en la query**.
+  Consecuencia: la comparación denso-vs-híbrido (anoxic 0.50→0.25, biogas MRR 0.889→0.857)
+  se hizo con un BM25 que no ve los términos donde BM25 aportaría → la conclusión "denso
+  gana" puede ser correcta por parsimonia, pero la evidencia no la sostiene. Fix:
+  `[a-z0-9]+(?:-[a-z0-9]+)*` + `strip_accents`/NFKD + tests (H2S, TiO2, NR-SOB, Fe(II), kLa).
+  Secuencia obligada: arreglar tokenizer → re-correr eval → decidir híbrido.
+  **Corrección de la propia auditoría:** retira su punto "(2) RRF k=60 sobre pools diminutos"
+  — `pool_size()` devuelve `max(k*10, 200)` (pools de 200/brazo), régimen donde k=60 es
+  defendible; la raíz es el tokenizer, no la fusión.
+- **Reranking (fase 2):** confirmado que `bge-reranker` NO se sirve desde Ollama. Vías reales
+  sin violar Ollama 0.30.7: (a) CrossEncoder `bge-reranker-v2-m3` en `sentence-transformers`
+  (rerank top-20 <1 s en M4, añade torch al venv); (b) LLM-as-reranker pointwise con qwen2.5
+  (cero dependencias) para la evaluación inicial.
+
 ### 35. Fallback OCR para PDFs escaneados — MEDIA prioridad
 
 GROBID no extrae nada de un PDF que es imagen → entra vacío al índice.
@@ -274,6 +323,19 @@ cualquier cambio de chunking, embeddings, modelo o estrategia de retrieval.
     previo a pool_candidates) antes de poder ampliarlo por pooling. Ojo consistencia:
     su golden se anotó sin pooling (independiente); si se re-poolea, homogeneizar
     o dejar anoxic como está y ampliar solo upgrading + plásticos.
+- **Auditoría externa 2026-07-20:** el harness (`run_eval.py`) necesita, en una sola
+  iteración antes de generar golden nuevos: (a) **excluir preguntas con
+  `relevant_paper_ids: []`** — hoy `pool_candidates.py::cmd_build` las escribe al golden y
+  en `run_eval` dan `hit=0/rr=0` siempre, inflando el fracaso aparente; (b) **IC de Wilson**
+  para Hit@k y **bootstrap** por pregunta para MRR; (c) **McNemar** (test emparejado) para
+  denso-vs-híbrido; (d) **Recall@k y Precision@k** (anoxic ~4 relevantes/pregunta; Hit@8 solo
+  mira si cae *alguno*; para reranking importarán Precision@3-5 y MRR); (e) **métricas por
+  `archetype`** además del global; (f) diagnóstico gratis: **Jaccard top-k denso vs top-k
+  BM25** por pregunta (≈1 ⇒ fusión decorativa); (g) escribir en el CSV **`index.ntotal`, max
+  `processed_date`, git commit y hash del golden** (deriva del corpus entre runs;
+  `corpus_manifest.py` ya genera casi todo). Reformular en docs: "sin evidencia de beneficio
+  del híbrido a n=10; OFF por parsimonia", no "denso gana". El Hit@8=1.0 de biogas es casi
+  seguro artefacto de pooling.
 
 ### 38. Batch API de Anthropic para resúmenes — BAJA prioridad
 
@@ -292,6 +354,11 @@ Formalizar como tests la verificación AST que ya se incluye en los prompts de C
 - Tests de regresión para los bugs ya documentados (guiones vs guiones bajos,
   ligaduras Unicode, sufijos de DOI).
 - Opcional: hook pre-commit que corra `pytest` + parseo AST de los scripts tocados.
+- **Auditoría externa 2026-07-20:** ampliar la suite al **núcleo de recuperación**, hoy sin
+  tests: `utils/retrieval.py` (`dense_rank`, `bm25_rank`, `rrf_fuse`, `passes_filters` con
+  `year=None` + filtro activo, `pool_size`), el tokenizer (H2S/TiO2/NR-SOB tras el fix del
+  item 33) y `run_eval.py`. Son funciones que devuelven resultados distintos sin lanzar error.
+  Sobre fixtures, sin Ollama ni FAISS real.
 
 ### ~~41. Limpiar el índice viejo all__bge-m3~~ — ✅ COMPLETADO (ejecutado 2026-06-16, documentado 2026-06-17)
 
@@ -592,3 +659,124 @@ confirmación humana) — detalle en `Mejoras_realizadas.md`. Pendiente:
     `ESTADO.md`); (b) ejecución en segundo plano que sobreviva al cierre del
     navegador — hoy `13_RAG_multiple.py` es síncrona y muere si se cierra la
     pestaña a mitad de batería (para tandas largas, usar el CLI en pciq22).
+
+
+---
+
+## Auditoría externa (Kimi K2, 2026-07-20) — items nuevos 52–61
+> Origen: `docs/auditorias/2026-07-20_auditoria_externa.md`. Los items marcados **VERIFICAR
+> (pciq22)** son inferencias de lectura de código: confirmar en pciq22 antes de editar en casa.
+> Disciplina de dos máquinas: verificación/ejecución en pciq22, edición/commit en casa.
+
+### 52. `num_ctx` + `temperature` en las dos rutas de síntesis — P0 (crítico)
+
+`rag_core.py::stream_ollama` y `run_rag_batch.py::synthesize` llaman a `client.generate(...)`
+**sin `options`** → Ollama usa `num_ctx=4096` por defecto y trunca el prompt en silencio
+(descarta los tokens más antiguos: system prompt + primeros chunks). Con top_k=8 y chunks de
+hasta 8000 chars se supera 4096 en consultas normales. `apply_citations` post-procesa las
+claves `[N]` que el modelo sí menciona → la respuesta truncada **parece** correctamente citada.
+Temperatura sin fijar (default 0.8 en Ollama) para síntesis con citas.
+
+- **VERIFICAR (pciq22):** `ollama ps` (columna CONTEXT) durante una consulta real. CONTEXT=4096
+  ⇒ confirmado. Opcional: contrastar `input_tokens` estimado (chars//4) contra 4096 en los
+  `rag_usage_*.jsonl` para acotar el daño histórico.
+- **Fix (casa → commit → pull → pciq22):** `options={"num_ctx": 8192, "temperature": 0.0}` en
+  ambas funciones. 8192 sobra para top_k=8; 16384 solo si se sube top_k (agranda el KV-cache —
+  cabe en 24 GB con qwen2.5:14b + bge-m3, pero elegir a conciencia). Documentar ambos valores en
+  ESTADO.md junto a los modelos.
+
+### 53. Default `hybrid` → `False` en `run_rag_batch.py` — P1 (2 min)
+
+La batería usaría híbrido **ON** (`cfg.setdefault("hybrid", True)`) mientras la política de
+producción es OFF ("denso gana") → **no reproduce producción**. Es la copia del núcleo RAG (item
+57) ya desalineada en un parámetro de comportamiento.
+
+- **VERIFICAR:** `grep -n 'setdefault("hybrid"' scripts/run_rag_batch.py`. Si es `True` →
+  cambiar a `False` (el YAML puede seguir forzándolo explícitamente cuando se quiera).
+
+### 54. `run_weekly_scopus`: ingesta semanal robusta — P1
+
+Tres grietas apiladas en la función central del sistema:
+1. **Plist 04:00 sin aplicar** (residual del item 49): `git pull` + `cp deployment/... ~/Library/LaunchAgents/` + `launchctl bootout/bootstrap`.
+2. **LaunchAgent con `WakeOnLaunchDate` que se pierde sin sesión gráfica** (mismo fallo del 16/18-jul en `daily_question`) → migrar a **LaunchDaemon** (`UserName` + `HOME`, verificar SMTP en frío como se hizo con `claude`).
+3. **El "timeout de 90 min" no termina el proceso:** `ThreadPoolExecutor` + `future.result(timeout=5400)` + `executor.shutdown(wait=False)` con threads **no-daemon** → el email sale pero el proceso sigue vivo hasta que `run_scopus` acaba de verdad (launchd ve el job vivo, Ollama ocupado). Además `pdf_after` se cuenta en el instante del timeout → números del email incoherentes con el estado final. Sustituir el thread por `subprocess.Popen([...], start_new_session=True)` + `wait(timeout=5400)` + `os.killpg(os.getpgid(p.pid), SIGKILL)` al expirar (kill real del árbol de procesos). ~30 líneas.
+
+### 55. Integridad índice ↔ metadata — P1
+
+- (a) **Norma de embeddings — VERIFICAR (pciq22):** `5_build_embeddings.py` usa
+  `faiss.IndexFlatL2` sin `faiss.normalize_L2`; `attachments.py` lo documenta ("NO normaliza").
+  Si bge-m3 vía Ollama no devuelve vectores normalizados, la similitud no es coseno. Comprobar en
+  3 líneas contra el Ollama de prod: embeber un texto y `np.linalg.norm(v)`. Si ≈1.0 → documentar
+  "Ollama normaliza, L2≈coseno" y cerrar; si no → normalizar en `embed_texts` (idempotente) y
+  re-indexar.
+- (b) **`assert index.ntotal == len(meta)`** al cargar en los 5 consumidores (`run_eval.py`,
+  `pool_candidates.py`, `run_rag_batch.py`, `8_query_rag.py`, `2_RAG.py`); mejor en el loader
+  compartido del item 57. Hoy todos hacen `if idx >= len(meta): continue`, tolerando una
+  desalineación parcial en silencio.
+- (c) En `5_build_embeddings.py`, escribir `indexed_papers.json` **antes** de `write_index` (hoy
+  es lo último → un kill entre ambos deja vectores sin registrar → duplicados en el siguiente run).
+
+### 56. Robustez del pipeline — P2
+
+- (a) **FileHandler leak** en `pipeline.py::_setup_pipeline_log`: cada `run_scopus`/`run_inbox_*`
+  hace `log.addHandler(fh)` sin `removeHandler`; Streamlit importa `pipeline` in-process y vive
+  semanas → handlers acumulados (logs cruzados) + leak de fd. `run_weekly_scopus.py` sí tiene guard
+  (`if not log.handlers`); portarlo (try/finally o `_setup` idempotente).
+- (b) **`run_step` sin timeout:** lectura bloqueante de `process.stdout` sin watchdog → un hijo
+  colgado (GROBID muerto, red) bloquea el pipeline. Watchdog por inactividad (N min sin línea →
+  `process.kill()`) al menos en pasos de red (`0_scopus_api`, `3a_download`, `3_process`).
+- (c) **Quitar el `--force` obsoleto** de `integrate_adhoc` → `5_build_embeddings.py` (data del
+  2026-05-27, previo al incremental del 2026-06-04; re-indexa toda la categoría por 2 papers).
+- (d) Inconsistencias menores: `run_books` es `raise NotImplementedError` mientras ESTADO.md lo
+  describe funcional (código muerto contradictorio); docstring de `run_adhoc` dice "no renombra"
+  pero sí; docstring de `8_query_rag.py` obsoleto ("nomic-embed-text", "k*5"); `iter_chunks` usa
+  `chunk["text"]` (usar `.get` → evita `KeyError`).
+
+### 57. Desduplicar el núcleo RAG — P1
+
+`load_metadata` y `embed_query` copiadas VERBATIM en 4 sitios (`8_query_rag.py`, `run_eval.py`,
+`pool_candidates.py`, `run_rag_batch.py`); la plantilla de síntesis en `rag_core.py::build_default_system`
++ copia en `run_rag_batch.py::synthesize`; y `2_RAG.py` importa un **tercer** `embed_texts` desde
+`utils/attachments.py`. Extraer a `utils/`: `load_index_and_meta` (con el assert del item 55b),
+`embed_query`, y `utils/synthesis.py` (plantilla, módulo puro sin streamlit). Hacer **antes** del
+primer uso serio de la batería para investigación (item 37): la copia ya se desalineó una vez (item
+53). Extiende la "deuda de consolidación" anotada bajo `run_rag_batch.py` y el item 50 (pareja
+distinta). ~2–3 h.
+
+### 58. TLS / túnel para el Bearer de Ollama — P1 (seguridad)
+
+Caddy en `http://pciq22.uca.es:11434` exige Bearer pero el canal es **HTTP plano** → el token
+(`OLLAMA_API_KEY`) circula en claro por la red del campus (interceptable en el segmento). Opciones:
+(a) `tls internal` de Caddy + repartir el cert raíz a los pocos clientes (Obsidian) — la menos
+friccionante a medio plazo; (b) cert UCA si `pciq22.uca.es` puede obtenerlo; (c) cerrar `:11434` a
+la red y usar túnel SSH (`ssh -L 11434:127.0.0.1:11435`) si el único cliente remoto sois vosotros por
+VPN. Relacionado: `PasswordAuthentication no` en pciq22 (ya en el checklist del item 49).
+
+### 59. Observabilidad: healthcheck + rotación de logs — P2
+
+- (a) **Rotación** vía `newsyslog` (`/etc/newsyslog.d/research_agent.conf`) para logs de
+  Streamlit/Caddy/scopus (hoy crecen sin límite). ~10 min.
+- (b) **Healthcheck** barato (launchd): `curl -fsS` a `:8501`, `:8502`, `:11434` (con token) y
+  GROBID `/api/isalive`; email solo si falla (reutiliza el SMTP de `run_weekly_scopus.py`). Cierra el
+  hueco "me entero por el usuario". ~50 líneas.
+
+### 60. Reproducibilidad: lockfile + configs versionadas + runbook — P1
+
+- (a) `pip freeze > requirements-lock.txt` desde `~/venvs/rag_papers` en pciq22, versionado (la regla
+  manual de replicar entre los dos venvs ya falló una vez con un Python 3.14 desinstalado).
+- (b) Versionar `~/grobid-compose.yml` y `com.martin.ollama.plist` → `deployment/` (ver item 27).
+- (c) Aviso en portada/health si los dos venvs divergen.
+- (d) **Runbook mínimo de recuperación de pciq22:** montar `research_bk` → `pip install -r
+  requirements-lock.txt` → re-aplicar `deployment/` → re-emitir `.env` desde el gestor. Los índices
+  FAISS son **regenerables desde chunks** — decirlo explícitamente (nadie debe entrar en pánico por el
+  índice).
+
+### 61. Fiabilidad de citas + coste — P2
+
+- (a) **Chequeo determinista post-síntesis:** verificar que todo `[N]` citado existe entre los chunks
+  enviados; marcar citas huérfanas en la UI. Gratis; refuerza el item 52. (Verificación de *entailment*
+  —que el chunk sustente la afirmación— más adelante y solo para notas guardadas.)
+- (b) `download_registry.py`: `upsert`/`mark_downloaded`/`snooze` comparan DOI **sin normalizar case**
+  (`reconcile_with_corpus` sí) → normalizar con `_norm_doi_key` en todas las vías.
+- (c) **VERIFICAR:** la pre-estimación de coste en `2_RAG.py` (`app_utils.estimate_cost_usd`) asume
+  ~1200 chars/chunk cuando el tope real es 8000 → podría subestimar ~6x el input en providers de pago.
