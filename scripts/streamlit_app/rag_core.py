@@ -230,7 +230,8 @@ def synthesize_answer(provider, model, results, query, papers_meta,
     def stream_ollama():
         client = get_ollama_client()
         full = ""
-        for chunk in client.generate(model=model, prompt=ollama_prompt, stream=True):
+        for chunk in client.generate(model=model, prompt=ollama_prompt, stream=True,
+                                      options={"num_ctx": 16384, "temperature": 0.0}):
             text = chunk.get("response", "")
             full += text
             yield text

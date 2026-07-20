@@ -2,6 +2,50 @@
 > Histórico append-only (lo más nuevo arriba). Backlog: Mejoras_pendientes.md · Estado/arquitectura: ESTADO.md
 
 ---
+### ✅ Fix: `num_ctx=16384` en las 5 llamadas a Ollama + `hybrid=False` por defecto en la batería (items 52, 53) (2026-07-20)
+
+**Contexto:** item 52 del backlog — `rag_core.py::stream_ollama`, `run_rag_batch.py::synthesize` y
+`pages/7_Revision.py::_stream_ollama` (esta última, tercera ruta de síntesis con citas, detectada
+en un segundo pase el mismo día tras un primer commit que solo cubría 4 de las 5 llamadas)
+llamaban a `client.generate(...)` **sin `options`**, así que Ollama usaba `num_ctx=4096` por
+defecto y truncaba el prompt en silencio (descarta primero el system prompt y los chunks más
+antiguos). Con top_k=8 y chunks de hasta 8000 chars se supera 4096 en consultas normales de
+producción. Como `apply_citations` solo post-procesa las claves `[N]` que el modelo sí llega a
+mencionar, una respuesta truncada seguía **pareciendo** correctamente citada — el bug era invisible
+sin mirar el contexto real reportado por Ollama.
+
+**Evidencia (log 2026-07-20):** una consulta real mostró `prompt=15851` tokens estimados contra el
+límite de 4096 del default — muy por encima, confirmando el truncado silencioso descrito en el
+item 52.
+
+**Fix:**
+- `options={"num_ctx": 16384, "temperature": 0.0}` en las TRES rutas de síntesis con citas:
+  `scripts/streamlit_app/rag_core.py::stream_ollama`, `scripts/run_rag_batch.py:202` (función
+  `synthesize`) y `scripts/streamlit_app/pages/7_Revision.py:369` (`_stream_ollama`).
+  `temperature=0.0` porque antes no estaba fijada (default 0.8 de Ollama) y la fidelidad de las
+  citas exige determinismo.
+- `num_ctx=16384` fusionado (sin tocar `temperature`) en las otras dos llamadas del pipeline que
+  compartían el mismo bug de truncado a 4096 pero no estaban cubiertas por el item 52:
+  `scripts/3b_summarize.py::summarize_paper` (mantiene `temperature=0.3`, deliberada para prosa
+  más natural en el resumen) y `scripts/2_screen_pdfs.py` (mantiene `temperature=0.1`, deliberada
+  y casi determinista para la clasificación JSON). Se decidió no forzar estas dos a `0.0` para no
+  colar un cambio de comportamiento no scoped bajo un commit de fix de truncado.
+- Item 53: `cfg.setdefault("hybrid", True)` → `cfg.setdefault("hybrid", False)` en
+  `run_rag_batch.py:202` — la batería usaba híbrido ON por defecto mientras la política de
+  producción es OFF ("denso gana"), así que no reproducía producción.
+
+Total: **5/5 llamadas** a `client.generate` del pipeline llevan ahora `num_ctx=16384`.
+
+**Verificación (estática, desde casa — sin tocar pciq22 ni ejecutar el pipeline):**
+`python3 -m py_compile` en los 5 ficheros tocados (OK) + `grep -n "num_ctx"` confirmando 16384 en
+las 5 llamadas + `grep 'setdefault("hybrid", False)'` confirmando el nuevo default. Pendiente de
+**verificar en caliente en pciq22** (`ollama ps` columna CONTEXT durante una consulta real) —
+fuera de alcance de esta sesión por regla dura de no tocar pciq22 ni datos reales.
+
+Detalle completo: `ESTADO.md` (sección "Modelos Ollama disponibles") · `Mejoras_pendientes.md`
+(items 52 y 53, marcados ✅).
+
+---
 ### ✅ Corrección: `daily_question` migrado a LaunchDaemon — el fix de WakeOnLaunchDate del 09-07 no funcionaba (2026-07-18)
 
 **Contexto:** el usuario reportó que la pregunta diaria (tiempo/mareas,

@@ -383,7 +383,7 @@ def classify_with_ollama(
     )
 
     resp = client.generate(model=model, prompt=prompt, format="json", stream=False,
-                           options={"temperature": 0.1})
+                           options={"temperature": 0.1, "num_ctx": 16384})
     response_text = resp["response"]
 
     parsed = json.loads(response_text)

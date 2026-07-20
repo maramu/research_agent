@@ -140,6 +140,19 @@ backlog item 49.
 - `qwen2.5:14b-instruct` — síntesis RAG (modelo de producción, ~9 GB)
 - `bge-m3` — embeddings FAISS (8192 ctx, 1024 dims, multilingüe) — **modelo de producción**
 
+**`options` en las llamadas a `client.generate` (item 52/53, fix 2026-07-20):** sin `options`,
+Ollama usa `num_ctx=4096` por defecto y trunca el prompt en silencio (system prompt + primeros
+chunks descartados) — con top_k=8 y chunks de hasta 8000 chars se supera 4096 en consultas
+normales; `apply_citations` post-procesa las `[N]` que el modelo sí menciona, así que la respuesta
+truncada parecía correctamente citada. Las 5 llamadas del pipeline llevan ahora `num_ctx=16384`:
+- `rag_core.py::stream_ollama`, `run_rag_batch.py::synthesize` y `pages/7_Revision.py:369`
+  (`_stream_ollama`) — las tres rutas de síntesis con citas — `temperature=0.0` (determinismo;
+  antes sin fijar → default 0.8 de Ollama).
+- `3b_summarize.py::summarize_paper` — `temperature=0.3` (deliberada, prosa más natural en
+  resumen; se preserva, solo se añadió `num_ctx`).
+- `2_screen_pdfs.py` (clasificación JSON) — `temperature=0.1` (deliberada, casi determinista; se
+  preserva, solo se añadió `num_ctx`).
+
 Borrados en sesión 2026-06-26 (item 46 cerrado):
 ~~`qwen3:8b-hermes`~~ · ~~`qwen3:8b`~~ · ~~`qwen3:14b`~~ · ~~`gemma3:4b`~~ ·
 ~~`nomic-embed-text`~~ · ~~`mxbai-embed-large`~~ (si aplica)

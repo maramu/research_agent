@@ -16,14 +16,17 @@
 > Detalle y justificación: `docs/auditorias/2026-07-20_auditoria_externa.md`.
 > Items 52–61 nuevos (bloque al final); el resto son anotaciones fechadas dentro de items existentes. El orden 2026-06-25 sigue vigente para lo no tocado aquí.
 
-1. **Item 52 (P0) — `num_ctx` + `temperature` en las DOS rutas de síntesis.** Verificar antes en pciq22 (`ollama ps`, columna CONTEXT); fix de 30 min. Degradación silenciosa potencialmente activa hoy.
-2. **Item 53 — default `hybrid` → `False` en `run_rag_batch.py`** (verificar `grep setdefault`). 2 min.
-3. **Item 33 (anotado) — tokenizer BM25** (acrónimos/fórmulas/tildes/griegas, índice + query) → re-correr eval denso/híbrido después.
-4. **Item 54 — `run_weekly_scopus`:** aplicar plist 04:00 + LaunchDaemon + timeout con kill real.
-5. **Item 55 — integridad índice↔metadata:** norma de embeddings (verificar `np.linalg.norm`) + `assert ntotal==len(meta)` + orden de escritura de `indexed_papers.json`.
-6. **Item 37 (anotado) — harness de eval:** Wilson/McNemar/Recall/Precision/arquetipo/deriva + excluir preguntas sin relevantes.
-7. **Item 57 — desduplicar el núcleo RAG** antes del primer uso investigativo de la batería.
-8. **Items 56, 58, 59, 60, 61** — higiene de pipeline, TLS del Bearer, observabilidad, reproducibilidad y fiabilidad de citas (P1–P2, ver bloque final).
+> **Verificación 2026-07-20 (pciq22, solo lectura): items 52, 53 y 55a CONFIRMADOS** — pasan de "verificar" a fix. Evidencia en cada item.
+
+1. **Item 52 (P0) — ✅ CONFIRMADO — `num_ctx` + `temperature` en las CUATRO llamadas a `client.generate`** (síntesis app + batería + resúmenes + cribado). Log muestra truncados reales hoy (`prompt=15851 → 4095`). Fix casa: `num_ctx=16384, temperature=0.0`.
+2. **Item 53 — ✅ CONFIRMADO — default `hybrid` → `False`** (`run_rag_batch.py:202`). 2 min, mismo commit que el 52.
+3. **Item 55a — ✅ CONFIRMADO — bge-m3 sin normalizar (‖v‖=27.1) → similitud del corpus no es coseno.** Renormalizar índice + query (sin re-embeber) **con** el item 33 y **antes** de re-correr la eval. Sesión propia (edición casa + re-index pciq22).
+4. **Item 33 (anotado) — tokenizer BM25** (acrónimos/fórmulas/tildes/griegas, índice + query). Va junto al 55a → re-correr eval denso/híbrido después de ambos.
+5. **Item 54 — `run_weekly_scopus`:** aplicar plist 04:00 + LaunchDaemon + timeout con kill real.
+6. **Item 55b/c — integridad índice↔metadata:** `assert ntotal==len(meta)` + orden de escritura de `indexed_papers.json`.
+7. **Item 37 (anotado) — harness de eval:** Wilson/McNemar/Recall/Precision/arquetipo/deriva + excluir preguntas sin relevantes.
+8. **Item 57 — desduplicar el núcleo RAG** antes del primer uso investigativo de la batería.
+9. **Items 56, 58, 59, 60, 61** — higiene de pipeline, TLS del Bearer, observabilidad, reproducibilidad y fiabilidad de citas (P1–P2, ver bloque final).
 
 ## Hallazgos pendientes (revisión 2026-06-12)
 - ~~`detect_affected_categories` compara stems por igualdad exacta sin `_norm` → riesgo de reproceso
@@ -668,31 +671,40 @@ confirmación humana) — detalle en `Mejoras_realizadas.md`. Pendiente:
 > (pciq22)** son inferencias de lectura de código: confirmar en pciq22 antes de editar en casa.
 > Disciplina de dos máquinas: verificación/ejecución en pciq22, edición/commit en casa.
 
-### 52. `num_ctx` + `temperature` en las dos rutas de síntesis — P0 (crítico)
+### 52. `num_ctx` + `temperature` en las llamadas a `client.generate` — P0 (crítico) — ✅ CONFIRMADO 2026-07-20
 
-`rag_core.py::stream_ollama` y `run_rag_batch.py::synthesize` llaman a `client.generate(...)`
-**sin `options`** → Ollama usa `num_ctx=4096` por defecto y trunca el prompt en silencio
-(descarta los tokens más antiguos: system prompt + primeros chunks). Con top_k=8 y chunks de
-hasta 8000 chars se supera 4096 en consultas normales. `apply_citations` post-procesa las
-claves `[N]` que el modelo sí menciona → la respuesta truncada **parece** correctamente citada.
-Temperatura sin fijar (default 0.8 en Ollama) para síntesis con citas.
+Las llamadas a `client.generate(...)` van **sin `options`** → Ollama usa `num_ctx=4096` por
+defecto y trunca el prompt en silencio (mantiene los primeros `keep` tokens + la cola reciente,
+descarta system prompt + primeros chunks). `apply_citations` post-procesa las claves `[N]` que el
+modelo sí menciona → la respuesta truncada **parece** correctamente citada. Temperatura sin fijar
+(default 0.8) para síntesis con citas.
 
-- **VERIFICAR (pciq22):** `ollama ps` (columna CONTEXT) durante una consulta real. CONTEXT=4096
-  ⇒ confirmado. Opcional: contrastar `input_tokens` estimado (chars//4) contra 4096 en los
-  `rag_usage_*.jsonl` para acotar el daño histórico.
-- **Fix (casa → commit → pull → pciq22):** `options={"num_ctx": 8192, "temperature": 0.0}` en
-  ambas funciones. 8192 sobra para top_k=8; 16384 solo si se sube top_k (agranda el KV-cache —
-  cabe en 24 GB con qwen2.5:14b + bge-m3, pero elegir a conciencia). Documentar ambos valores en
-  ESTADO.md junto a los modelos.
+- **CONFIRMADO 2026-07-20 (pciq22, solo lectura):** (a) sin `options` en `rag_core.py:233`
+  (`stream_ollama`) y `run_rag_batch.py:139` (`synthesize`) — **y también** en `3b_summarize.py:123`
+  y `2_screen_pdfs.py:385` (resúmenes y cribado truncaban igual). (b) `ollama show
+  qwen2.5:14b-instruct --modelfile | grep num_ctx` no devuelve nada → runtime cae a 4096; `ollama ps`
+  mostró el modelo cargado a CONTEXT=4096. (c) **Daño real en producción hoy mismo** en
+  `~/ollama.launchd.err`: `truncating input prompt limit=4096 prompt=15851 keep=4 new=4095` (y
+  prompts de 13141, 9219, 4933 tokens, todos recortados a ~4095). Las consultas grandes pierden ~¾
+  del contexto.
+- **Fix (casa → commit → push → pull → pciq22 → reiniciar Streamlit):**
+  `options={"num_ctx": 16384, "temperature": 0.0}` en las **cuatro** llamadas (para resúmenes,
+  `temperature` puede quedar según su uso; `num_ctx` es imprescindible en las cuatro). **Corrección
+  2026-07-20:** el 8192 que se barajó es insuficiente — se han visto prompts reales de 15851 tokens;
+  16384 cubre lo observado, 32768 da margen total (qwen2.5:14b aguanta 32k; el KV-cache cabe en
+  24 GB pero multiplica con `OLLAMA_NUM_PARALLEL`). Seguimiento (sub-item): además de subir `num_ctx`,
+  acotar el prompt ensamblado (top_k o presupuesto de chars/chunk) para no depender de un contexto
+  siempre creciente. Documentar los valores en ESTADO.md.
 
-### 53. Default `hybrid` → `False` en `run_rag_batch.py` — P1 (2 min)
+### 53. Default `hybrid` → `False` en `run_rag_batch.py` — P1 (2 min) — ✅ CONFIRMADO 2026-07-20
 
-La batería usaría híbrido **ON** (`cfg.setdefault("hybrid", True)`) mientras la política de
-producción es OFF ("denso gana") → **no reproduce producción**. Es la copia del núcleo RAG (item
-57) ya desalineada en un parámetro de comportamiento.
+La batería corre híbrido **ON** mientras la política de producción es OFF ("denso gana") → **no
+reproduce producción**. Es la copia del núcleo RAG (item 57) ya desalineada en un parámetro de
+comportamiento.
 
-- **VERIFICAR:** `grep -n 'setdefault("hybrid"' scripts/run_rag_batch.py`. Si es `True` →
-  cambiar a `False` (el YAML puede seguir forzándolo explícitamente cuando se quiera).
+- **CONFIRMADO 2026-07-20:** `run_rag_batch.py:202` → `cfg.setdefault("hybrid", True)`.
+- **Fix (casa):** cambiar el default a `False` (el YAML de la query puede seguir forzándolo
+  explícitamente cuando se quiera). Puede ir en el mismo commit que el item 52.
 
 ### 54. `run_weekly_scopus`: ingesta semanal robusta — P1
 
@@ -703,12 +715,17 @@ Tres grietas apiladas en la función central del sistema:
 
 ### 55. Integridad índice ↔ metadata — P1
 
-- (a) **Norma de embeddings — VERIFICAR (pciq22):** `5_build_embeddings.py` usa
-  `faiss.IndexFlatL2` sin `faiss.normalize_L2`; `attachments.py` lo documenta ("NO normaliza").
-  Si bge-m3 vía Ollama no devuelve vectores normalizados, la similitud no es coseno. Comprobar en
-  3 líneas contra el Ollama de prod: embeber un texto y `np.linalg.norm(v)`. Si ≈1.0 → documentar
-  "Ollama normaliza, L2≈coseno" y cerrar; si no → normalizar en `embed_texts` (idempotente) y
-  re-indexar.
+- (a) **Norma de embeddings — ✅ CONFIRMADO 2026-07-20:** bge-m3 vía Ollama **NO** normaliza
+  (‖v‖ = **27.11**, dim 1024, ≠ 1.0), y el índice es `IndexFlatL2` sobre vectores crudos →
+  **la similitud de TODO el corpus no es coseno** (penaliza por magnitud, no semántica). Fix, en dos
+  lados que deben ser consistentes: (1) **índice** — no hace falta re-embeber: reconstruir los
+  vectores (`index.reconstruct_n`), `faiss.normalize_L2`, reconstruir el índice (`IndexFlatIP`, o
+  `IndexFlatL2` sobre normalizados — monótono con coseno) y guardar; (2) **query** — normalizar el
+  vector de consulta en `embed_query`/`embed_texts` antes de buscar. Barato en cómputo (sin llamadas
+  a Ollama), pero **cambia la recuperación** → secuenciar **con** el tokenizer (item 33) y **antes**
+  de re-correr la eval (ambos alteran el ranking; si no, se contamina la atribución). La parte de
+  editar código va en casa; el reconstruir/normalizar el índice es ejecución en pciq22 (sesión
+  propia, con `.bak` del índice antes).
 - (b) **`assert index.ntotal == len(meta)`** al cargar en los 5 consumidores (`run_eval.py`,
   `pool_candidates.py`, `run_rag_batch.py`, `8_query_rag.py`, `2_RAG.py`); mejor en el loader
   compartido del item 57. Hoy todos hacen `if idx >= len(meta): continue`, tolerando una
@@ -755,7 +772,11 @@ VPN. Relacionado: `PasswordAuthentication no` en pciq22 (ya en el checklist del 
 ### 59. Observabilidad: healthcheck + rotación de logs — P2
 
 - (a) **Rotación** vía `newsyslog` (`/etc/newsyslog.d/research_agent.conf`) para logs de
-  Streamlit/Caddy/scopus (hoy crecen sin límite). ~10 min.
+  Streamlit/Caddy/scopus (hoy crecen sin límite). ~10 min. **Concreto 2026-07-20:** el log del
+  servidor Ollama es **`~/ollama.launchd.err`** (StandardErrorPath del plist), **ya en 58 MB y
+  creciendo** — incluir en la rotación. (Corrección de runbook: NO está en
+  `~/.ollama/logs/server.log`, que está vacío; usar `~/ollama.launchd.err` para cualquier `grep` de
+  diagnóstico de Ollama, p. ej. truncados del item 52.)
 - (b) **Healthcheck** barato (launchd): `curl -fsS` a `:8501`, `:8502`, `:11434` (con token) y
   GROBID `/api/isalive`; email solo si falla (reutiliza el SMTP de `run_weekly_scopus.py`). Cierra el
   hueco "me entero por el usuario". ~50 líneas.

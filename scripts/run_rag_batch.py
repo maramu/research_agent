@@ -136,7 +136,8 @@ Fragmentos:
 Recuerda: cita con [N] junto a cada dato; sin sección de Referencias."""
 
     prompt = f"{system_content}\n\nPregunta: {query}\n\nRespuesta:"
-    raw = client.generate(model=model, prompt=prompt, stream=False)["response"]
+    raw = client.generate(model=model, prompt=prompt, stream=False,
+                           options={"num_ctx": 16384, "temperature": 0.0})["response"]
     answer_md = apply_citations(raw, cite_map)
     return answer_md
 
@@ -199,7 +200,7 @@ def run_batch(cfg: dict, base: str = DEFAULT_BASE, progress_cb=None) -> dict:
     cfg = dict(cfg)  # no mutar el dict del caller
     cfg.setdefault("phase", "all")
     cfg.setdefault("top_k", 8)
-    cfg.setdefault("hybrid", True)
+    cfg.setdefault("hybrid", False)
     cfg.setdefault("sections", [])
     cfg.setdefault("model", "qwen2.5:14b-instruct")
     cfg.setdefault("synth_timeout", 600)

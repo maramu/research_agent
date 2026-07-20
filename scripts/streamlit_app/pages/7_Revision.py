@@ -366,7 +366,8 @@ usage_capture = {"input_tokens": 0, "output_tokens": 0, "is_estimated": False}
 
 def _stream_ollama():
     full = ""
-    for chunk in ol_client.generate(model=synth_model, prompt=prompt, stream=True):
+    for chunk in ol_client.generate(model=synth_model, prompt=prompt, stream=True,
+                                     options={"num_ctx": 16384, "temperature": 0.0}):
         text = chunk.get("response", "")
         full += text
         yield text

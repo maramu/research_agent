@@ -125,7 +125,7 @@ def summarize_paper(
         system=SYSTEM_PROMPT,
         prompt=prompt,
         stream=False,
-        options={"temperature": 0.3, "num_predict": 2048},
+        options={"temperature": 0.3, "num_predict": 2048, "num_ctx": 16384},
     )
     return resp["response"].strip()
 
