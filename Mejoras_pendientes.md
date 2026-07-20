@@ -695,6 +695,14 @@ modelo sí menciona → la respuesta truncada **parece** correctamente citada. T
   24 GB pero multiplica con `OLLAMA_NUM_PARALLEL`). Seguimiento (sub-item): además de subir `num_ctx`,
   acotar el prompt ensamblado (top_k o presupuesto de chars/chunk) para no depender de un contexto
   siempre creciente. Documentar los valores en ESTADO.md.
+- **Cola abierta (sub-items, tras cerrar 52 el 2026-07-20):**
+  - **52-a — Re-run selectivo pre-fix.** Resúmenes (`3b_summarize`) y cribados (`2_screen_pdfs`)
+    generados antes de `6fec8b9` corrían a num_ctx=4096 → posible texto truncado en papers largos.
+    Identificar afectados (prompt estimado `chars//4` > ~4096 en logs de esos pasos) y re-ejecutar
+    solo esos. No rehacer a ciegas. Prioridad baja.
+  - **52-b — Acotar el prompt ensamblado.** Añadir presupuesto duro (cap de top_k o de chars/chunk)
+    en el ensamblado de síntesis para que el prompt no pueda exceder num_ctx por diseño; con prompts
+    vistos de ~15.851 tok, subir contexto no basta a largo plazo. Formaliza el "seguimiento" del 52.
 
 ### 53. Default `hybrid` → `False` en `run_rag_batch.py` — P1 (2 min) — ✅ CONFIRMADO 2026-07-20
 
