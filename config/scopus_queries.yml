@@ -12,6 +12,8 @@ bioplastics_microplastics:
 biogas_upgrading_biomethanation:
 - TITLE-ABS-KEY("biogas upgrading" OR biomethanation) AND TITLE-ABS-KEY(("hydrogen"
   OR "H2") AND ("CO2" OR "carbon dioxide"))
+- TITLE-ABS-KEY ( biogas bioelectrochemical upgrading )
+- TITLE-ABS-KEY ( biogas hollow fiber upgrading )
 microalgae:
 - TITLE-ABS-KEY(microalgae AND ("wastewater treatment" OR "nutrient removal" OR "CO2
   fixation"))
