@@ -12,9 +12,32 @@ Posición en el pipeline:
 Estructura del índice de salida:
     embeddings/<phase>[__<modelo>]/
         index.faiss          ← índice FAISS (IndexFlatL2, dim=1024 para bge-m3)
-        metadata.jsonl       ← metadatos de cada chunk (paper_id, section, type, text…)
-        config.json          ← project, phase, model, chunks, dimension
+        metadata.jsonl       ← metadatos de cada chunk (paper_id, section, type, text,
+                               embed_truncated…)
+        config.json          ← project, phase, model, chunks, dimension, normalized
         indexed_papers.json  ← paper_ids ya indexados + modelo usado (para modo incremental)
+
+Normalización L2 (item 55a, 2026-07-26):
+    bge-m3 vía Ollama devuelve vectores SIN normalizar (‖v‖ ≈ 27,1), así que la
+    similitud del índice no era coseno. Los vectores se normalizan L2 justo antes
+    de `index.add` con el helper único `utils.embeddings.l2_normalize`; el lado
+    consulta lo hace `utils.retrieval.dense_rank`. Se mantiene IndexFlatL2: sobre
+    vectores unitarios el orden L2 coincide con el del coseno, así que ningún
+    consumidor tiene que invertir su "menor = mejor". `config.json` declara
+    `"normalized": true`.
+
+    Los índices construidos ANTES de este cambio son incompatibles: el modo
+    incremental los detecta por la norma media y aborta pidiendo `--force`.
+
+Invariante de integridad (item 55b):
+    Al terminar se verifica `index.ntotal == len(metadata.jsonl)`, norma L2 media
+    ≈ 1,0 y el flag `normalized` de config.json. Cualquier fallo es un error
+    ruidoso (SystemExit), nunca un warning.
+
+Campo `embed_truncated` (P2 auditoría Kimi):
+    `embed_texts` trunca el texto que embebe si excede el contexto del modelo,
+    pero `text` se guarda completo. Cada chunk lleva `embed_truncated: bool` para
+    poder auditar qué vectores representan solo parte de su texto.
 
 Nomenclatura de la carpeta de salida:
     - Modelo por defecto (bge-m3): embeddings/<phase>/
@@ -90,7 +113,9 @@ _SCRIPTS_DIR = Path(__file__).parent
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
 from utils.constants import OLLAMA_MODEL_EMBED, year_from_paper_id, MAX_EMBED_CHARS  # noqa: E402
-from utils.embeddings import embed_texts  # noqa: E402  (núcleo compartido con books/embed.py)
+from utils.embeddings import (  # noqa: E402  (núcleo compartido con books/embed.py)
+    embed_texts, l2_normalize, assert_index_normalized, verify_index_integrity,
+)
 
 DEFAULT_BASE       = "/Volumes/research/categorias"
 DEFAULT_MODEL      = OLLAMA_MODEL_EMBED
@@ -254,6 +279,22 @@ def main():
     buf_texts:   list = []
     buf_meta:    list = []
 
+    def flush_batch():
+        """Embeddea el lote pendiente y anota `embed_truncated` por chunk.
+
+        P2 de la auditoría Kimi: el truncado reactivo de `embed_texts` recorta el
+        texto que se embebe pero `text` sigue completo en metadata. El booleano
+        permite auditar qué vectores representan solo parte de su chunk.
+        """
+        nonlocal buf_texts, buf_meta
+        truncated: list = []
+        all_vectors.extend(embed_texts(client, buf_texts, args.model,
+                                       truncated_out=truncated))
+        for m, was_truncated in zip(buf_meta, truncated):
+            m["embed_truncated"] = bool(was_truncated)
+        all_meta.extend(buf_meta)
+        buf_texts, buf_meta = [], []
+
     for rec in iter_chunks(chunks_dir, args.phase):
         if incremental and rec.get("paper_id", "") in indexed_ids:
             continue
@@ -264,14 +305,11 @@ def main():
 
         if len(buf_texts) >= args.batch_size:
             print(f"  Embeddiendo {len(buf_texts)} chunks  (procesados: {len(all_meta) + len(buf_texts)})…")
-            all_vectors.extend(embed_texts(client, buf_texts, args.model))
-            all_meta.extend(buf_meta)
-            buf_texts, buf_meta = [], []
+            flush_batch()
 
     if buf_texts:
         print(f"  Embeddiendo último lote de {len(buf_texts)} chunks…")
-        all_vectors.extend(embed_texts(client, buf_texts, args.model))
-        all_meta.extend(buf_meta)
+        flush_batch()
 
     if incremental and not all_vectors:
         print("Índice actualizado, nada nuevo.")
@@ -280,10 +318,17 @@ def main():
     if not all_vectors:
         raise SystemExit("No se encontraron chunks para embeddear.")
 
-    X = np.vstack(all_vectors)
+    # Item 55a: normalizar L2 antes de indexar. El índice sigue siendo
+    # IndexFlatL2 — sobre vectores unitarios el orden L2 es el del coseno, así
+    # que ningún consumidor cambia su "menor = mejor".
+    X = l2_normalize(np.vstack(all_vectors))
 
     if incremental:
         index = faiss.read_index(str(index_path))
+        # Antes de mezclar: si el índice existente es anterior al item 55a sus
+        # vectores no son unitarios y añadirle vectores normalizados daría un
+        # ranking basura en silencio. Se comprueba ANTES de escribir nada.
+        assert_index_normalized(index, context=str(index_path))
         index.add(X)
         with (out_dir / "metadata.jsonl").open("a", encoding="utf-8") as f:
             for m in all_meta:
@@ -310,14 +355,25 @@ def main():
         "model":     args.model,
         "chunks":    total_chunks,
         "dimension": dim,
+        # Item 55a/55b: marca de vectores unitarios. Los consumidores
+        # multi-índice (14_Preparar_clase.py mezcla varios por distancia) no
+        # pueden detectar un rollout parcial sin este flag.
+        "normalized": True,
     }
     (out_dir / "config.json").write_text(json.dumps(config, indent=2), encoding="utf-8")
+
+    # Item 55b: invariante de integridad. Falla ruidosamente, no con warning.
+    n_meta, mean_norm = verify_index_integrity(out_dir, index)
+
     _save_indexed_papers(out_dir, all_indexed_ids, args.model)
 
     verb = "añadidos al índice" if incremental else "creados"
     print(f"\nChunks {verb} : {len(all_meta)}")
     if incremental:
         print(f"Total en índice    : {total_chunks}")
+    print(f"Truncados (embed)  : {sum(1 for m in all_meta if m.get('embed_truncated'))}")
+    print(f"Integridad 55b     : OK (ntotal={total_chunks} == metadata={n_meta}, "
+          f"‖v‖ media={mean_norm:.4f})")
     print(f"Dimension          : {dim}")
     print(f"FAISS index        : {index_path}")
     print(f"Metadata           : {out_dir / 'metadata.jsonl'}")

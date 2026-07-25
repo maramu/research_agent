@@ -229,6 +229,26 @@ refuerzan la robustez del procesado; 37–39 son evaluación, coste y mantenimie
 
 ✅ v1 (denso+BM25+RRF) completado 2026-06-11 — detalle en Mejoras_realizadas.md.
 
+✅ **Tokenizer BM25 arreglado 2026-07-26** (`utils/retrieval.py::tokenize`). Era el prerrequisito
+duro que la auditoría marcaba como "arreglar tokenizer → re-correr eval → decidir híbrido"; el
+primer paso está hecho. No requiere reindexado: BM25 se construye al vuelo desde `metadata.jsonl`.
+Cambios, todos simétricos entre indexado y consulta:
+  - tildes plegadas vía NFKD → `desulfurización` es UN token y casa con `desulfurizacion`;
+  - griegas minúsculas conservadas (α/β/μ), con `µ` (signo micro) plegado a `μ` (mu griega);
+  - acrónimos con guion como un token **y además sus partes** (`NR-SOB` → `nr-sob`, `nr`, `sob`) —
+    emitir solo el compuesto habría sido una REGRESIÓN frente al tokenizer viejo, que sí encontraba
+    `sob`;
+  - tokens mixtos letra/dígito emitidos también por segmentos (`h2s` → `h2s`, `h`, `2`, `s`;
+    `tio2` → `tio2`, `tio`, `2`). **Esto es lo que hace que la consulta "H2S" case con el corpus**,
+    donde los subíndices vienen aplanados como "H 2 S" — coherente con la decisión explícita de NO
+    reescribir el texto del corpus.
+  - `Fe(II)` sigue tokenizando `fe` + `ii` (igual que antes): meter paréntesis en el alfabeto pegaría
+    basura tipo `(see`, y no se pierde nada respecto al comportamiento previo.
+Tests: `tests/test_bm25_tokenizer.py` (22 casos + 2 end-to-end sobre BM25Okapi).
+**OJO al interpretar la eval:** este cambio altera el ranking BM25 y por tanto el híbrido, así que
+el "antes/después" contra la línea base vieja NO es limpio — y a n=4/n=6 tampoco tendría potencia
+(ver item 37, que bloquea la fase 2).
+
 Pendiente (fase 2): reranking opcional sobre el top-N fusionado con `bge-reranker` (vía Ollama) o
 un cross-encoder pequeño, antes de pasar al LLM de síntesis.
 - Tocar `8_query_rag.py` y la capa de retrieval de `2_RAG.py` / `7_Revision.py`.
@@ -297,7 +317,22 @@ para que un fallo a mitad no obligue a reprocesar todo ni deje entradas a medias
 - Útil tras timeouts del job semanal o caídas de VPN a mitad de ingesta.
 - 36-A completado 2026-06-20: visibilidad por paper en pestaña Pendientes (opción ligera, sin fichero persistente).
 
-### 37. Set de evaluación del RAG (golden Q&A) — MEDIA prioridad (siguiente paso natural)
+### 37. Set de evaluación del RAG (golden Q&A) — ⛔ PRIORIDAD ELEVADA 2026-07-26: CUELLO DE BOTELLA DEL PROYECTO
+
+> **ANOTACIÓN 2026-07-26 — la línea base NO sirve para probar mejoras, solo para detectar
+> regresiones.** La línea base del 2026-07-26 tiene **n=4** (anoxic) y **n=6** (upgrading):
+> - con n=4, **una sola pregunta mueve Hit@8 25 puntos** — no hay resolución para medir nada;
+> - **upgrading ya está saturado** en 6/6, así que por construcción no puede mejorar;
+> - el MRR de upgrading se movió de **0,889 (junio) a 0,708 (hoy)** por **pura deriva de corpus**,
+>   sin ningún cambio de retrieval de por medio; el suelo de ruido es de **~0,18 de MRR**.
+>
+> Conclusión operativa: la línea base vale como **ALARMA DE REGRESIÓN** (si algo se hunde, se ha
+> roto algo), **NO como prueba de mejora**. Cualquier "antes/después" a este n es ruido.
+>
+> **El item 37 BLOQUEA ahora:** la fase 2 del item 33 (reranking) y cualquier antes/después de los
+> items 62, 63 y 55a. Los cuatro cambios alteran el ranking y sin ~25 preguntas por categoría no
+> hay forma de atribuir el efecto a ninguno. Es el cuello de botella del proyecto: mientras no se
+> amplíe, el resto de trabajo de calidad de retrieval se hace a ciegas.
 
 **Siguiente paso natural tras 32/33/34 (2026-06-11):** es la única forma de medir si el
 chunking estructural (32), el híbrido denso+BM25 (33) y los filtros sección/año (34)
@@ -499,10 +534,9 @@ largo Scopus en descarga)~~ ✅ CUBIERTO 2026-06-13 (renombrado por DOI antes de
 (ausencia de papers_metadata.jsonl, clave MVP libros), 8_query_rag.py/2_RAG/7_Revision (cableado
 passes_filters). Más: detect_affected_categories con _norm ✅; filtro de activas en run_scopus para
 categorías explícitas; sort_keys=True en promote_adhoc_to_category.
-- **Auditoría de chunks 2026-07-25:** la verificación canonical_section vs CANONICAL_SECTIONS sigue
-  ABIERTA en su parte importante — no se ha comprobado si `"table"`, que no está en
-  CANONICAL_SECTIONS, hace que el filtro por sección de la UI descarte todos los chunks de tabla.
-  Pendiente.
+- ✅ **CERRADO 2026-07-26 con evidencia ejecutada** — `table` SÍ está en CANONICAL_SECTIONS
+  (8 etiquetas) y `passes_filters` usa `if sections and ...`, así que sin selección pasan todos
+  los chunks. La sospecha de pérdida sistemática de tablas por el filtro de sección era infundada.
 
 ### ~~46. Borrar modelos Ollama obsoletos en pciq22~~ — ✅ COMPLETADO 2026-06-26
 
@@ -742,7 +776,43 @@ Tres grietas apiladas en la función central del sistema:
 2. **LaunchAgent con `WakeOnLaunchDate` que se pierde sin sesión gráfica** (mismo fallo del 16/18-jul en `daily_question`) → migrar a **LaunchDaemon** (`UserName` + `HOME`, verificar SMTP en frío como se hizo con `claude`).
 3. **El "timeout de 90 min" no termina el proceso:** `ThreadPoolExecutor` + `future.result(timeout=5400)` + `executor.shutdown(wait=False)` con threads **no-daemon** → el email sale pero el proceso sigue vivo hasta que `run_scopus` acaba de verdad (launchd ve el job vivo, Ollama ocupado). Además `pdf_after` se cuenta en el instante del timeout → números del email incoherentes con el estado final. Sustituir el thread por `subprocess.Popen([...], start_new_session=True)` + `wait(timeout=5400)` + `os.killpg(os.getpgid(p.pid), SIGKILL)` al expirar (kill real del árbol de procesos). ~30 líneas.
 
-### 55. Integridad índice ↔ metadata — P1
+### 55. Integridad índice ↔ metadata — P1 — (a) y (b) ✅ RESUELTOS EN CÓDIGO 2026-07-26, PENDIENTES DE ROLLOUT
+
+> **ESTADO 2026-07-26:**
+> - **55a ✅ en código.** Normalización L2 en UN SOLO SITIO por lado: helper único
+>   `utils.embeddings.l2_normalize()` (con copia obligatoria — `faiss.normalize_L2` muta in-place y
+>   los callers reutilizan su `qv`), aplicado en los **dos** constructores de índice
+>   (`5_build_embeddings.py` y `books/embed.py`) y en las **dos** rutas de consulta
+>   (`utils.retrieval.dense_rank` y `utils.attachments.rank_attachment`).
+>   **Se MANTIENE `IndexFlatL2`**, no se cambia a `IndexFlatIP`: sobre vectores unitarios el orden
+>   L2 es exactamente el del coseno (`‖q-d‖² = ‖q‖² - 2·q·d + 1`, con `‖q‖²` constante), así que
+>   ningún consumidor tiene que invertir su "menor = mejor" — habría sido tocar 8 call sites y
+>   `fuse_results` para cero ganancia de ranking. Como ya no hay que reconstruir vectores, el plan
+>   de `index.reconstruct_n` + renormalizar in situ que proponía la auditoría queda descartado: se
+>   re-embebe en la misma tanda que el re-chunk de 62/63, que era obligatorio de todos modos.
+>   **Hallazgo del inventario de rutas:** no eran 4 rutas densas sino **8 call sites en 7 ficheros**
+>   (además de 8_query_rag / run_rag_batch / 2_RAG / 7_Revision: `run_eval.py`,
+>   `pool_candidates.py`, `14_Preparar_clase.py` ×2 y un SEGUNDO call site en `2_RAG.py`, el de
+>   "Profundizar en estos papers"). Ninguna llamaba a `index.search()` directamente, así que
+>   normalizar dentro de `dense_rank` las cubre todas. Guard estructural en
+>   `tests/test_retrieval_normalization.py`: falla si aparece un `*index*.search(` fuera de
+>   `retrieval.py` o un tercer constructor de índice FAISS.
+>   **Dos superficies que NO pasan por `dense_rank` y había que tocar igual:**
+>   `utils/attachments.py` (calculaba L2 crudo en numpy y `fuse_results` MEZCLA POR DISTANCIA esos
+>   valores con los del corpus → el adjunto no habría ganado nunca una plaza de relleno) y
+>   `books/embed.py` (su índice se fusiona por distancia con los de papers en
+>   `14_Preparar_clase.py` → el cupo de libro habría dejado de competir).
+> - **55b ✅ en código**, en su versión de constructor (no la de los 5 consumidores). Al terminar de
+>   construir un índice, `verify_index_integrity()` comprueba las tres cosas y **aborta con
+>   SystemExit, no con warning**: `index.ntotal == len(metadata.jsonl)`, norma L2 media ≈ 1,0 y el
+>   flag `"normalized": true` de `config.json`. El modo incremental además llama a
+>   `assert_index_normalized()` **antes de escribir nada**, así que un índice pre-55a se detecta y
+>   aborta limpio pidiendo `--force` en vez de quedarse mezclado.
+>   **Nuevo `"normalized": true` en config.json** (papers y libros): sin ese flag un rollout parcial
+>   es INDETECTABLE para `14_Preparar_clase.py:138`, que ordena por distancia mezclando varios
+>   índices — daría resultados basura en silencio.
+> - **Sigue PENDIENTE la parte (b) original** (`assert index.ntotal == len(meta)` en los 5
+>   consumidores al CARGAR) y la **(c)** (orden de escritura de `indexed_papers.json`).
 
 - (a) **Norma de embeddings — ✅ CONFIRMADO 2026-07-20:** bge-m3 vía Ollama **NO** normaliza
   (‖v‖ = **27.11**, dim 1024, ≠ 1.0), y el índice es `IndexFlatL2` sobre vectores crudos →
@@ -841,7 +911,7 @@ VPN. Relacionado: `PasswordAuthentication no` en pciq22 (ya en el checklist del 
 > de `anoxic_biogas_biodesulfurization` (1741 chunks, 87 papers), comparada contra la página
 > renderizada del PDF original (no contra `md_clean`), protocolo a ciegas.
 
-### 62. `canonical_section()` se aplica al título del paper — ALTA prioridad
+### 62. `canonical_section()` se aplica al título del paper — ✅ RESUELTO EN CÓDIGO 2026-07-26, PENDIENTE DE ROLLOUT
 
 `canonical_section()` compara el título completo del paper (que actúa como heading H1) contra las
 keywords de sección, así que el bloque de portada (autores + DOI, chunk_index=1) hereda
@@ -849,20 +919,52 @@ methods/results. Ejemplos: 2025_brito ("Operational" → methods), 2014_mora ("c
 results). Medido: 31 de 87 chunks chunk_index=1 tienen section_canonical distinto de other/abstract
 — COTA SUPERIOR medida por proxy, no verificado que los 31 sean portada sin contenido real
 (2018_zheng tiene abstract completo y salió "other"). En términos de corpus son 31/1741 = 1,8%, no
-"un tercio". Pero el impacto en recuperación puede ser mayor que ese 1,8%: estos chunks contienen
-el título del paper, así que un recuperador denso los rankeará alto justo en consultas temáticas —
-un chunk que es solo autores y DOI compitiendo por el top-8. PENDIENTE MEDIRLO.
+"un tercio".
+
+**CORRECCIÓN 2026-07-26 — el daño NO es ventaja injusta en el ranking.** La versión anterior de este
+item afirmaba que estos chunks "compiten con ventaja injusta por el top-8 porque contienen el título
+del paper". Es FALSO. La verificación P3 muestra que el texto del chunk es solo
+`**Authors:** … **Year/DOI**` y NO contiene el título: el título es el heading H1, que se usa para
+CLASIFICAR (de ahí la fuga) pero no entra en el texto del chunk ni, por tanto, en su vector. El daño
+real es **lastre muerto que diluye el pool** de candidatos, no ventaja en consultas temáticas.
+
+**CORRECCIÓN 2026-07-26 — el alcance real es MUCHO mayor que la portada.** El defecto no se limita a
+los chunks de portada. Por el ascenso de ancestros (`3_process_corpus.py`, resolución del canonical
+efectivo: sube de `level` hasta 1 buscando el primer ancestro ≠ "other"), en todo paper cuyo título
+case con un patrón, **TODA subsección del cuerpo que no clasifique por sí misma hereda la etiqueta
+del título** en vez de caer a "other". Una `## Site description` bajo un título con "Operational"
+salía etiquetada `methods`. El fix es el mismo (no clasificar el H1), pero:
+  - el número de chunks afectados es muy superior a los 823 de portada — es "todas las subsecciones
+    no clasificables de todos los papers con título que casa", sin medir todavía;
+  - **el residuo `other` CRECERÁ tras el rollout**, y eso es lo correcto: hoy hay chunks etiquetados
+    methods/results que nunca lo fueron. Un filtro por sección que antes los devolvía dejará de
+    hacerlo. No confundir esa caída de volumen con una regresión.
+
+**CIFRA REAL de portadas vacías (2026-07-26):** **809 de 823** chunks de portada de las 8 categorías
+están vacíos de contenido propio (< 200 chars de prosa tras quitar `**Authors:**`/`**Year|DOI**`).
+No 215: los 215 eran solo los MAL ETIQUETADOS; los otros 598 ya estaban en "other" y están igual de
+vacíos. Los 4 casos MIXTO (≥ 200 chars de prosa) no se tocan y quedan bien etiquetados por sí solos
+gracias al 62.1.
 
 Causa raíz: `constants.py:29-32` + `3_process_corpus.py:376-396`.
 
-Fix: no aplicar `canonical_section()` al heading nivel 0 / preámbulo.
+**FIX IMPLEMENTADO 2026-07-26** (`3_process_corpus.py`):
+- **62.1** — no se aplica `canonical_section()` a `level <= 1`. Ojo: el bloque de portada es
+  **nivel 1**, no nivel 0. El nivel 0 (preámbulo) ya devolvía "other" y además viene siempre vacío
+  porque `md_clean` empieza con el `# título`; el bloque de autores/DOI es la sección cuyo heading
+  ES el H1 del título. El cuerpo nunca es nivel 1 (`_extract_div_content` arranca en `depth=2`).
+- **62.2 — DECISIÓN: FUSIONAR con el chunk siguiente, no excluir del índice.** Así los autores
+  siguen siendo recuperables y no quedan vectores muertos. Regla DE CONTENIDO (no posicional),
+  `merge_empty_cover_blocks()`, con las cuatro guardas: sin chunk siguiente se emite tal cual; si
+  el fusionado superaría MAX_EMBED_CHARS no se fusiona; el fusionado hereda el `section_canonical`
+  del SIGUIENTE, nunca el del remanente; `chunk_index` se renumera tras las fusiones.
 
 **DECISIÓN 2026-07-25:** se hace por re-chunk + re-embed (reindexar es aceptable), no por backfill
 de `metadata.jsonl`, para no divergir código↔datos.
 
-Prioridad: ALTA (el defecto de mayor prevalencia del corpus).
+Prioridad: ALTA (el defecto de mayor prevalencia del corpus). Tests: `tests/test_chunking.py`.
 
-### 63. Fusión de filas de tabla y caption huérfano en el fallback del splitter — ALTA prioridad
+### 63. Fusión de filas de tabla y caption huérfano en el fallback del splitter — ✅ RESUELTO EN CÓDIGO 2026-07-26, PENDIENTE DE ROLLOUT
 
 `extract_tables_md` (`3_process_corpus.py:303-363`, rama sin columna "Exp.") une las filas de una
 tabla con un solo `\n`, y `_split_to_max_chars` (489-521) solo reconoce párrafos separados por
@@ -888,7 +990,30 @@ Implica re-chunk + re-embed de las 8 categorías, aceptado. Añadir además el f
 **VERIFICAR ANTES DEL ROLLOUT:** si `golden_<cat>.jsonl` referencia `chunk_id`, un re-chunk lo
 invalida — comprobar en `/Volumes/research/metadatos/eval/` antes de lanzar.
 
-**P2 de la auditoría Kimi (2026-07-20) sobre `embed_truncated` — ancla aquí, sin item propio:**
+**FIX IMPLEMENTADO 2026-07-26** (`3_process_corpus.py`):
+- **63.1** — `extract_tables_md` une las filas con `\n\n` en AMBAS ramas (con y sin columna "Exp."),
+  de modo que cada fila es un párrafo y el splitter corta en frontera de fila por su ruta normal.
+  El dict de tabla se parte ahora en `header_md` (heading + caption) y `body_md` (solo filas).
+- **63.2** — nueva `_split_long_para()`: la rama de emergencia degrada por niveles
+  (párrafo → líneas → palabras dentro de una línea → corte duro de token atómico) en vez de hacer
+  `para.split()` + `" ".join`. OJO: `books/process.py:132` reutiliza `_split_to_max_chars`, así que
+  esto cambia también los CHUNKS de libros → libros necesita re-trocear, no solo re-embeber.
+- **63.3** — el heading + caption se antepone a CADA parte de una tabla troceada, con el presupuesto
+  descontado antes de trocear el cuerpo para que ninguna parte se pase de MAX_EMBED_CHARS. No se
+  repite la fila de cabecera: el markdown ya lleva el nombre de columna inline en cada celda.
+- El caption huérfano de 107 chars (almenglo #33) desaparece por 63.1, así que NO necesitó la regla
+  de fusión del 62.2. Confirmado en test: todas las partes empiezan por `### Table N` + caption.
+
+Tests: `tests/test_chunking.py` (80 filas intactas, ninguna partida ni fusionada, todas las partes
+con ancla, fallback que preserva las fronteras de línea).
+
+**P2 de la auditoría Kimi (2026-07-20) sobre `embed_truncated` — ✅ RESUELTO EN CÓDIGO 2026-07-26,
+PENDIENTE DE ROLLOUT.** `utils/embeddings.embed_texts` acepta `truncated_out` (lista opcional) y
+`5_build_embeddings.py` persiste `embed_truncated: bool` por chunk en `metadata.jsonl`, cubriendo las
+dos vías de truncado (recorte previo a `MAX_EMBED_CHARS` y truncado reactivo por contexto). El
+resumen del script imprime el recuento de truncados. Se hizo en la misma tanda que 62/63/55 porque
+si no habría que reindexar dos veces. NO se persiste en libros: la caché `_vectors/*.npy` reutiliza
+vectores sin flags y no merece la complicación (anotado como residuo menor). Contexto original:
 ahora tiene razón funcional, no de higiene, en vez de solo higiene como cuando se registró
 (`2026-07-20_auditoria_externa.md`, sección "P2 — Truncado reactivo de embeddings sin auditoría +
 divergencia vector↔texto"). 2023_almenglo #34 mide 7993 chars, topa en `MAX_EMBED_CHARS` y es
@@ -912,6 +1037,19 @@ corpus sobre el que se va a anotar el golden del item 37.
 
 Acción: revisar los 87 títulos de anoxic a mano (~30 min) y cuarentenar los fuera de dominio con el
 mecanismo reversible existente.
+
+**Anotación 2026-07-26 — quinto paper fuera de dominio.** Aparece
+`2004_shikano_volcanic_heat_flux` (lago Katanuma), encontrado INCIDENTALMENTE en la verificación P3,
+sin buscarlo. Van cinco, y los fuera de dominio siguen apareciendo sin buscarlos, así que la
+prevalencia real es probablemente **muy superior a 4/87** y el conteo actual es un suelo, no una
+estimación.
+
+**PENDIENTE DE MIRAR (diagnóstico gratis, hazlo antes de la revisión manual):** anoxic tiene
+Hit@8 **0,50** con MRR **0,098** frente a **1,00** y **0,708** de upgrading. Revisar en el CSV por
+pregunta **qué papers salen por encima del correcto**. Si son los de limnología/sedimentos, el item
+64 se adelanta al resto: significa que la contaminación del corpus, y no el retrieval, explica la
+diferencia entre categorías. Un MRR de 0,098 está cerca del suelo de ruido (~0,18), lo que es
+compatible con esa hipótesis.
 
 Prioridad: MEDIA, antes del item 37.
 

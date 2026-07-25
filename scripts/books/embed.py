@@ -11,10 +11,15 @@ un libro que cambió).
 
 Salida (espejo del formato de artículos, alineada por orden):
     /Volumes/research/libros_docencia/embeddings/all/
-        index.faiss          IndexFlatL2, dim=1024 (bge-m3)
+        index.faiss          IndexFlatL2 sobre vectores L2-normalizados (item 55a)
         metadata.jsonl        1 línea por vector, MISMO orden que el índice
-        config.json           project, phase, model, chunks, dimension
+        config.json           project, phase, model, chunks, dimension, normalized
         indexed_books.json    {model, dimension, books:{book_id: chunks_sha256}}
+
+Normalización L2 (item 55a): OBLIGATORIA y solidaria con los índices de papers —
+14_Preparar_clase.py fusiona este índice con los de categorías POR DISTANCIA, así
+que el rollout es atómico: si se normalizan los papers hay que re-embeber libros
+en la misma tanda. La caché _vectors/*.npy sigue guardando vectores crudos.
 
 Incremental por HASH de libro (indexed_books.json):
     - Se hashea el fichero chunks/<book_id>.jsonl (captura re-chunking, no solo
@@ -62,7 +67,9 @@ _ENV_FILE = _SCRIPTS_DIR.parent / "config" / ".env"
 load_dotenv(_ENV_FILE if _ENV_FILE.exists() else None)
 
 from utils.constants import OLLAMA_MODEL_EMBED  # noqa: E402
-from utils.embeddings import embed_texts, make_client  # noqa: E402
+from utils.embeddings import (  # noqa: E402
+    embed_texts, make_client, l2_normalize, verify_index_integrity,
+)
 
 DEFAULT_BASE = "/Volumes/research"
 DEFAULT_COLLECTION = "libros_docencia"
@@ -198,7 +205,13 @@ def build_book_embeddings(
     if not all_vectors:
         raise SystemExit("No se encontraron chunks para embeddear.")
 
-    X = np.vstack(all_vectors).astype("float32")
+    # Item 55a: normalizar L2 antes de indexar, igual que los artículos. La
+    # caché _vectors/*.npy guarda los vectores CRUDOS (así sigue siendo válida
+    # entre versiones); la normalización se aplica siempre aquí, al ensamblar.
+    # Obligatorio para libros: 14_Preparar_clase.py fusiona POR DISTANCIA este
+    # índice con los de papers, así que si uno solo no está normalizado el cupo
+    # de libro deja de competir y la fusión da basura en silencio.
+    X = l2_normalize(np.vstack(all_vectors).astype("float32"))
     dim = int(X.shape[1])
 
     index = faiss.IndexFlatL2(dim)
@@ -212,7 +225,11 @@ def build_book_embeddings(
     (out_dir / "config.json").write_text(json.dumps({
         "project": collection, "phase": phase, "model": model,
         "chunks": index.ntotal, "dimension": dim,
+        "normalized": True,
     }, indent=2), encoding="utf-8")
+
+    # Item 55b: invariante de integridad (ntotal == metadata, ‖v‖ ≈ 1, flag).
+    verify_index_integrity(out_dir, index)
     _save_indexed_books(out_dir, model, dim, new_books)
 
     summary = {

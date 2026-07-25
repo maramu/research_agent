@@ -18,6 +18,7 @@ import numpy as np
 
 from utils.citations import attachment_citation_key
 from utils.constants import year_from_paper_id
+from utils.embeddings import l2_normalize
 
 try:
     import fitz  # PyMuPDF
@@ -107,9 +108,10 @@ def chunk_text(text: str, target_chars: int = TARGET_CHARS_DEFAULT,
 def embed_texts(client, texts: List[str], model: str) -> np.ndarray:
     """Embebe una lista de textos con el MISMO cliente+modelo de la query.
 
-    Devuelve una matriz float32 de forma (n_texts, dims). NO normaliza:
-    el índice del corpus usa IndexFlatL2 sobre vectores crudos, por lo que
-    las distancias solo son comparables si no se normaliza.
+    Devuelve una matriz float32 de forma (n_texts, dims) con los vectores
+    CRUDOS. La normalización (item 55a) la aplica ``rank_attachment`` justo
+    antes de medir distancias, para que las matrices ya cacheadas en
+    ``session_state`` sigan sirviendo sin recalcular embeddings.
     """
     if not texts:
         return np.empty((0, 0), dtype="float32")
@@ -126,12 +128,19 @@ def rank_attachment(qv: np.ndarray, mat: np.ndarray) -> List[Tuple[int, float]]:
 
     Devuelve ``[(idx_chunk, dist)]`` ordenado de menor a mayor distancia.
     No usa FAISS: para un adjunto efímero con pocos chunks numpy basta.
+
+    Item 55a: normaliza query y matriz (sobre copias, vía el helper único de
+    ``utils.embeddings``) porque ``fuse_results`` MEZCLA POR DISTANCIA estos
+    valores con los del corpus, cuyo índice ya está normalizado. Sin esto el
+    adjunto arrastraría distancias de escala ~700 (‖v‖ ≈ 27) contra las de
+    escala [0, 2] del corpus y no ganaría nunca una plaza de relleno.
     """
     if mat.shape[0] == 0:
         return []
 
-    qv = np.asarray(qv, dtype="float32").reshape(1, -1)
-    dists = ((mat - qv) ** 2).sum(axis=1)
+    q = l2_normalize(qv)
+    m = l2_normalize(mat)
+    dists = ((m - q) ** 2).sum(axis=1)
     order = np.argsort(dists, kind="stable")
     return [(int(i), float(dists[i])) for i in order]
 

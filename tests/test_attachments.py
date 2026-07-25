@@ -5,6 +5,7 @@ No requieren red, FAISS, Ollama ni pymupdf (salvo extract_text, que no se testea
 """
 
 import numpy as np
+import pytest
 
 from utils.attachments import (
     chunk_text,
@@ -106,11 +107,34 @@ class TestFuseResults:
         assert len(out) <= 5
 
     def test_rank_attachment_orders_by_distance(self):
-        mat = np.array([[0.0, 0.0], [3.0, 4.0], [1.0, 1.0]], dtype="float32")
-        qv = np.array([0.0, 0.0], dtype="float32")
+        # Tras el item 55a rank_attachment normaliza L2, así que el caso hay que
+        # plantearlo con una consulta NO nula: con qv=[0,0] todos los vectores
+        # unitarios quedan equidistantes y el orden lo decidiría el redondeo.
+        mat = np.array([[2.0, 0.0], [0.0, 5.0], [3.0, 3.0]], dtype="float32")
+        qv = np.array([1.0, 0.0], dtype="float32")
         ranked = rank_attachment(qv, mat)
         idxs = [i for i, _ in ranked]
-        assert idxs == [0, 2, 1]
+        assert idxs == [0, 2, 1]      # 0° < 45° < 90° respecto a la consulta
+
+    def test_rank_attachment_is_scale_invariant(self):
+        """Item 55a: la magnitud del vector ya no influye, solo la dirección.
+
+        Es lo que hace comparables las distancias del adjunto con las del corpus
+        en fuse_results (el índice del corpus también va normalizado).
+        """
+        qv = np.array([1.0, 1.0], dtype="float32")
+        mat = np.array([[1.0, 1.0], [50.0, 50.0]], dtype="float32")
+        dists = dict(rank_attachment(qv, mat))
+        assert dists[0] == pytest.approx(dists[1], abs=1e-5)
+        assert dists[0] == pytest.approx(0.0, abs=1e-5)
+
+    def test_rank_attachment_does_not_mutate_inputs(self):
+        """La normalización va sobre copias: 2_RAG.py reutiliza qv y cachea mat."""
+        qv = np.array([3.0, 4.0], dtype="float32")
+        mat = np.array([[6.0, 8.0]], dtype="float32")
+        rank_attachment(qv, mat)
+        assert qv.tolist() == [3.0, 4.0]
+        assert mat.tolist() == [[6.0, 8.0]]
 
 
 class TestContentHash:

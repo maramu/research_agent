@@ -2,6 +2,134 @@
 > Histórico append-only (lo más nuevo arriba). Backlog: Mejoras_pendientes.md · Estado/arquitectura: ESTADO.md
 
 ---
+### ✅ Chunker (62, 63), normalización L2 (55a, 55b), `embed_truncated` y tokenizer BM25 (33 fase 1) — 2026-07-26
+
+**Por qué en un solo commit:** los cinco cambios de datos exigen el MISMO reindexado posterior
+(62, 63, 55a, 55b y la P2 de `embed_truncated`). Hacerlos por separado significaba reindexar las 8
+categorías dos o tres veces. El item 33 entró en la misma tanda porque BM25 se construye al vuelo y
+NO depende del reindexado, así que no añade coste de rollout. **Todo el código está en `main`; el
+rollout sobre el NAS está PENDIENTE y es ATÓMICO** (8 categorías + índice de libros, todo o nada) —
+procedimiento con los flags correctos en `ESTADO.md`, sección Notas importantes.
+
+**Inventario previo (PASO 0) — dos correcciones al planteamiento inicial:**
+1. **El bloque de portada es nivel 1, no nivel 0.** El nivel 0 (preámbulo) ya devolvía `"other"` y
+   además llega siempre vacío, porque `md_clean` empieza con el `# título` y `split_by_headings`
+   descarta las secciones de texto vacío. El bloque de autores/DOI es la sección cuyo heading ES el
+   H1 del título, con `level = 1`, y el ascenso de ancestros sí lo recoge. El fix tenía que atacar
+   `level <= 1`; apuntar al nivel 0 no habría cambiado nada. Seguro: el cuerpo nunca es nivel 1
+   (`_extract_div_content` arranca en `depth=2`).
+2. **No eran 4 rutas de búsqueda densa sino 8 call sites en 7 ficheros.** Además de las cuatro
+   conocidas (`8_query_rag.py:154`, `run_rag_batch.py:99`, `2_RAG.py:955`, `7_Revision.py:312`):
+   `run_eval.py:98` (el harness del item 37), `pool_candidates.py:180`,
+   `14_Preparar_clase.py:126` y `:161`, y un SEGUNDO call site en `2_RAG.py:133` ("Profundizar en
+   estos papers"). **Ninguna llamaba a `index.search()` directamente**, así que normalizar dentro de
+   `dense_rank` las cubrió todas — pero había **dos superficies fuera de `dense_rank`** que la
+   normalización habría roto en silencio: `utils/attachments.py` (L2 crudo en numpy, y
+   `fuse_results` MEZCLA POR DISTANCIA esos valores con los del corpus → el adjunto no habría ganado
+   nunca una plaza de relleno) y `books/embed.py` (su índice se fusiona por distancia con los de
+   papers en `14_Preparar_clase.py` → el cupo de libro habría dejado de competir). Ambas entraron.
+
+**Item 62 — fuga del título + portadas vacías (`3_process_corpus.py`):**
+- 62.1 `canonical_section()` no se aplica a `level <= 1`. Un título con "Operational" (2025_brito) o
+  "characterization" (2014_mora) etiquetaba la portada como methods/results.
+- 62.2 `merge_empty_cover_blocks()` + `cover_residue_chars()`: los bloques de portada sin prosa
+  propia se FUSIONAN con el chunk siguiente en vez de excluirse del índice, así que los autores
+  siguen siendo recuperables y no quedan vectores muertos. Criterio DE CONTENIDO reproducido tal cual
+  de la verificación P3: hay línea `**Authors:**`, se quitan esa y las `**Year|DOI**`, se colapsan
+  saltos y se mide el resto; < 200 chars → remanente sin contenido. Las cuatro guardas están
+  implementadas explícitamente (sin chunk siguiente → se emite tal cual; si el fusionado superaría
+  `MAX_EMBED_CHARS` → no se fusiona; hereda el `section_canonical` del SIGUIENTE, nunca el del
+  remanente; `chunk_index` renumerado tras las fusiones).
+
+**Item 63 — filas de tabla (`3_process_corpus.py`):**
+- 63.1 (causa raíz) filas unidas con `\n\n` en AMBAS ramas de `extract_tables_md`, que ahora devuelve
+  `header_md` / `body_md` además de `text`.
+- 63.2 (cinturón y tirantes) nueva `_split_long_para()`: degrada párrafo → líneas → palabras DENTRO
+  de una línea → corte duro de token atómico, en vez de `para.split()` + `" ".join`.
+- 63.3 heading + caption en TODAS las partes, con el presupuesto descontado antes de trocear el
+  cuerpo para que ninguna parte se pase del tope. No se repite la fila de cabecera (el markdown ya
+  lleva el nombre de columna inline en cada celda).
+- El caption huérfano de 107 chars (almenglo #33) desaparece por 63.1: no necesitó la regla del 62.2.
+
+**Items 55a / 55b — normalización e integridad:**
+- Helper único `utils.embeddings.l2_normalize()`, **siempre sobre copia** (`faiss.normalize_L2` muta
+  in-place y los callers reutilizan su `qv`: `2_RAG` se lo pasa después a `rank_attachment`,
+  `14_Preparar_clase` lo usa contra varios índices). Aplicado en los dos constructores de índice y
+  las dos rutas de consulta.
+- **Se mantuvo `IndexFlatL2`** en vez de pasar a `IndexFlatIP`: sobre vectores unitarios el orden L2
+  es exactamente el del coseno (`‖q-d‖² = ‖q‖² - 2·q·d + 1`, con `‖q‖²` constante para todos los d),
+  así que ningún consumidor tiene que invertir su "menor = mejor" — pasar a IP habría sido tocar 8
+  call sites y `fuse_results` para cero ganancia de ranking.
+- 55b `verify_index_integrity()`: `ntotal == len(metadata)`, norma media ≈ 1,0 y flag `normalized` de
+  `config.json`, con **SystemExit, no warning**. En incremental, `assert_index_normalized()` valida el
+  índice existente **antes de escribir nada**, así que un índice pre-55a aborta limpio pidiendo
+  `--force` en lugar de quedarse mezclado.
+- **Nuevo `"normalized": true` en `config.json`** (papers y libros): sin él un rollout parcial es
+  indetectable para `14_Preparar_clase.py:138`, que ordena por distancia mezclando varios índices.
+
+**P2 Kimi — `embed_truncated`:** `embed_texts` acepta `truncated_out` (lista opcional) y cubre las dos
+vías de truncado (recorte previo a `MAX_EMBED_CHARS` y truncado reactivo por contexto);
+`5_build_embeddings.py` lo persiste por chunk e imprime el recuento. Sin esto habría que reindexar
+dos veces.
+
+**Item 33 fase 1 — tokenizer BM25 (`utils/retrieval.py`):** NFKD para tildes
+(`desulfurización` = `desulfurizacion`), griegas conservadas (`µ` → `μ`), acrónimos con guion como
+token entero **y** por partes (`NR-SOB` → `nr-sob`, `nr`, `sob` — emitir solo el compuesto habría
+sido una regresión frente al tokenizer viejo), y tokens mixtos letra/dígito también por segmentos
+(`h2s` → `h2s`, `h`, `2`, `s`), que es lo que hace que la consulta "H2S" case con el corpus, donde
+los subíndices vienen aplanados como "H 2 S". `Fe(II)` sigue dando `fe` + `ii` (igual que antes:
+meter paréntesis en el alfabeto pegaría basura tipo `(see`).
+
+**Correcciones de documentación (dos afirmaciones falsas retiradas):**
+- La entrada de la auditoría del 2026-07-25 (más abajo en este fichero) y el item 62 decían que estos
+  chunks "compiten con ventaja injusta por el top-8 porque contienen el título del paper". **Es
+  falso:** el texto del chunk es solo `**Authors:** … **Year/DOI**` y NO contiene el título — el
+  título es el heading H1, que se usa para clasificar (de ahí la fuga) pero no entra en el texto ni
+  en el vector. El daño real es **lastre muerto que diluye el pool**, no ventaja en consultas
+  temáticas. Corregido en el item 62.
+- El item 43 daba por abierta la sospecha de que `"table"` no estuviera en `CANONICAL_SECTIONS` y se
+  perdieran las tablas al filtrar. **Cerrado con evidencia ejecutada:** `table` SÍ está (8 etiquetas)
+  y `passes_filters` usa `if sections and …`, así que sin selección pasan todos los chunks.
+- **Alcance real del 62 ampliado:** la fuga no se limita a la portada. Por el ascenso de ancestros,
+  en todo paper cuyo título case con un patrón, TODA subsección del cuerpo que no clasifique por sí
+  misma heredaba la etiqueta del título. El residuo `other` CRECERÁ tras el rollout, y es lo
+  correcto.
+- **Cifra real de portadas vacías: 809/823** en las 8 categorías, no 215 (los 215 eran solo los mal
+  etiquetados; los otros 598 ya estaban en "other" e igual de vacíos).
+- **Item 37 elevado a cuello de botella del proyecto** y marcado como bloqueante de la fase 2 del 33
+  y de cualquier antes/después de 62/63/55a: con n=4 una sola pregunta mueve Hit@8 25 puntos,
+  upgrading está saturado en 6/6, y su MRR se movió de 0,889 a 0,708 por pura deriva de corpus con un
+  suelo de ruido de ~0,18. La línea base sirve como ALARMA DE REGRESIÓN, no como prueba de mejora.
+- **Item 64:** quinto paper fuera de dominio en anoxic (`2004_shikano_volcanic_heat_flux`, lago
+  Katanuma), encontrado sin buscarlo → la prevalencia real es probablemente muy superior a 4/87.
+  Anotado el diagnóstico pendiente (anoxic Hit@8 0,50 / MRR 0,098 vs 1,00 / 0,708 de upgrading:
+  mirar en el CSV por pregunta si lo que sale por encima del correcto es limnología).
+
+**Ficheros tocados:** `scripts/3_process_corpus.py`, `scripts/5_build_embeddings.py`,
+`scripts/utils/embeddings.py`, `scripts/utils/retrieval.py`, `scripts/utils/attachments.py`,
+`scripts/books/embed.py`, y los docs (`Mejoras_pendientes.md`, `ESTADO.md`, este fichero).
+También se arreglaron los desajustes del docstring de `3_process_corpus.py`: documentaba
+`--input-dir` cuando el argumento real es **`--input-dir-a`**, y no mencionaba `--force-md`,
+`--target-words`, `--overlap-words` ni `--sleep`.
+
+**Verificación (estática, sin datos vivos):** `py_compile` de los 6 ficheros;
+**292 passed, 2 skipped** (los 2 skip son los end-to-end de BM25Okapi, `rank_bm25` no instalado en el
+Mac de casa). Tests nuevos: `tests/test_chunking.py` (28), `tests/test_retrieval_normalization.py`
+(30), `tests/test_bm25_tokenizer.py` (24). Incluyen un **guard estructural** que falla si aparece un
+`*index*.search(` fuera de `retrieval.py` o un tercer constructor de índice FAISS: así no se puede
+añadir una novena ruta densa que se salte la normalización. Se reescribió
+`test_rank_attachment_orders_by_distance`, que con `qv=[0,0]` había quedado degenerado (con vectores
+normalizados todos los docs son equidistantes de una consulta nula y pasaba solo por redondeo:
+0.99999994 < 1.0).
+
+**Residuos anotados, no hechos:** `embed_truncated` no se persiste en libros (la caché
+`_vectors/*.npy` reutiliza vectores sin flags); sigue pendiente la parte (b) original del 55
+(`assert ntotal == len(meta)` en los 5 consumidores al CARGAR) y la (c) (orden de escritura de
+`indexed_papers.json`). No se pudo verificar el estado del pipeline de libros desde casa: el NAS está
+montado pero este Mac no tiene permiso de lectura (`Operation not permitted`), así que el rollout de
+libros se documentó en su versión conservadora (re-trocear + re-embeber).
+
+---
 ### ✅ Auditoría de calidad de chunks vs PDF original (2026-07-25)
 
 **Qué se hizo:** muestra estratificada de 16 chunks (semilla fija `20260725`) de

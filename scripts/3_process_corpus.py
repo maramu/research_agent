@@ -15,9 +15,22 @@ Etapas por cada PDF:
     4. Chunking: divide el Markdown en fragmentos de ~1500 chars con solapamiento
 
 Skip logic:
-    Si el .clean.md y el .jsonl correspondientes ya existen y --force no está
-    activo, el PDF se salta. Permite reanudar ingestas interrumpidas sin
-    reprocesar lo ya completado.
+    Si el .tei.xml, el .clean.md y el .jsonl correspondientes ya existen y ni
+    --force ni --force-md están activos, el PDF se salta. Permite reanudar
+    ingestas interrumpidas sin reprocesar lo ya completado.
+
+Chunking — comportamiento (items 62 y 63, 2026-07-26):
+    - El H1 (título del paper) y el preámbulo NO se clasifican con
+      canonical_section(): un título con "Operational" etiquetaba la portada como
+      methods y contagiaba la etiqueta a las subsecciones del cuerpo sin
+      clasificación propia (item 62.1).
+    - Los bloques de portada sin prosa propia (`**Authors:**` + `**Year|DOI**`,
+      < 200 chars de residuo) se FUSIONAN con el chunk siguiente y heredan SU
+      section_canonical (item 62.2). chunk_index se renumera tras las fusiones.
+    - Cada fila de tabla es un párrafo, así que el splitter corta en frontera de
+      fila y nunca fusiona filas de estudios distintos (item 63.1).
+    - Cuando una tabla se trocea, TODAS las partes llevan `### Table N` + caption
+      (item 63.3).
 
 Ficheros leídos:
     /Volumes/research/categorias/<phase>/pdfs/*.pdf   ← PDFs de entrada
@@ -33,11 +46,17 @@ Ficheros escritos:
 Parámetros CLI:
     --phase PHASE         Nombre de la categoría/fase a procesar (obligatorio)
     --base DIR            Directorio raíz (defecto: /Volumes/research/categorias)
-    --force               Reprocesa aunque los artefactos ya existan
-    --dry-run             Lista PDFs a procesar sin ejecutar nada
-    --limit N             Procesa solo los primeros N PDFs
+    --input-dir-a DIR     Carpeta alternativa de PDFs (sobreescribe la ruta por defecto)
     --grobid URL          URL del servidor GROBID
-    --input-dir DIR       Carpeta alternativa de PDFs (sobreescribe la ruta por defecto)
+    --limit N             Procesa solo los primeros N PDFs
+    --target-words N      Tamaño objetivo por chunk en palabras (defecto: 850)
+    --overlap-words N     Solape entre chunks en palabras (defecto: 120)
+    --sleep SEGS          Pausa entre PDFs (defecto: 0)
+    --force               Reprocesa todo desde el PDF, RE-INVOCANDO GROBID
+    --force-md            Regenera md_clean + chunks desde el TEI existente, SIN
+                          llamar a GROBID (falla si no hay TEI). Es el flag para
+                          re-trocear tras un cambio del chunker.
+    --dry-run             Lista PDFs a procesar sin ejecutar nada
 
 Variables de entorno (config/.env):
     GROBID_URL            URL del servidor GROBID (defecto: http://127.0.0.1:8070)
@@ -50,7 +69,7 @@ Notas:
     - GROBID necesita warm-up tras inactividad; la primera llamada puede ser lenta.
     - Errores "[Errno 2] No such file" en PDFs que sí existen indican inestabilidad
       de red/NAS. Solución: copiar los PDFs fallidos a /tmp/<fase>_retry y relanzar
-      con --input-dir apuntando a esa carpeta y el mismo --phase.
+      con --input-dir-a apuntando a esa carpeta y el mismo --phase.
 """
 
 import argparse
@@ -301,6 +320,21 @@ def tei_to_md_clean(tei_xml: str) -> Tuple[str, str, int, int]:
 # ============================================================
 
 def extract_tables_md(tei_xml: str) -> List[Dict]:
+    """Extrae las tablas del TEI como Markdown de una fila por párrafo.
+
+    Item 63.1 — CADA FILA ES UN PÁRRAFO (separada por `\\n\\n`), en las dos ramas
+    (con y sin columna "Exp."). Antes se unían con un solo `\\n`, así que la tabla
+    entera era UN párrafo para `_split_to_max_chars`: una tabla que superara
+    MAX_EMBED_CHARS caía a la rama de emergencia por palabras y fusionaba filas de
+    estudios distintos (2023_almenglo #34). Con filas como párrafos, el splitter
+    corta siempre en frontera de fila por su ruta normal.
+
+    Devuelve dicts con:
+        table_id, title
+        header_md  ← `### <head>` + caption; se antepone a CADA parte (item 63.3)
+        body_md    ← solo las filas, un párrafo cada una
+        text       ← header_md + body_md (la tabla completa, como antes)
+    """
     root   = ET.fromstring(tei_xml)
     tables = []
 
@@ -318,9 +352,14 @@ def extract_tables_md(tei_xml: str) -> List[Dict]:
             continue
 
         header, data = rows[0], rows[1:]
-        lines = [f"### {head}"]
+
+        # Ancla semántica de la tabla (heading + caption), separada del cuerpo
+        # para poder repetirla en cada parte cuando la tabla se trocee.
+        header_md = f"### {head}"
         if desc:
-            lines.append(f"\n*{desc}*")
+            header_md += f"\n\n*{desc}*"
+
+        blocks: List[str] = []
 
         exp_col_idx = next(
             (i for i, h in enumerate(header) if h.strip().lower() in {"exp.", "exp", "experiment"}),
@@ -333,12 +372,12 @@ def extract_tables_md(tei_xml: str) -> List[Dict]:
             def flush_block(k, block_rows):
                 if k is None or not block_rows:
                     return
-                lines.append(f"\n\n**Experiment {k}**\n")
+                blocks.append(f"**Experiment {k}**")
                 for r in block_rows:
                     r   = r + [""] * (len(header) - len(r))
                     row = dict(zip(header, r))
                     parts = [f"{hk}: {row.get(hk,'').strip()}" for hk in header if row.get(hk,"").strip()]
-                    lines.append("- " + " | ".join(parts))
+                    blocks.append("- " + " | ".join(parts))
 
             for r in data:
                 r = r + [""] * (len(header) - len(r))
@@ -350,15 +389,21 @@ def extract_tables_md(tei_xml: str) -> List[Dict]:
                     current_rows.append(r)
             flush_block(current_key, current_rows)
         else:
-            lines.append("")
             for r in data:
                 r     = r + [""] * (len(header) - len(r))
                 pairs = [f"{header[i]}: {r[i]}" for i in range(len(header)) if r[i].strip()]
                 if pairs:
-                    lines.append("- " + " | ".join(pairs))
+                    blocks.append("- " + " | ".join(pairs))
 
-        text = norm_space("\n".join(lines)) + "\n"
-        tables.append({"table_id": table_id, "title": head, "text": text})
+        body_md = norm_space("\n\n".join(blocks))
+        text    = norm_space(f"{header_md}\n\n{body_md}") + "\n"
+        tables.append({
+            "table_id":  table_id,
+            "title":     head,
+            "header_md": header_md,
+            "body_md":   body_md,
+            "text":      text,
+        })
 
     return tables
 
@@ -486,8 +531,51 @@ def write_jsonl(path: Path, records: List[Dict]) -> None:
             f.write(json.dumps(r, ensure_ascii=False) + "\n")
 
 
+def _split_long_para(para: str, max_chars: int) -> List[str]:
+    """Trocea UN párrafo que ya no cabe en max_chars, degradando por niveles.
+
+    Item 63.2 (cinturón y tirantes): antes esta rama hacía `para.split()` +
+    `" ".join`, que destruía TODOS los saltos de línea y podía fusionar dos filas
+    de tabla en una sola entrada. Ahora respeta primero los `\\n` (unidad natural
+    de fila) y solo baja a palabras dentro de una línea que por sí sola no cabe.
+    Último recurso: corte duro de un token atómico gigante.
+    """
+    out: List[str] = []
+    cur = ""
+
+    def add_unit(unit: str, sep: str) -> None:
+        nonlocal cur
+        if cur and len(cur) + len(sep) + len(unit) > max_chars:
+            out.append(cur)
+            cur = unit
+        else:
+            cur = f"{cur}{sep}{unit}" if cur else unit
+
+    for line in para.split("\n"):
+        if not line.strip():
+            continue
+        if len(line) <= max_chars:
+            add_unit(line, "\n")
+            continue
+        # La línea sola ya no cabe: degradar a palabras DENTRO de esta línea.
+        for w in line.split():
+            if len(w) > max_chars:                 # token atómico gigante
+                if cur:
+                    out.append(cur); cur = ""
+                while len(w) > max_chars:
+                    out.append(w[:max_chars]); w = w[max_chars:]
+                if w:
+                    cur = w
+            else:
+                add_unit(w, " ")
+
+    if cur:
+        out.append(cur)
+    return out
+
+
 def _split_to_max_chars(text: str, max_chars: int) -> List[str]:
-    """Trocea text en piezas de <= max_chars respetando párrafos/palabras.
+    """Trocea text en piezas de <= max_chars respetando párrafos/líneas/palabras.
     Devuelve [text] si ya cabe; [] si está vacío."""
     text = (text or "").strip()
     if not text:
@@ -503,21 +591,86 @@ def _split_to_max_chars(text: str, max_chars: int) -> List[str]:
         if len(para) > max_chars:
             if cur:
                 out.append(cur); cur = ""
-            piece = ""
-            for w in para.split():
-                if piece and len(piece) + 1 + len(w) > max_chars:
-                    out.append(piece); piece = ""
-                piece = f"{piece} {w}".strip()
-                while len(piece) > max_chars:      # token atómico gigante
-                    out.append(piece[:max_chars]); piece = piece[max_chars:]
-            if piece:
-                cur = piece
+            pieces = _split_long_para(para, max_chars)
+            if pieces:
+                out.extend(pieces[:-1])
+                cur = pieces[-1]      # el último sigue abierto para el párrafo siguiente
         elif cur and len(cur) + 2 + len(para) > max_chars:
             out.append(cur); cur = para
         else:
             cur = f"{cur}\n\n{para}".strip() if cur else para
     if cur:
         out.append(cur)
+    return out
+
+
+# ── Portadas vacías (item 62.2) ───────────────────────────────────────────────
+# Umbral de prosa por debajo del cual un bloque de portada se considera remanente
+# sin contenido propio y se fusiona con el chunk siguiente.
+COVER_PROSE_MIN_CHARS = 200
+
+# Presupuesto mínimo que debe quedar para el CUERPO de una tabla tras descontar su
+# ancla (item 63.3). Si el heading + caption fuera tan largo que no dejara ni esto,
+# se emite sin ancla antes que trocear la tabla en migajas.
+MIN_TABLE_BODY_BUDGET = 200
+
+_COVER_AUTHORS_RE = re.compile(r"(?im)^[ \t]*\*\*Authors:\*\*.*$")
+_COVER_META_RE    = re.compile(r"(?im)^[ \t]*\*\*(?:Year|DOI)\b.*$")
+
+
+def cover_residue_chars(text: str) -> Optional[int]:
+    """Chars de prosa que quedan en un bloque de portada, o None si no es portada.
+
+    Criterio de la verificación P3 (2026-07-26), reproducido tal cual: si el chunk
+    contiene una línea `**Authors:**…`, se eliminan esa línea y las
+    `**Year…**`/`**DOI…**`, se colapsan los saltos sobrantes y se mide el resto.
+    Por debajo de COVER_PROSE_MIN_CHARS el bloque no tiene contenido propio
+    (809 de 823 casos medidos en las 8 categorías).
+
+    Devuelve None cuando el bloque no es una portada, para distinguirlo de una
+    portada cuyo residuo mide 0.
+    """
+    if not _COVER_AUTHORS_RE.search(text or ""):
+        return None
+    rest = _COVER_AUTHORS_RE.sub("", text)
+    rest = _COVER_META_RE.sub("", rest)
+    rest = re.sub(r"\n{2,}", "\n\n", rest).strip()
+    return len(rest)
+
+
+def merge_empty_cover_blocks(pieces: List[Dict]) -> List[Dict]:
+    """Fusiona los bloques de portada sin contenido propio con el chunk SIGUIENTE.
+
+    Item 62.2. La regla es DE CONTENIDO, no posicional: se aplica a cualquier
+    pieza que cumpla el criterio de `cover_residue_chars`, no solo a la primera.
+    Así los autores siguen siendo recuperables y no quedan vectores muertos
+    diluyendo el pool.
+
+    Guardas:
+      - sin chunk siguiente (paper que solo tiene portada) → se emite tal cual;
+      - si el fusionado superaría MAX_EMBED_CHARS → no se fusiona;
+      - el fusionado hereda la metadata de sección del chunk SIGUIENTE
+        (section, section_canonical, section_part), nunca la del remanente.
+    """
+    out: List[Dict] = []
+    i = 0
+    while i < len(pieces):
+        cur     = pieces[i]
+        residue = cover_residue_chars(cur["text"])
+        if residue is not None and residue < COVER_PROSE_MIN_CHARS:
+            if i + 1 >= len(pieces):
+                out.append(cur)          # guarda: no hay siguiente
+                break
+            nxt         = pieces[i + 1]
+            merged_text = f"{cur['text']}\n\n{nxt['text']}"
+            if len(merged_text) <= MAX_EMBED_CHARS:   # guarda: no pasarse del tope
+                merged         = dict(nxt)            # hereda sección del SIGUIENTE
+                merged["text"] = merged_text
+                out.append(merged)
+                i += 2
+                continue
+        out.append(cur)
+        i += 1
     return out
 
 
@@ -534,9 +687,7 @@ def build_chunk_records(
     target_words: int,
     overlap_words: int,
 ) -> List[Dict]:
-    sections    = split_by_headings(md_clean)  # (title, text, level)
-    records: List[Dict] = []
-    chunk_index = 1
+    sections = split_by_headings(md_clean)  # (title, text, level)
 
     # Ancestor map: heading level → (title, canonical) for hierarchical
     # section_canonical. When a heading at level L is encountered, all
@@ -544,8 +695,19 @@ def build_chunk_records(
     # or parent section).
     ancestors: Dict[int, Tuple[str, str]] = {}
 
+    # Piezas de texto sin numerar todavía: chunk_index se asigna DESPUÉS de
+    # fusionar las portadas vacías (item 62.2), para que quede consecutivo.
+    pieces: List[Dict] = []
+
     for sec_title, sec_text, level in sections:
-        canonical = canonical_section(sec_title)
+        # Item 62.1: el nivel 1 es el TÍTULO del paper (tei_to_md_clean lo emite
+        # como único H1; el cuerpo empieza en H2 porque _extract_div_content
+        # arranca en depth=2), y el nivel 0 es el preámbulo. Ninguno es un
+        # heading de sección, así que NO se clasifican: un título con
+        # "Operational"/"characterization" etiquetaba el bloque de portada como
+        # methods/results y, por el ascenso de ancestros de más abajo, contagiaba
+        # esa etiqueta a toda subsección del cuerpo que no clasificara por sí misma.
+        canonical = "other" if level <= 1 else canonical_section(sec_title)
         ancestors[level] = (sec_title, canonical)
         for k in list(ancestors.keys()):
             if k > level:
@@ -566,25 +728,50 @@ def build_chunk_records(
         for ch in chunk_text(sec_text, target_words, overlap_words):
             for piece in _split_to_max_chars(ch, MAX_EMBED_CHARS):
                 part_i += 1
-                records.append({
-                    "phase":             phase,
-                    "paper_id":          paper_id,
-                    "paper_title":       paper_title,
-                    "doc_type":          "article",
-                    "source_pdf":        str(source_pdf),
-                    "source_tei":        str(source_tei),
-                    "source_md_clean":   str(source_md_clean),
+                pieces.append({
                     "section":           sec_title,
                     "section_canonical": sec_canonical,
-                    "type":              "text",
-                    "chunk_index":       chunk_index,
                     "section_part":      part_i,
                     "text":              piece,
                 })
-                chunk_index += 1
+
+    pieces = merge_empty_cover_blocks(pieces)
+
+    records: List[Dict] = []
+    chunk_index = 1
+
+    for p in pieces:
+        records.append({
+            "phase":             phase,
+            "paper_id":          paper_id,
+            "paper_title":       paper_title,
+            "doc_type":          "article",
+            "source_pdf":        str(source_pdf),
+            "source_tei":        str(source_tei),
+            "source_md_clean":   str(source_md_clean),
+            "section":           p["section"],
+            "section_canonical": p["section_canonical"],
+            "type":              "text",
+            "chunk_index":       chunk_index,
+            "section_part":      p["section_part"],
+            "text":              p["text"],
+        })
+        chunk_index += 1
 
     for t_i, tb in enumerate(tables, start=1):
-        for part_i, piece in enumerate(_split_to_max_chars(tb["text"], MAX_EMBED_CHARS), start=1):
+        # Item 63.3: el heading + caption se antepone a CADA parte, no solo a la
+        # primera. Se trocea el CUERPO con el presupuesto ya descontado, así que
+        # ninguna parte puede pasarse de MAX_EMBED_CHARS al añadirle el ancla.
+        header_md = tb.get("header_md", "")
+        body_md   = tb.get("body_md", tb.get("text", ""))
+        budget    = MAX_EMBED_CHARS - (len(header_md) + 2) if header_md else MAX_EMBED_CHARS
+        if budget < MIN_TABLE_BODY_BUDGET:   # ancla patológicamente larga
+            header_md, budget = "", MAX_EMBED_CHARS
+
+        # `or [""]` preserva el comportamiento previo para una tabla cuyo cuerpo
+        # queda vacío (celdas vacías en el TEI): se emite el ancla sola.
+        for part_i, piece in enumerate(_split_to_max_chars(body_md, budget) or [""], start=1):
+            text = f"{header_md}\n\n{piece}".strip() if header_md else piece
             records.append({
                 "phase":             phase,
                 "paper_id":          paper_id,
@@ -599,7 +786,7 @@ def build_chunk_records(
                 "chunk_index":       chunk_index,
                 "table_id":          tb.get("table_id", ""),
                 "section_part":      part_i,
-                "text":              piece,
+                "text":              text,
             })
             chunk_index += 1
 
