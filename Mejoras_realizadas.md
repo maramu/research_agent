@@ -2,7 +2,114 @@
 > Histórico append-only (lo más nuevo arriba). Backlog: Mejoras_pendientes.md · Estado/arquitectura: ESTADO.md
 
 ---
-### ✅ Chunker (62, 63), normalización L2 (55a, 55b), `embed_truncated` y tokenizer BM25 (33 fase 1) — 2026-07-26
+### ✅ Rollout del commit 6093f35 (2026-07-25)
+
+Ejecución en pciq22 del rollout atómico de los items 62, 63, 55a, 55b, `embed_truncated` y 33.
+Informe completo (352 líneas, con logs) en
+`/Volumes/research/metadatos/eval/rollout_6093f35/informe.md`. Duración del bloque de re-embebido:
+**~5h20min** (bioplastics 2h16 y upgrading 2h01 se llevan el grueso). Sin commits ni push en pciq22
+en ningún momento: la disciplina de dos máquinas se respetó y las ediciones de documentación que
+allí se hicieron por error se han traído aquí, corregidas y ampliadas.
+
+**Números clave:**
+- **9/9 índices normalizados** — norma L2 media **1,000** y flag `"normalized": true` en las 8
+  categorías + `libros_docencia`. Invariante 55b (`ntotal == len(metadata)`) en verde en los 9.
+  Ningún rollout parcial. Prueba de humo de la fusión multi-índice de `14_Preparar_clase`: distancias
+  de categoría 0,50–0,58 y de libros 0,90–0,99 — **mismo rango**, que era justo lo que había que
+  comprobar (un índice sin normalizar habría dado decenas o cientos).
+- **809/823 portadas fusionadas (99,75%)**. Los 2 SOLO_METADATA residuales sí se fusionaron: su
+  abstract combinado mide 164-180 chars y cae bajo el umbral de 200 del criterio de medida. Los 4
+  MIXTO conocidos siguen existiendo y bien etiquetados (4/4).
+- **Chunks de tabla con filas fusionadas: 29/1875 (1,5%) → 0/1859.** Y 0 chunks de tabla sin
+  `### Table N` al inicio (antes 2/165 en anoxic).
+- **`embed_truncated` presente en el 100% de los 19.086 chunks**, 90 a `true` (**0,47%**): 58 en
+  bioplastics, 28 en upgrading, 3 en anoxic, 1 en microalgae.
+- **`other` crece en 6/8 categorías**, como predecía el item 62. El caso extremo es
+  `bioleaching_critical_materials` con **+23,54 pp**, y está explicado a nivel de paper: de sus 6
+  papers, **`kelly` y `santomartino` tenían 22/33 y 22/27 chunks etiquetados `methods`** — dos
+  tercios del cuerpo entero contagiados por el título vía ascenso de ancestros — y caen a **3 y 1**,
+  con `other` pasando de 0 a 18 y de 0 a 20. Con solo 6 papers, 2 casos extremos mueven la media de
+  la categoría. Las 2 categorías donde `other` baja son las 2 más pequeñas (30 y 27 chunks): ahí el
+  efecto de resta del 62.2 (cada portada fusionada elimina un chunk que era "other") supera al de
+  suma del 62.1.
+- **Reconciliación aritmética con residuo = 0 en las 8 categorías:** caída de chunks = portadas
+  fusionadas + Δ nº de piezas de tabla. Los "10 extra" de bioplastics y "5" de upgrading que no
+  cuadraban en la primera versión del informe no eran error de conteo: son tablas grandes que
+  cambiaron de número de piezas por el fix 63.3 (cada parte reserva presupuesto para repetir el
+  ancla). Son, no por casualidad, las 2 categorías con más y mayores tablas del corpus.
+
+**Método del estado "antes" — re-derivado, no reconstruido.** Durante el rollout se sobreescribió por
+accidente `antes.json` al reutilizar el script de captura con el mismo nombre de salida. En vez de
+dar por bueno lo reconstruido de la transcripción, el estado previo se **re-derivó de verdad**:
+`git worktree` sobre `6093f35^` (código anterior al fix) + `3_process_corpus.py --force-md` contra el
+**TEI real**, con `pdfs/` y `tei/` como symlinks de solo lectura y salida en `/tmp` — cero escritura
+en `/Volumes/research/`. Es código real ejecutado contra datos reales, no una reconstrucción de
+memoria. Resultado: **coincide exacto en 7/8 categorías** con lo reconstruido (lo valida), y difiere
+en `anoxic` justo por el paper fantasma de abajo.
+
+**Descubrimiento: un paper fantasma de 6 semanas → item 65 (nuevo).** La anomalía `n_papers` 87→86 en
+anoxic resultó ser `2019_santos_clotas_..._sewage_biogas_2`, cuarentenado como TEI huérfano el
+**2026-06-14**, cuyos **20 chunks seguían vivos en el índice FAISS** hasta que este `--force` los
+barrió. Causa: **el modo incremental de `5_build_embeddings.py` solo añade, nunca poda** — jamás
+comprueba si un `paper_id` del índice ha desaparecido de `chunks/`. Consecuencia práctica:
+**cuarentenar un paper no lo saca del RAG**, solo del catálogo bibliográfico. Eso convierte al item
+65 en **prerrequisito del item 64** (revisar y cuarentenar los fuera de dominio de anoxic sería
+inútil sin un `--force` posterior). Y expone un límite del 55b: **no detecta este caso**, porque en
+incremental vectores y `metadata.jsonl` se escriben juntos en append y `ntotal == len(meta)` sigue
+cuadrando — verde en los 9 índices con el fantasma dentro. Falta un invariante de coherencia
+EXTERNA, `paper_ids_en_indice - paper_ids_en_chunks == ∅`, anotado como 55b(d).
+
+**La línea base del híbrido estaba contaminada.** La caída de `upgrading`-híbrido de 5/6 a 4/6 no era
+una regresión del tokenizer: el tokenizer VIEJO, al no plegar tildes, partía `termófilos` en
+`term`+`filos` y `biometanación` en `biometanaci`+`n`, y esos restos casaban **por colisión de
+substring** con el inglés real del documento ("long-**term** storage", "in **term**s of"). El paper
+de Logroño salía en posición 1 por esa casualidad. Con el tokenizer nuevo la intersección BM25
+legítima entre la pregunta y el documento es literalmente `ex, situ` — dos tokens, y son latín. **El
+tokenizer nuevo no pierde ninguna coincidencia legítima: elimina dos falsos positivos.** El item 33
+fase 1 se queda, y el 5/6 de la línea base queda anotado como inflado (honesto: 4/6). Confirmación
+independiente: `anoxic`-híbrido con tokenizer viejo y corpus nuevo reproduce la línea base bit a bit
+(1/4, MRR 0,062), así que el re-chunking no tocó el híbrido.
+
+**De ahí sale la hipótesis del desajuste de idioma**, que bloquea la fase 2 del item 33: el golden
+está en español y el corpus en inglés, y BM25 no cruza idiomas. La conclusión histórica de que "el
+denso gana siempre al híbrido" puede ser un artefacto de eso y no una propiedad del híbrido. Tarea
+concreta anotada en los items 33 y 37: traducir 2-3 preguntas al inglés y correr las 4
+combinaciones antes de tocar la fusión.
+
+**Otros resultados de la sesión:**
+- Eval (n=4/n=6, **alarma de regresión, no prueba de mejora**): anoxic denso 0,500 → 0,500; anoxic
+  híbrido 0,250 → 0,250; upgrading denso 1,000 → 1,000 (MRR 0,708 → 0,792, ruido de reordenamiento);
+  upgrading híbrido 0,833 → 0,667, explicado arriba.
+- **Norma L2 real corregida: ‖v‖ ≈ 25,8 de media** (25,73–25,95 según categoría), medida sobre
+  muestras de 27-50 vectores en los 9 índices. El **27,11** que citaban el item 55a y ESTADO.md desde
+  el 2026-07-20 salió de **un único vector suelto**, no de una media. No cambia ninguna conclusión
+  (bge-m3 sigue sin normalizar), solo la cifra.
+- **Test arreglado** (`tests/test_bm25_tokenizer.py`, único `.py` tocado en esta sesión):
+  `test_accented_query_retrieves_unaccented_document` fallaba, y **no era una regresión del
+  tokenizer** — con 2 documentos y el término en 1, la IDF de Okapi vale `log(1) = 0` exacto y el
+  score sale 0 pase lo que pase. Corpus de prueba ampliado a 3 documentos. Suite en pciq22:
+  **294 passed, 0 skipped**. **Ojo: en el Mac de casa la misma suite da 292 passed + 2 skipped**
+  porque `rank_bm25` no está instalado en ninguno de sus venvs y los 2 tests end-to-end de BM25 se
+  saltan — entre ellos, justamente el que este fix arregla. Verificada aparte la afirmación
+  matemática que lo sostiene (IDF = 0,0 exacto con N=2; 0,5108 con N=3), pero **la comprobación
+  end-to-end de ese test solo es válida en pciq22** hasta que se instale `rank-bm25` en casa (está
+  en `requirements.txt`).
+- `corpus_manifest.json` regenerado en las 8 categorías; Streamlit (8501/8502) y el job semanal de
+  Scopus parados durante el rollout y reactivados al final, verificados con `launchctl` + `curl`.
+- `baseline_2026-07-26/` renombrada a **`baseline_2026-07-25/`** (los CSV están sellados `20260725`);
+  y corregidas en los docs las ~27 fechas `2026-07-26` que el commit 6093f35 había dejado en el
+  futuro.
+- **`1996-Blanch_Clark_Biochemical_Engineering.pdf` quedó fuera del rollout a propósito** (symlinks
+  solo a Najafpour y Burstein): nunca se había procesado, y mezclar "primera ingesta" con "re-proceso
+  de un fix" habría enturbiado la verificación. Su estado sin chunks es el correcto mientras no
+  exista la pasada de OCR del item 35, donde queda anotado.
+- Auditado que **ningún LaunchAgent/LaunchDaemon puede re-disparar un prompt viejo contra datos
+  vivos**: el único cron de Claude en pciq22 (`daily_question`) usa `--allowedTools "WebSearch,
+  WebFetch"`, una lista blanca sin acceso a ficheros, y su `question.md` pregunta por el tiempo y las
+  mareas de Cádiz.
+
+---
+### ✅ Chunker (62, 63), normalización L2 (55a, 55b), `embed_truncated` y tokenizer BM25 (33 fase 1) — 2026-07-25
 
 **Por qué en un solo commit:** los cinco cambios de datos exigen el MISMO reindexado posterior
 (62, 63, 55a, 55b y la P2 de `embed_truncated`). Hacerlos por separado significaba reindexar las 8

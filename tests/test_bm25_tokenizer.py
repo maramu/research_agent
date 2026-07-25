@@ -140,8 +140,16 @@ class TestEndToEndBM25:
         assert top and top[0] == 0
 
     def test_accented_query_retrieves_unaccented_document(self):
-        bm25 = build_bm25(["desulfurizacion anoxica del biogas", "otro tema"])
+        # Corpus de 3 docs, no 2: con exactamente 2 docs y el término en 1 de
+        # ellos, la IDF clásica de Okapi (rank_bm25) da log((2-1+.5)/(1+.5))=0
+        # exacto y el score sale 0 pase lo que pase con el tokenizer — no es
+        # un caso del tokenizer, es un artefacto del tamaño del corpus.
+        bm25 = build_bm25([
+            "desulfurizacion anoxica del biogas",
+            "otro tema",
+            "un tercer documento cualquiera sin relacion",
+        ])
         if bm25 is None:
             pytest.skip("rank_bm25 no instalado")
-        top = bm25_rank(bm25, "desulfurización", 2)
+        top = bm25_rank(bm25, "desulfurización", 3)
         assert top and top[0] == 0
