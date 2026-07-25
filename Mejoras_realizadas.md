@@ -2,6 +2,52 @@
 > Histórico append-only (lo más nuevo arriba). Backlog: Mejoras_pendientes.md · Estado/arquitectura: ESTADO.md
 
 ---
+### ✅ Auditoría de calidad de chunks vs PDF original (2026-07-25)
+
+**Qué se hizo:** muestra estratificada de 16 chunks (semilla fija `20260725`) de
+`anoxic_biogas_biodesulfurization` (1741 chunks, 87 papers), comparada chunk a chunk contra la
+página renderizada del PDF original a 150 dpi (PyMuPDF) — no contra `md_clean`, para no heredar los
+mismos errores que se intenta auditar. Protocolo a ciegas: el auditor no vio los hallazgos previos
+(auditoría Kimi K2 del 2026-07-20) hasta el final, para no sesgar la lectura hacia lo ya conocido.
+Informe completo en `/Volumes/research/metadatos/auditoria_chunks/2026-07-25/informe.md` (NAS, fuera
+de git; pendiente copiarlo a la raíz del repo como `2026-07-25_auditoria_chunks.md` desde pciq22
+para versionarlo).
+
+**Números clave:**
+- 31/87 chunks `chunk_index=1` (portada del paper) con `section_canonical` distinto de
+  `other`/`abstract` — 1,8% del corpus en volumen, pero afecta a chunks que compiten con ventaja
+  injusta por el top-8 en cualquier consulta temática (item 62).
+- 1/165 tablas ≥7500 chars con filas fusionadas por el fallback del splitter (0,6% de prevalencia,
+  crítico cuando ocurre) — mismo bug explica el caption huérfano de 2/165 chunks de tabla (item 63).
+- Al menos 4/87 papers de la muestra fuera de dominio de `anoxic_biogas_biodesulfurization`
+  (limnología/sedimentos que se creían descartados manualmente) — problema de cribado, no de
+  extracción (item 64).
+- 176 tablas en TEI → 165 chunks de tabla, caption presente en 163/165, 70/87 papers con ≥1 tabla:
+  **no hay pérdida de tablas en la extracción** (hipótesis de partida de la sesión, descartada).
+- 4/16 chunks CRÍTICOS en la muestra — atribuible a sesgo de muestreo intencional (sobre-representa
+  tablas/resultados con fórmulas); 0/6 CRÍTICOS entre los chunks de control.
+- 0 defectos nuevos achacables a GROBID frente a extractores alternativos (Docling/PyMuPDF4LLM):
+  decisión de no migrar el extractor de papers queda CERRADA sin evidencia.
+
+**Resultado principal:** el defecto de mayor prevalencia del corpus —`canonical_section()`
+aplicado al título completo del paper, que hace que el bloque de portada (autores+DOI) herede
+`methods`/`results`— no tenía ninguna relación con la hipótesis de partida de la sesión (pérdida de
+tablas en la extracción), que quedó descartada con evidencia concreta (ver arriba).
+
+**Nota metodológica:** la auditoría visual contra el PDF original encontró en una sola pasada lo que
+tres días de análisis por hipótesis no habían encontrado — descubrir antes de medir.
+
+**Acciones derivadas:** `Mejoras_pendientes.md` items nuevos 62 (`canonical_section` sobre título),
+63 (fusión de filas de tabla + caption huérfano, con la P2 de `embed_truncated` de la auditoría Kimi
+anclada ahí) y 64 (pureza del corpus, papers fuera de dominio); anotaciones fechadas 2026-07-25 en
+los items 33 (BM25, decisión de no reescribir subíndices), 35 (caso OCR nuevo en 1989_anderson), 37
+(golden a nivel de chunk, prerrequisito item 64) y 43 (verificación `"table"` vs
+`CANONICAL_SECTIONS` sigue abierta); bloque "Descartado con evidencia 2026-07-25" para no repetir el
+trabajo de pérdida de tablas/extractor en seis meses. Detalle completo en `Mejoras_pendientes.md` y
+`ESTADO.md` (sección "Auditorías externas / de calidad", corrección de rutas del repo por máquina y
+gotcha de grep sobre TEI de GROBID).
+
+---
 ### ✅ Fix: `num_ctx=16384` en las 5 llamadas a Ollama + `hybrid=False` por defecto en la batería (items 52, 53) (2026-07-20)
 
 **Contexto:** item 52 del backlog — `rag_core.py::stream_ollama`, `run_rag_batch.py::synthesize` y

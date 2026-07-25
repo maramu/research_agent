@@ -9,6 +9,7 @@
 | Mac mini Pro (UCA) (pciq22.uca.es) | máquina principal — scripts, Streamlit, datos, Ollama, GROBID |
 | Scripts | `/Users/martinramirez/proyectos/research_agent/scripts/` |
 | Config | `/Volumes/Disco/proyectos/research_agent/config/` |
+| **Repo — ruta por máquina** | **pciq22:** `/Users/martinramirez/proyectos/research_agent` (`/Volumes/Disco` **NO existe** en esa máquina — confirmado por la auditoría de chunks 2026-07-25). **Casa:** `/Volumes/Disco/proyectos/research_agent` — esta ruta es **exclusiva** de la máquina de casa, no replicarla al razonar sobre pciq22. Datos (`categorias/`, `metadatos/`) viven en `/Volumes/research/` **solo en pciq22**. |
 | Venv | `~/venvs/rag_papers` (Python 3.13 via Homebrew /opt/homebrew/bin/python3.13) — **el venv bueno del proyecto**; ver nota abajo |
 | GROBID | Docker (ARM64 nativo), imagen `grobid/grobid:0.9.0-crf`, compose en `~/grobid-compose.yml` |
 | Ollama | Solo loopback (`127.0.0.1:11435`); remoto vía proxy Caddy con Bearer en `http://pciq22.uca.es:11434` — ver [Ollama — instalación en pciq22](#ollama--instalación-en-pciq22) |
@@ -27,6 +28,20 @@
 > `validate_metadata.py`, scripts sueltos) — NO lo usa ningún LaunchAgent;
 > si se toca una dependencia de producción, replicar también en
 > `~/venvs/rag_papers`.
+
+### Auditorías externas / de calidad
+
+| Auditoría | Informe | Acciones derivadas |
+|---|---|---|
+| Externa Kimi K2 (2026-07-20) | `2026-07-20_auditoria_externa.md` (raíz del repo, versionado) | `Mejoras_pendientes.md` items 52–61 |
+| Calidad de chunks vs PDF original (2026-07-25) | `/Volumes/research/metadatos/auditoria_chunks/2026-07-25/informe.md` (NAS, fuera de git; pendiente copiar a la raíz del repo como `2026-07-25_auditoria_chunks.md` desde pciq22 para versionarlo) | `Mejoras_pendientes.md` items 62–64 + anotaciones en items 33/35/37/43 |
+
+Muestra estratificada de 16 chunks (semilla `20260725`) de `anoxic_biogas_biodesulfurization`
+(1741 chunks, 87 papers), comparada a ciegas contra la página renderizada del PDF original a 150
+dpi (PyMuPDF) — no contra `md_clean`. Hallazgo principal: el defecto de mayor prevalencia del
+corpus (`canonical_section()` aplicado al título del paper, item 62) no tenía relación con la
+hipótesis inicial de pérdida de tablas en la extracción, que quedó descartada con evidencia. Detalle
+completo en `Mejoras_realizadas.md`.
 
 ### Hermes Agent (productividad personal)
 
@@ -276,7 +291,7 @@ research_agent/
 | `1_rename_papers_by_doi.py` | Renombra PDFs via DOI + Crossref. Gestiona `doi_manual.xlsx`. **2026-06-09**: nueva fuente DOI `--doi-csv`. **2026-06-13 (item 44):** lookup robusto en `doi_manual`: además de clave exacta, indexa por `normalize_stem(stem)` y `normalize_title(título_extraído)`; normaliza DOI antes de llamar a Crossref (`normalize_doi` — barra final → no más 404 para `10.1002/bit.26092/`); handler HTTPError conserva el fichero si hay DOI válido (no mueve a fallidos). | ✅ |
 - Eliminada `DOI_REGEX` duplicada y funciones `clean_doi`, `extract_doi_from_text`, `extract_doi_from_pdf` — ahora importa desde `utils.pdf_utils` (commit d1ea84d)
 | `2_screen_pdfs.py` | Clasifica PDFs en 8 categorías via keywords + Ollama | ✅ |
-| `3_process_corpus.py` | PDF → TEI (GROBID) → MD clean → chunks JSONL. **2026-06-10 (item 32)**: campo `section_canonical` en cada chunk con herencia jerárquica de heading — `split_by_headings()` devuelve nivel del heading; `build_chunk_records()` mantiene mapa ancestros `nivel→canonical` y sube niveles hasta encontrar una etiqueta que no sea "other". 7 etiquetas: `abstract \| introduction \| methods \| results \| discussion \| conclusion \| other`. Chunks de tabla: `section_canonical="table"`. El campo `section` (título hoja crudo) queda intacto. Commit b097744. **2026-06-11**: chunks capados a `MAX_EMBED_CHARS` vía `_split_to_max_chars` (texto y TABLAS, que antes se emitían enteras); `section_part` añadido a registros de tabla. | ✅ |
+| `3_process_corpus.py` | PDF → TEI (GROBID) → MD clean → chunks JSONL. **2026-06-10 (item 32)**: campo `section_canonical` en cada chunk con herencia jerárquica de heading — `split_by_headings()` devuelve nivel del heading; `build_chunk_records()` mantiene mapa ancestros `nivel→canonical` y sube niveles hasta encontrar una etiqueta que no sea "other". 7 etiquetas: `abstract \| introduction \| methods \| results \| discussion \| conclusion \| other`. Chunks de tabla: `section_canonical="table"`. El campo `section` (título hoja crudo) queda intacto. Commit b097744. **2026-06-11**: chunks capados a `MAX_EMBED_CHARS` vía `_split_to_max_chars` (texto y TABLAS, que antes se emitían enteras); `section_part` añadido a registros de tabla. **Defecto conocido (auditoría de chunks 2026-07-25, item 63):** `extract_tables_md` une filas de tabla con un solo `\n`; `_split_to_max_chars` solo corta en `\n\n`, así que una tabla ≥`MAX_EMBED_CHARS` cae al fallback por palabras sueltas y fusiona filas distintas en una sola entrada (confirmado en 2023_almenglo). Fix pendiente: unir filas con `\n\n` en origen. | ✅ |
 | `3a_download_pdfs.py` | Descarga PDFs desde CSV Scopus via Unpaywall + Elsevier API. **Bug fix 2026-06-09**: doi_registry check corregido (`_line.strip().split("\t")[0].lower()` — el fichero tiene formato `doi\tcategory/filename`; antes el split tab faltaba y nunca detectaba duplicados ya en corpus). **Fix 2026-06-14**: el skip por doi_registry añade resultado con status `SKIPPED_CORPUS` (fuera de `pending_mask`) → las filas ya-en-corpus dejan de filtrarse a pendientes y no descuadran `save_results` (antes el `continue` sin append rompía la alineación posicional). | ✅ |
 | `3b_summarize.py` | Genera resúmenes con qwen3:14b | ✅ |
 | `4_extract_metadata.py` | Extrae metadatos de TEI XML (título, DOI, autores, refs). Añade `stable_id`, `processed_date`, `source_type`, `download_source`, `download_url`, `access_type`, `download_date`. Arg `--source-type`. Verificado en producción 2026-05-27. **2026-06-11**: extrae **revista** del TEI (`monogr/title[@level='j']` + fallback) al campo `journal`; **fallback de DOI** a `doi_manual.xlsx` cuando el TEI no lo trae (por nombre de archivo y título normalizado); **preserva** `doi`/`journal` previos no vacíos al reextraer (no los machaca con vacío del TEI, backup `.bak`); **salta TEI huérfanos** sin `md_clean` correspondiente (imprime la lista) para no generar papers fantasma. **2026-06-13**: preservación generalizada a `title`/`doi`/`journal`/`year`/`authors` (`PRESERVE_FIELDS`) para que las correcciones manuales desde el editor de Artículos sobrevivan a una re-extracción; un campo vacío/ausente previo fuerza refresco desde el TEI. **2026-06-13**: fallback de `journal` vía Crossref por DOI cuando ni el TEI ni el registro previo traen revista. Ver `Mejoras_realizadas.md`, sesión de hoy. | ✅ |
@@ -654,6 +669,12 @@ El backlog vivo y el orden de prioridad están en `Mejoras_pendientes.md`. El hi
 - `metadata.jsonl` por chunk incluye ahora `section_canonical` (item 32) y `year` (item 34, denormalizado desde `papers_metadata.jsonl` + fallback regex sobre paper_id).
 - `utils/retrieval.py` centraliza la recuperación: BM25 al vuelo (sin artefacto, alineado con FAISS por orden), fusión RRF (k=60) y filtros (`passes_filters`). Toggle híbrido OFF por defecto en CLI (`--hybrid`) y web.
 - `MAX_EMBED_CHARS=8000` (`utils/constants.py`): tope de chunk + truncado reactivo en el embed para no exceder el contexto de bge-m3 con texto denso en fórmulas/subíndices.
+- **Gotcha de grep sobre TEI de GROBID (auditoría de chunks 2026-07-25):** GROBID escribe
+  `<figure xmlns="http://www.tei-c.org/ns/1.0" type="table">` con el `xmlns` ANTES del `type`, así
+  que `grep '<figure type="table"'` devuelve 0 falsos negativos. Y `type="table"` a secas también
+  casa con `<ref type="table" target="#tab_1">` (cada mención en el texto, p. ej. "as shown in
+  Table 2"), inflando el conteo si no se filtra por `<figure`: en `anoxic`, 738 matches totales =
+  176 objetos tabla reales + 562 menciones de referencia.
 - `requirements.txt`: dependencias `rank-bm25`, `pytest>=8.0` y `pymupdf` (item 47 — extracción de texto de adjuntos efímeros).
 - **Tests (item 39):** `tests/` con `pytest` (`conftest.py` añade `scripts/` a sys.path; `pytest.ini` en raíz). `normalize_stem` en `utils/pdf_utils.py` unifica el antiguo `_norm` de los 3 ficheros. Regresión de DOI/título/stem: 56 passed, 1 xfailed (xfail strict = bug `_clean_doi`, item 44). Hallazgos abiertos: items 44 (`_clean_doi` recorta sufijos DOI de 3+ letras) y 45 (utilidades de texto duplicadas y divergentes `pdf_utils`↔`1_rename`).
 - **Rollout item 32 completado (2026-06-11):** las 8 categorías re-troceadas + re-indexadas (`3_process_corpus.py --force-md` + `5_build_embeddings.py --force`); `section_canonical` y `year` poblados en `metadata.jsonl` de todas. Ya no queda el "pendiente: re-trocear el resto".

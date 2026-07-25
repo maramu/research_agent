@@ -13,7 +13,9 @@
 - ~~Timeout job semanal: subir `SCOPUS_TIMEOUT` de 2700 a 5400 (45→90 min)~~ — ✅ **COMPLETADO 2026-06-15** — `run_weekly_scopus.py`: `SCOPUS_TIMEOUT = 5400`; `WEEKLY_CATEGORIES` ampliada con `anoxic_biogas_biodesulfurization`.
 
 ## Orden de prioridad (revisión 2026-07-20 — auditoría externa Kimi K2)
-> Detalle y justificación: `docs/auditorias/2026-07-20_auditoria_externa.md`.
+> Detalle y justificación: `2026-07-20_auditoria_externa.md` (raíz del repo — corregido 2026-07-25;
+> el path `docs/auditorias/...` que aparecía aquí antes no existe, el fichero siempre vivió en la
+> raíz, ver también auditoría de chunks más abajo).
 > Items 52–61 nuevos (bloque al final); el resto son anotaciones fechadas dentro de items existentes. El orden 2026-06-25 sigue vigente para lo no tocado aquí.
 
 > **Verificación 2026-07-20 (pciq22, solo lectura): items 52, 53 y 55a CONFIRMADOS** — pasan de "verificar" a fix. Evidencia en cada item.
@@ -261,6 +263,13 @@ Ligado al item 37 — sin set de evaluación no se puede medir, y el soporte de 
   sin violar Ollama 0.30.7: (a) CrossEncoder `bge-reranker-v2-m3` en `sentence-transformers`
   (rerank top-20 <1 s en M4, añade torch al venv); (b) LLM-as-reranker pointwise con qwen2.5
   (cero dependencias) para la evaluación inicial.
+- **Auditoría de chunks 2026-07-25:** refuerza el arreglo del tokenizer BM25. DECISIÓN EXPLÍCITA:
+  NO normalizar el aplanado de subíndices (H₂S → "H 2 S", presente en ~13/16 chunks con química)
+  reescribiendo el texto. Es constante en todo el corpus y para recuperación densa la consistencia
+  vale más que la fidelidad — bge-m3 lo ve igual en chunk y consulta. El daño real es en BM25, donde
+  `[a-z0-9]+` lo parte en h/2/s, y ahí el arreglo es el tokenizer. Reescribir el texto obligaría a
+  re-embeber y arriesga falsos positivos. Se descarta también el defecto "Table N ." con espacio
+  espurio (58/165 = 35%): cosmético, el tokenizer ya descarta los puntos. Prevalencia ≠ importancia.
 
 ### 35. Fallback OCR para PDFs escaneados — MEDIA prioridad
 
@@ -270,6 +279,12 @@ GROBID no extrae nada de un PDF que es imagen → entra vacío al índice.
 - `ocrmypdf` (Tesseract) genera un PDF con capa de texto; reintentar GROBID sobre él.
 - Idiomas: `eng` (corpus mayoritariamente en inglés).
 - Encaja con la carpeta de cuarentena (item 18): si tras OCR sigue vacío → cuarentena.
+- **Auditoría de chunks 2026-07-25:** caso nuevo que el filtro NO caza. 1989_anderson tiene texto
+  extraíble (pasa `text_extractable=true`) pero el texto está degradado por OCR: `~`→`-`,
+  `10⁻⁹`→`10m9` (el exponente cambia de valor), `CO₃²⁻`→`CO:-`, "Saanich Inler", "sediment mps".
+  Peor caso que un escaneado limpio sin texto, porque entra al corpus sin aviso. Considerar un
+  chequeo de calidad de OCR además del binario texto/no-texto. (OJO: este paper es 1989_anderson,
+  NO 1998_searcy — searcy salió como el chunk más limpio de los 16.)
 
 ### ~~36~~. ✅ (36-A completado 2026-06-20) Idempotencia y reanudación por documento — MEDIA prioridad
 
@@ -339,6 +354,8 @@ cualquier cambio de chunking, embeddings, modelo o estrategia de retrieval.
   `corpus_manifest.py` ya genera casi todo). Reformular en docs: "sin evidencia de beneficio
   del híbrido a n=10; OFF por parsimonia", no "denso gana". El Hit@8=1.0 de biogas es casi
   seguro artefacto de pooling.
+- **Auditoría de chunks 2026-07-25:** anotar el golden a nivel de CHUNK, no de paper. El item 64
+  (pureza del corpus) es prerrequisito: no anotar sobre un corpus con papers fuera de dominio.
 
 ### 38. Batch API de Anthropic para resúmenes — BAJA prioridad
 
@@ -482,6 +499,10 @@ largo Scopus en descarga)~~ ✅ CUBIERTO 2026-06-13 (renombrado por DOI antes de
 (ausencia de papers_metadata.jsonl, clave MVP libros), 8_query_rag.py/2_RAG/7_Revision (cableado
 passes_filters). Más: detect_affected_categories con _norm ✅; filtro de activas en run_scopus para
 categorías explícitas; sort_keys=True en promote_adhoc_to_category.
+- **Auditoría de chunks 2026-07-25:** la verificación canonical_section vs CANONICAL_SECTIONS sigue
+  ABIERTA en su parte importante — no se ha comprobado si `"table"`, que no está en
+  CANONICAL_SECTIONS, hace que el filtro por sección de la UI descarte todos los chunks de tabla.
+  Pendiente.
 
 ### ~~46. Borrar modelos Ollama obsoletos en pciq22~~ — ✅ COMPLETADO 2026-06-26
 
@@ -809,3 +830,106 @@ VPN. Relacionado: `PasswordAuthentication no` en pciq22 (ya en el checklist del 
   (`reconcile_with_corpus` sí) → normalizar con `_norm_doi_key` en todas las vías.
 - (c) **VERIFICAR:** la pre-estimación de coste en `2_RAG.py` (`app_utils.estimate_cost_usd`) asume
   ~1200 chars/chunk cuando el tope real es 8000 → podría subestimar ~6x el input en providers de pago.
+
+---
+
+## Auditoría de calidad de chunks vs PDF original (2026-07-25) — items nuevos 62–64
+> Origen: informe en `/Volumes/research/metadatos/auditoria_chunks/2026-07-25/informe.md` (NAS,
+> fuera de git) — pendiente copiar a la raíz del repo como `2026-07-25_auditoria_chunks.md` desde
+> pciq22 para versionarlo (mismo patrón real que `2026-07-20_auditoria_externa.md`, la auditoría
+> Kimi: raíz del repo, no `docs/auditorias/`). Muestra estratificada de 16 chunks (semilla 20260725)
+> de `anoxic_biogas_biodesulfurization` (1741 chunks, 87 papers), comparada contra la página
+> renderizada del PDF original (no contra `md_clean`), protocolo a ciegas.
+
+### 62. `canonical_section()` se aplica al título del paper — ALTA prioridad
+
+`canonical_section()` compara el título completo del paper (que actúa como heading H1) contra las
+keywords de sección, así que el bloque de portada (autores + DOI, chunk_index=1) hereda
+methods/results. Ejemplos: 2025_brito ("Operational" → methods), 2014_mora ("characterization" →
+results). Medido: 31 de 87 chunks chunk_index=1 tienen section_canonical distinto de other/abstract
+— COTA SUPERIOR medida por proxy, no verificado que los 31 sean portada sin contenido real
+(2018_zheng tiene abstract completo y salió "other"). En términos de corpus son 31/1741 = 1,8%, no
+"un tercio". Pero el impacto en recuperación puede ser mayor que ese 1,8%: estos chunks contienen
+el título del paper, así que un recuperador denso los rankeará alto justo en consultas temáticas —
+un chunk que es solo autores y DOI compitiendo por el top-8. PENDIENTE MEDIRLO.
+
+Causa raíz: `constants.py:29-32` + `3_process_corpus.py:376-396`.
+
+Fix: no aplicar `canonical_section()` al heading nivel 0 / preámbulo.
+
+**DECISIÓN 2026-07-25:** se hace por re-chunk + re-embed (reindexar es aceptable), no por backfill
+de `metadata.jsonl`, para no divergir código↔datos.
+
+Prioridad: ALTA (el defecto de mayor prevalencia del corpus).
+
+### 63. Fusión de filas de tabla y caption huérfano en el fallback del splitter — ALTA prioridad
+
+`extract_tables_md` (`3_process_corpus.py:303-363`, rama sin columna "Exp.") une las filas de una
+tabla con un solo `\n`, y `_split_to_max_chars` (489-521) solo reconoce párrafos separados por
+`\n\n`. Toda la tabla es UN párrafo para el splitter; si supera `MAX_EMBED_CHARS=8000` cae a la
+rama de emergencia por palabras (507-513), que descarta los saltos de línea y reconstruye por
+palabras sueltas, DESTRUYENDO el límite entre filas. Confirmado en 2023_almenglo #34 (7993 chars):
+las filas de Soreanu 2010, Baspinar 2011, Chinalia 2012 y Montebello 2012 quedan fusionadas en una
+sola entrada, y aparece `-1000-1500` que es la concatenación de un "sin dato" con el rango de otro
+estudio. Una pregunta tipo "¿qué pH usó Baspinar 2011?" puede responderse con el pH de otro
+estudio, con cita aparentemente trazable (agrava la P1 de la auditoría Kimi). El MISMO bug explica
+el caption huérfano: #33 es el caption solo (107 chars) y #34 los datos sin caption — son los 2 de
+165 chunks de tabla sin "Table N" en los primeros caracteres. Un solo arreglo cierra los dos.
+
+Prevalencia: 1/165 tablas ≥7500 chars (0,6%), pero CRÍTICO cuando ocurre, y crece con papers de
+tablas grandes.
+
+**DECISIÓN 2026-07-25:** arreglar en ORIGEN — unir filas con `\n\n` en `extract_tables_md`, de modo
+que la ruta normal del splitter corte en frontera de fila. Se descartó el parche defensivo de hacer
+el fallback consciente de `\n` (menor radio de explosión pero deja el desajuste de diseño intacto).
+Implica re-chunk + re-embed de las 8 categorías, aceptado. Añadir además el fallback consciente de
+`\n` como cinturón y tirantes.
+
+**VERIFICAR ANTES DEL ROLLOUT:** si `golden_<cat>.jsonl` referencia `chunk_id`, un re-chunk lo
+invalida — comprobar en `/Volumes/research/metadatos/eval/` antes de lanzar.
+
+**P2 de la auditoría Kimi (2026-07-20) sobre `embed_truncated` — ancla aquí, sin item propio:**
+ahora tiene razón funcional, no de higiene, en vez de solo higiene como cuando se registró
+(`2026-07-20_auditoria_externa.md`, sección "P2 — Truncado reactivo de embeddings sin auditoría +
+divergencia vector↔texto"). 2023_almenglo #34 mide 7993 chars, topa en `MAX_EMBED_CHARS` y es
+candidato casi seguro al truncado reactivo de `embed_texts`: texto con filas ya fusionadas por este
+mismo bug Y vector representando dos tercios de ese texto ya corrupto. Es el caso peor conocido del
+corpus — refuerzo concreto para retomar el `embed_truncated: true` (+ longitud original) en
+`metadata.jsonl` que propuso Kimi.
+
+Prioridad: ALTA.
+
+### 64. Pureza del corpus: papers fuera de dominio en anoxic — MEDIA prioridad
+
+Entre los papers tocados por la muestra hay al menos 4 fuera de dominio: 1989_anderson (uranio en
+sedimentos de Saanich Inlet), 1997_gervais (migración vertical de Cryptomonas/Chromatium),
+2018_zheng (isótopos de mercurio, euxinia mesoproterozoica) y discutiblemente 1998_searcy
+(reducción de azufre en eritrocitos humanos). La muestra era dirigida, así que NO es una estimación
+de prevalencia. Pero `Mejoras_pendientes.md` da por hecho que "los falsos positivos de
+limnología/sedimentos se descartan manualmente" (ver categoría `anoxic_biogas_biodesulfurization`
+más arriba) y estos sobrevivieron. Es un problema de cribado, no de extracción, y contamina el
+corpus sobre el que se va a anotar el golden del item 37.
+
+Acción: revisar los 87 títulos de anoxic a mano (~30 min) y cuarentenar los fuera de dominio con el
+mecanismo reversible existente.
+
+Prioridad: MEDIA, antes del item 37.
+
+### Descartado con evidencia 2026-07-25 (auditoría de calidad de chunks)
+
+- **No se están perdiendo tablas en la extracción:** 176 tablas en TEI → 165 chunks de tabla;
+  caption presente en 163/165; 70 de 87 papers con ≥1 tabla (verificado que los papers sin tablas de
+  la muestra genuinamente no las tienen); los 6 valores numéricos del golden de anoxic están todos
+  presentes y todos en chunks de tabla.
+- **Cambio de extractor (Docling / PyMuPDF4LLM) para PAPERS: CERRADO, sin evidencia.** Solo 2
+  defectos de techo de GROBID en 16 chunks (tabla fragmentada en 3 `<figure>` con celdas ya vacías
+  en el XML en 2021_valdebenito; fórmula partida en `$$CH$$` + texto suelto en 2018_shihab) y 0/6
+  CRÍTICOS entre los chunks de control. Sigue vigente evaluarlos para LIBROS difíciles (item 31).
+- **4 de 16 CRÍTICOS es sesgo de muestreo intencional:** 3 de los 4 son chunks de tabla o de
+  resultados con fórmulas, sobre-representados a propósito en el diseño. Entre los controles, 0/6.
+- **Corrupción heredada del PDF fuente, fuera de nuestro alcance:** 1997_gervais
+  "Müggelsee"→"Miiggelsee" (confirmado presente ya en la capa de texto nativa del PDF, antes de
+  GROBID).
+- **Menor, sin acción:** 2014_mora tiene un 8º autor espurio ": D Cantero" (GROBID capturó el
+  bloque de afiliaciones como `<author>`); 2018_zheng pierde el nombre chino del autor y produce
+  "O cean" por un drop-cap de PNAS.
