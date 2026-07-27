@@ -646,6 +646,208 @@ def prune_orphan_tei(
     return out
 
 
+def _load_cleanup_module():
+    """Carga 9_cleanup_duplicates.py por ruta (el nombre empieza por dígito y no
+    es importable). Se reutiliza su candidate_paths() como fuente única de verdad
+    de qué artefactos componen un paper."""
+    import importlib.util  # noqa: PLC0415
+    if "cleanup_dups" in sys.modules:
+        return sys.modules["cleanup_dups"]
+    path = SCRIPTS_DIR / "9_cleanup_duplicates.py"
+    spec = importlib.util.spec_from_file_location("cleanup_dups", str(path))
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = mod          # necesario para los @dataclass del módulo
+    try:
+        spec.loader.exec_module(mod)
+    except Exception:
+        sys.modules.pop(spec.name, None)
+        raise
+    return mod
+
+
+def purge_paper_by_doi(
+    doi: str,
+    category: Optional[str] = None,
+    apply: bool = False,
+    on_output: Optional[Callable[[str], None]] = None,
+) -> Dict[str, Any]:
+    """Inventaria (apply=False) o BORRA (apply=True) todos los artefactos de un
+    paper localizado por DOI.
+
+    A diferencia de 9_cleanup_duplicates.quarantine_paper(), aquí el borrado es
+    DURO (unlink, sin cuarentena): es una decisión explícita del usuario al vetar
+    un DOI que ya había entrado en el corpus. Única excepción: papers_metadata.jsonl
+    se respalda en .bak (es barato y evita perder el resto del catálogo).
+
+    Elimina también el paper_id de embeddings/<phase>/indexed_papers.json, para que
+    una reindexación incremental vuelva a considerarlo ausente. NO toca los índices
+    FAISS: los vectores del paper siguen ahí hasta reindexar con --force (item 65).
+
+    Returns:
+        {"found", "category", "paper_id", "paths", "removed", "needs_reindex"}
+        · paths:   [{"path": str, "size": int, "exists": bool}]  (inventario)
+        · removed: rutas realmente borradas (vacío si apply=False)
+    """
+    import json  # noqa: PLC0415
+
+    out: Dict[str, Any] = {
+        "found": False, "category": "", "paper_id": "", "title": "",
+        "paths": [], "removed": [], "needs_reindex": True,
+    }
+
+    def emit(m: str) -> None:
+        log.info(m)
+        if on_output:
+            on_output(m)
+
+    key = _norm_doi_key(doi)
+    if not key:
+        emit("DOI vacío: nada que purgar.")
+        return out
+
+    # --- Localizar el paper en papers_metadata.jsonl ---
+    cats = [category] if category else list(_CANONICAL_CATEGORIES)
+    found_cat = ""
+    found_rec = None
+    for cat in cats:
+        meta = CATEGORIAS_DIR / cat / "metadata" / "papers_metadata.jsonl"
+        if not meta.exists():
+            continue
+        with meta.open(encoding="utf-8") as f:
+            for line in f:
+                s = line.strip()
+                if not s:
+                    continue
+                try:
+                    rec = json.loads(s)
+                except json.JSONDecodeError:
+                    continue
+                if _norm_doi_key(rec.get("doi")) == key:
+                    found_cat, found_rec = cat, rec
+                    break
+        if found_rec is not None:
+            break
+
+    if found_rec is None:
+        emit(f"DOI {doi}: no está en el corpus ({'/'.join(cats) if category else 'ninguna categoría'}).")
+        return out
+
+    stem = _record_stem(found_rec)
+    out.update({
+        "found": True,
+        "category": found_cat,
+        "paper_id": stem,
+        "title": (found_rec.get("title") or "")[:200],
+    })
+    if not stem:
+        emit(f"⚠️ DOI {doi} encontrado en {found_cat} pero sin identificador de fichero: "
+             "solo se puede quitar su registro de papers_metadata.jsonl.")
+
+    # --- Inventario de artefactos (reutiliza la enumeración de 9_cleanup) ---
+    project_dir = CATEGORIAS_DIR / found_cat
+    meta_path = project_dir / "metadata" / "papers_metadata.jsonl"
+    artefacts: List[Path] = []
+    if stem:
+        try:
+            cleanup = _load_cleanup_module()
+            artefacts = [p for p in cleanup.candidate_paths(project_dir, stem) if p.exists()]
+        except Exception as e:
+            # Sin candidate_paths el inventario sería parcial y el borrado dejaría
+            # restos: abortar es más seguro que purgar a medias.
+            emit(f"⚠️ No se pudo cargar 9_cleanup_duplicates.py ({e}): "
+                 "inventario incompleto, purga abortada.")
+            out["error"] = f"candidate_paths no disponible: {e}"
+            return out
+        per_paper = project_dir / "metadata" / "per_paper"
+        if per_paper.exists():
+            artefacts.extend(sorted(per_paper.glob(f"{stem}*")))
+
+    # Dedupe por identidad real de fichero (dev, ino): en volúmenes
+    # case-insensitive (macOS, SMB) 'x.pdf' y 'x.PDF' son el mismo fichero.
+    seen: set = set()
+    unique_artefacts: List[Path] = []
+    for p in artefacts:
+        try:
+            stat = p.stat()
+        except OSError:
+            continue
+        ident = (stat.st_dev, stat.st_ino)
+        if ident in seen:
+            continue
+        seen.add(ident)
+        unique_artefacts.append(p)
+        out["paths"].append({"path": str(p), "size": stat.st_size, "exists": True})
+
+    # indexed_papers.json de cada fase con embeddings
+    embed_root = project_dir / "embeddings"
+    indexed_files = [
+        ip for ip in sorted(embed_root.glob("*/indexed_papers.json"))
+    ] if embed_root.exists() else []
+
+    emit(f"{found_cat}/{stem or '(sin id)'} — DOI {doi}")
+    emit(f"  {out['title']}")
+    if unique_artefacts:
+        for item in out["paths"]:
+            emit(f"  · {item['path']}  ({item['size'] / 1024:.0f} KB)")
+    else:
+        emit("  · sin artefactos en disco (solo registro de metadata)")
+    emit(f"  · 1 registro en {meta_path}")
+
+    if not apply:
+        return out
+
+    # --- BORRADO DURO ---
+    for p in unique_artefacts:
+        try:
+            p.unlink(missing_ok=True)
+            out["removed"].append(str(p))
+            emit(f"  🗑️ borrado: {p}")
+        except OSError as e:
+            emit(f"  ⚠️ no se pudo borrar {p}: {e}")
+
+    # papers_metadata.jsonl: sí lleva backup (barato)
+    if meta_path.exists():
+        kept: List[str] = []
+        dropped = 0
+        with meta_path.open(encoding="utf-8") as f:
+            for line in f:
+                s = line.rstrip("\n")
+                if not s.strip():
+                    continue
+                try:
+                    rec = json.loads(s)
+                except json.JSONDecodeError:
+                    kept.append(s)
+                    continue
+                if _norm_doi_key(rec.get("doi")) == key:
+                    dropped += 1
+                    continue
+                kept.append(s)
+        if dropped:
+            shutil.copy(meta_path, meta_path.with_name(meta_path.name + ".bak"))
+            meta_path.write_text("\n".join(kept) + ("\n" if kept else ""), encoding="utf-8")
+            out["removed"].append(f"{meta_path} ({dropped} registro/s)")
+            emit(f"  🗑️ {dropped} registro(s) fuera de papers_metadata.jsonl (backup .bak)")
+
+    # indexed_papers.json: quitar el paper_id para que la reindexación lo ignore
+    if stem:
+        for ip in indexed_files:
+            try:
+                data = json.loads(ip.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            ids = data.get("paper_ids", [])
+            if stem in ids:
+                data["paper_ids"] = [x for x in ids if x != stem]
+                ip.write_text(json.dumps(data, indent=2), encoding="utf-8")
+                out["removed"].append(f"{ip} (paper_id)")
+                emit(f"  🗑️ paper_id fuera de {ip}")
+
+    emit(f"  ⚠️ Los vectores de este paper SIGUEN en FAISS: reindexa "
+         f"'{found_cat}' con --force para que desaparezcan de las búsquedas.")
+    return out
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # FLUJO A — Scopus
 # ═══════════════════════════════════════════════════════════════════════════

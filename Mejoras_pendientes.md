@@ -1165,6 +1165,12 @@ corpus sobre el que se va a anotar el golden del item 37.
 Acción: revisar los 87 títulos de anoxic a mano (~30 min) y cuarentenar los fuera de dominio con el
 mecanismo reversible existente.
 
+**Anotación 2026-07-27 — herramienta disponible.** Para los que se decida sacar definitivamente
+(no solo apartar), ya existe el circuito veto + purga: vetar el DOI en `15_Pendientes.py` evita que
+la ingesta semanal lo vuelva a bajar, y "🗑️ Eliminar del corpus" ejecuta
+`pipeline.purge_paper_by_doi()` (borrado DURO, sin cuarentena, con preview y confirmación
+explícita). Sigue haciendo falta el `--force` posterior por el item 65.
+
 **Anotación 2026-07-25 — quinto paper fuera de dominio.** Aparece
 `2004_shikano_volcanic_heat_flux` (lago Katanuma), encontrado INCIDENTALMENTE en la verificación P3,
 sin buscarlo. Van cinco, y los fuera de dominio siguen apareciendo sin buscarlos, así que la
@@ -1236,6 +1242,17 @@ cuarentenar sin re-indexar deja el problema exactamente donde estaba, solo que i
 catálogo.
 
 Prioridad: ALTA (bloquea que el item 64 cumpla su propósito real).
+
+**Anotación 2026-07-27 — el veto de DOIs añade un tercer camino que deja fantasmas.** La purga
+`pipeline.purge_paper_by_doi(doi, apply=True)` (nueva, ver `Mejoras_realizadas.md`) borra en duro
+todos los artefactos de un paper y lo quita de `papers_metadata.jsonl` **y de
+`embeddings/<phase>/indexed_papers.json`**. Quitarlo de `indexed_papers.json` hace que una
+reindexación incremental posterior lo trate como ausente, pero **NO retira sus vectores del FAISS
+ya construido**: el paper sigue siendo recuperable exactamente igual que el caso
+`2019_santos_clotas` descrito arriba. Por eso la página de Pendientes muestra un `st.warning` fijo
+tras cada purga remitiendo a un `--force` desde `6_Mantenimiento`. Es un parche de proceso, no el
+fix: cuando se implemente la poda del item 65, `purge_paper_by_doi()` debería poder disparar la
+purga del índice directamente en vez de dejar el aviso.
 
 ### Descartado con evidencia 2026-07-25 (auditoría de calidad de chunks)
 

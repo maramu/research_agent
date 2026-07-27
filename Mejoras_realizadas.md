@@ -2,6 +2,91 @@
 > Histórico append-only (lo más nuevo arriba). Backlog: Mejoras_pendientes.md · Estado/arquitectura: ESTADO.md
 
 ---
+### ✅ Veto persistente de DOIs (`blocked`) + purga dura del corpus (2026-07-27)
+
+Solo edición de código (máquina de casa); nada ejecutado contra `/Volumes/research/`.
+
+**El problema.** No había forma de decir "este DOI no lo quiero, nunca". Posponer (`snooze_until`,
+2026-07-12) solo lo aparta N años del email semanal; el DOI se sigue reintentando en cada lote de
+`3a_download_pdfs.py`. Y si el paper ya había entrado en el corpus, no había ningún camino desde la
+interfaz para sacarlo.
+
+**Lo implementado, en cuatro ficheros:**
+
+- **`utils/download_registry.py`** — `block(dois, reason="", rows=None)`, `unblock(dois)` y
+  `blocked_dois() -> set[str]`. Dos detalles que no son obvios:
+  - `block()` **inserta fila nueva** si el DOI no está en el registro. El caso real no es el DOI
+    fallido (ese ya está en el CSV vía `upsert()`), sino el que **se descargó bien**: `upsert()`
+    solo registra fallos, así que un paper correctamente ingestado nunca aparece en
+    `pendientes_descarga.csv` y no habría dónde marcar el veto. `rows` permite rellenar
+    title/year/category de esas filas nuevas.
+  - `"blocked"` entra en **`_RESOLVED`**. Sin eso, el `upsert()` de la ingesta semanal pisaba el
+    `reason` del veto ("fuera de alcance") con el error de descarga de turno ("403 Forbidden").
+    El `status` sí sobrevivía —`upsert()` nunca lo actualiza sobre filas existentes— pero se perdía
+    el motivo, que es la única traza de por qué se vetó.
+  - Toda comparación de DOI va en minúsculas (`_norm()`): el registro guarda el DOI **tal cual
+    llegó** del CSV de Scopus, con la capitalización que traiga.
+  - No hace falta tocar `pending_active()`: ya filtra `status == "pending"`, luego un vetado
+    desaparece del email semanal por construcción.
+
+- **`3a_download_pdfs.py`** — `DownloadStatus.SKIPPED_BLOCKED`. El set de vetados se carga **una
+  sola vez por lote** (junto a `doi_registry.txt`, mismo patrón try/except + log del nº cargado) y
+  se comprueba **antes** del check de `known_corpus_dois`. Al saltar: se añade siempre un dict a
+  `results` antes del `continue` (alineación `results ↔ subset`, el mismo "fix descuadre informe"
+  que ya llevaba `SKIPPED_CORPUS`), se incrementa `stats.skipped_blocked` —nuevo contador, visible
+  en `summary()`— y **no** se llama a `_registry_upsert`, que pisaría el `reason`. `SKIPPED_BLOCKED`
+  queda fuera de `pending_mask` (solo `NOT_DOWNLOADED | ERROR`), así que un vetado no reaparece en
+  la hoja "Pendientes_manual" ni en el HTML de pendientes.
+
+- **`pipeline.py`** — `purge_paper_by_doi(doi, category=None, apply=False, on_output=None)`, mismo
+  patrón preview/apply + `emit()` que `prune_orphan_metadata()`. Localiza el paper por DOI en
+  `papers_metadata.jsonl` (de una categoría o de todas las `CANONICAL_CATEGORIES`), y con
+  `apply=False` devuelve el inventario completo (rutas + tamaños) sin tocar nada. Con `apply=True`
+  el borrado es **DURO** (`unlink`, sin cuarentena) — decisión explícita del usuario, que la UI
+  exige confirmar. Única excepción: `papers_metadata.jsonl` sí lleva `.bak` (cuesta nada y evita
+  perder el catálogo entero por un error). Quita también el `paper_id` de
+  `embeddings/<phase>/indexed_papers.json`. **No** reindexa ni toca FAISS: eso es trabajo de pciq22
+  y del item 65.
+  - La enumeración de artefactos **no se reinventa**: se reutiliza `candidate_paths()` de
+    `9_cleanup_duplicates.py` (+ el glob `metadata/per_paper/<stem>*` que añade
+    `quarantine_paper()`), cargándolo por ruta con `importlib` porque el nombre empieza por dígito.
+
+- **`streamlit_app/pages/15_Pendientes.py`** — botón "🚫 Vetar (no volver a descargar)" con
+  `text_input` de motivo, `text_input` aparte para vetar un DOI que no esté en la tabla, y sección
+  "🚫 Vetados" con "🔄 Reactivar". Al vetar se cruza contra `download_registry._corpus_dois()`; si el
+  DOI ya está dentro, `st.warning` + "🗑️ Eliminar del corpus" → preview con el inventario →
+  checkbox "Entiendo que el borrado es irreversible" → apply. Tras el apply, `st.warning` fijo
+  recordando que los vectores siguen en FAISS hasta reindexar con `--force` (item 65), remitiendo a
+  `6_Mantenimiento`.
+
+**Dos bugs reales cazados por el smoke test de la purga** (no por revisión de código):
+
+1. **`importlib` sin registrar en `sys.modules`.** `9_cleanup_duplicates.py` usa `@dataclass`, y
+   `dataclasses._is_type()` resuelve `sys.modules.get(cls.__module__).__dict__` → `AttributeError:
+   'NoneType' object has no attribute '__dict__'` si el módulo no se registró antes de
+   `exec_module()`. `10_Duplicados.py` ya lo hacía bien (con el comentario `# <-- necesario para
+   @dataclass`); la primera versión de `_load_cleanup_module()` no. Lo grave no era el fallo sino
+   que estaba dentro de un `try/except` que solo logueaba: la purga habría seguido adelante
+   borrando **solo `per_paper/`** y dejando PDF, TEI, `md_clean`, chunks y summary huérfanos en
+   disco. Corregido de dos formas: registrar el módulo, y **abortar la purga** si la enumeración no
+   está disponible (un inventario parcial en un borrado duro es peor que no borrar).
+2. **`.pdf` y `.PDF` contados como dos ficheros.** `candidate_paths()` prueba ambas extensiones y en
+   volúmenes case-insensitive (macOS local, SMB del NAS) las dos existen y son **el mismo fichero**:
+   el inventario mostraba 7 artefactos donde había 6, con el tamaño del PDF duplicado, y el segundo
+   `unlink()` habría emitido un falso "no se pudo borrar". Deduplicado por identidad real
+   `(st_dev, st_ino)` en vez de por ruta.
+
+**Verificación (sin red, sin NAS):** `py_compile` de los 4 ficheros; smoke test de la purga sobre un
+corpus sintético en `tmp` (preview no toca nada e inventaría los 6 artefactos + el registro; apply
+borra los 6, deja `.bak`, conserva la otra línea del `.jsonl` y saca el `paper_id` de
+`indexed_papers.json`; DOI inexistente → `found=False`); 8 tests nuevos en
+`tests/test_download_registry.py` (incluido el que fija que `upsert()` no pisa el veto, que es el
+que justifica el cambio en `_RESOLVED`). **300 passed, 2 skipped** en la suite completa.
+
+**Pendiente de ejecutar en pciq22:** nada obligatorio — el veto no requiere migración (el CSV ya
+tiene la columna `status`). La purga solo se usa bajo demanda desde la interfaz.
+
+---
 ### ✅ Rollout del commit 6093f35 (2026-07-25)
 
 Ejecución en pciq22 del rollout atómico de los items 62, 63, 55a, 55b, `embed_truncated` y 33.

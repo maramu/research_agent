@@ -155,7 +155,11 @@ except ImportError:
 
 try:
     sys.path.insert(0, str(Path(__file__).parent))
-    from utils.download_registry import upsert as _registry_upsert, mark_downloaded as _registry_mark_downloaded
+    from utils.download_registry import (
+        upsert as _registry_upsert,
+        mark_downloaded as _registry_mark_downloaded,
+        blocked_dois as _registry_blocked_dois,
+    )
     _HAS_REGISTRY = True
 except Exception:
     _HAS_REGISTRY = False
@@ -270,6 +274,7 @@ class DownloadStatus(str, Enum):
     NO_DOI        = "sin DOI"
     ERROR         = "error"
     SKIPPED_CORPUS = "ya en corpus"
+    SKIPPED_BLOCKED = "vetado"
     DRY_RUN       = "dry-run"
 
 
@@ -345,6 +350,7 @@ class Stats:
     failed: int = 0
     no_doi: int = 0
     skipped_registry: int = 0
+    skipped_blocked: int = 0
     by_method: Dict[str, int] = field(default_factory=dict)
 
     def record(self, res: DownloadResult) -> None:
@@ -368,6 +374,7 @@ class Stats:
             f"Desde caché:    {self.from_cache}",
             f"Sin DOI:        {self.no_doi}",
             f"Ya en corpus:   {self.skipped_registry}",
+            f"Vetados:        {self.skipped_blocked}",
             f"Fallidos:       {self.failed}",
         ]
         if self.by_method:
@@ -1514,6 +1521,15 @@ class DownloadManager:
             except Exception as _re:
                 log.warning("No se pudo leer doi_registry.txt: %s", _re)
 
+        # DOIs vetados (status='blocked' en el registro) — también una sola vez
+        blocked: set = set()
+        if _HAS_REGISTRY:
+            try:
+                blocked = _registry_blocked_dois()
+                log.info("Registro: %d DOIs vetados cargados", len(blocked))
+            except Exception as _be:
+                log.warning("No se pudieron leer los DOIs vetados: %s", _be)
+
         for idx, (_, row) in enumerate(subset.iterrows(), start=1):
             if self._shutdown:
                 log.warning("Proceso interrumpido en artículo %d/%d.", idx - 1, total)
@@ -1535,6 +1551,20 @@ class DownloadManager:
                 }
                 results.append(res)
                 self.stats.record(res)
+                continue
+
+            if doi and doi.strip().lower() in blocked:
+                log.info("[%d/%d] DOI vetado (blocked) — saltando: %s", idx, total, doi)
+                # Mantener alineación results↔subset (fix descuadre informe).
+                # NO se llama a _registry_upsert: pisaría el `reason` del veto.
+                results.append({
+                    "doi": doi, "title": title, "year": year, "authors": authors,
+                    "status": DownloadStatus.SKIPPED_BLOCKED,
+                    "method": "blocked",
+                    "pdf_url": "", "saved_file": "",
+                    "error": "", "source_pdf": "",
+                })
+                self.stats.skipped_blocked += 1
                 continue
 
             if doi and doi.lower() in known_corpus_dois:

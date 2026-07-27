@@ -172,6 +172,84 @@ class TestReconcileWithCorpus:
         assert pospuesto["status"] == "pending"
 
 
+class TestBlockUnblock:
+    """Veto persistente: status='blocked'. Un DOI vetado no debe volver a
+    intentarse (3a_download_pdfs.py) ni salir en el email semanal."""
+
+    def test_block_actualiza_fila_existente(self):
+        dr.save(pd.DataFrame([_row(doi="10.x/test")]))
+
+        assert dr.block(["10.x/test"], reason="fuera de alcance") == 1
+
+        row = dr.load().iloc[0]
+        assert row["status"] == "blocked"
+        assert row["reason"] == "fuera de alcance"
+        assert row["snooze_until"] == ""
+
+    def test_block_inserta_doi_ausente_del_registro(self):
+        """Un DOI que se descargó bien nunca pasa por upsert(): al vetarlo hay
+        que crear la fila."""
+        dr.save(pd.DataFrame(columns=dr._COLS))
+
+        assert dr.block(
+            ["10.x/nuevo"], reason="retractado",
+            rows=[{"doi": "10.x/nuevo", "title": "T", "year": "2026", "category": "cat"}],
+        ) == 1
+
+        row = dr.load().iloc[0]
+        assert row["status"] == "blocked"
+        assert row["title"] == "T"
+        assert row["category"] == "cat"
+
+    def test_block_es_case_insensitive(self):
+        dr.save(pd.DataFrame([_row(doi="10.X/Test")]))
+
+        assert dr.block(["10.x/test"]) == 1
+        assert len(dr.load()) == 1          # no duplica la fila
+        assert dr.load().iloc[0]["status"] == "blocked"
+
+    def test_blocked_no_sale_en_pending_active(self):
+        dr.save(pd.DataFrame([_row(doi="10.x/test")]))
+        dr.block(["10.x/test"])
+
+        assert dr.pending_active(dr.load()).empty
+
+    def test_upsert_no_pisa_el_veto(self):
+        """'blocked' está en _RESOLVED: el upsert semanal no debe machacar
+        el motivo del veto con el error de descarga de turno."""
+        dr.save(pd.DataFrame([_row(doi="10.x/test")]))
+        dr.block(["10.x/test"], reason="fuera de alcance")
+
+        dr.upsert([{"doi": "10.x/test", "reason": "403 Forbidden"}])
+
+        row = dr.load().iloc[0]
+        assert row["status"] == "blocked"
+        assert row["reason"] == "fuera de alcance"
+
+    def test_blocked_dois_normaliza_a_minusculas(self):
+        dr.save(pd.DataFrame([
+            _row(doi="10.X/Uno", status="blocked"),
+            _row(doi="10.x/dos", status="pending"),
+        ]))
+
+        assert dr.blocked_dois() == {"10.x/uno"}
+
+    def test_unblock_devuelve_a_pending(self):
+        dr.save(pd.DataFrame([_row(doi="10.x/test", status="blocked")]))
+
+        assert dr.unblock(["10.X/TEST"]) == 1
+
+        row = dr.load().iloc[0]
+        assert row["status"] == "pending"
+        assert dr.blocked_dois() == set()
+
+    def test_unblock_ignora_filas_no_vetadas(self):
+        dr.save(pd.DataFrame([_row(doi="10.x/test", status="downloaded")]))
+
+        assert dr.unblock(["10.x/test"]) == 0
+        assert dr.load().iloc[0]["status"] == "downloaded"
+
+
 class TestUpsertSnoozeSafe:
     def test_upsert_does_not_clear_snooze_until(self):
         future = (date.today() + timedelta(days=730)).isoformat()

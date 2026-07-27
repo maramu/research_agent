@@ -29,8 +29,16 @@ _COLS = [
     "snooze_until",
 ]
 
-# Estados que se consideran resueltos (no se sobreescriben al hacer upsert)
-_RESOLVED = {"downloaded", "manual", "duplicate", "wrong_document"}
+# Estados que se consideran resueltos (no se sobreescriben al hacer upsert).
+# 'blocked' entra aquí: el veto es una decisión manual y el upsert semanal
+# no debe pisar su `reason` con el error de descarga de turno.
+_RESOLVED = {"downloaded", "manual", "duplicate", "wrong_document", "blocked"}
+
+
+def _norm(doi) -> str:
+    """DOI a clave comparable. El registro guarda el DOI tal cual llegó, así
+    que toda comparación pasa por aquí."""
+    return str(doi or "").strip().lower()
 
 
 def load() -> pd.DataFrame:
@@ -213,3 +221,88 @@ def unsnooze(dois: List[str]) -> int:
         df.loc[mask, "snooze_until"] = ""
         save(df)
     return affected
+
+
+def block(dois: List[str], reason: str = "", rows: Optional[List[Dict]] = None) -> int:
+    """Veta `dois`: status='blocked' → 3a_download_pdfs.py no los volverá a
+    intentar y pending_active() los deja fuera del email semanal.
+
+    Inserta fila nueva si el DOI no está en el registro: el caso real es un DOI
+    que se descargó bien y por tanto nunca pasó por upsert() (que solo registra
+    fallos). `rows` (list de dicts con doi/title/year/category) permite rellenar
+    los metadatos de esas filas nuevas.
+
+    Devuelve el nº de DOIs vetados (actualizados + insertados).
+    """
+    if not dois:
+        return 0
+    df = load()
+    today = date.today().isoformat()
+    reason = str(reason or "")[:200]
+    meta = {_norm(r.get("doi")): r for r in (rows or []) if _norm(r.get("doi"))}
+
+    doi_norm = df["doi"].astype(str).str.strip().str.lower()
+    affected = 0
+    new_entries: List[Dict] = []
+
+    for doi in dois:
+        key = _norm(doi)
+        if not key:
+            continue
+        mask = doi_norm == key
+        if mask.any():
+            df.loc[mask, "status"] = "blocked"
+            df.loc[mask, "snooze_until"] = ""
+            df.loc[mask, "reason"] = reason
+            df.loc[mask, "last_checked"] = today
+        else:
+            src = meta.get(key, {})
+            raw_doi = str(src.get("doi") or doi).strip()
+            new_entries.append({
+                "doi":          raw_doi,
+                "title":        str(src.get("title", ""))[:300],
+                "year":         str(src.get("year", "")),
+                "category":     str(src.get("category", "")),
+                "landing_url":  str(src.get("landing_url", f"https://doi.org/{raw_doi}")),
+                "status":       "blocked",
+                "reason":       reason,
+                "last_checked": today,
+                "notes":        "vetado manualmente (no estaba en el registro)",
+                "snooze_until": "",
+            })
+        affected += 1
+
+    if new_entries:
+        df = pd.concat([df, pd.DataFrame(new_entries)], ignore_index=True)
+    if affected:
+        save(df)
+    return affected
+
+
+def unblock(dois: List[str]) -> int:
+    """Levanta el veto: 'blocked' → 'pending'. Devuelve filas afectadas."""
+    if not dois:
+        return 0
+    df = load()
+    keys = {_norm(d) for d in dois if _norm(d)}
+    if not keys:
+        return 0
+    doi_norm = df["doi"].astype(str).str.strip().str.lower()
+    mask = doi_norm.isin(keys) & (df["status"] == "blocked")
+    affected = int(mask.sum())
+    if affected:
+        df.loc[mask, "status"] = "pending"
+        df.loc[mask, "last_checked"] = date.today().isoformat()
+        df.loc[mask, "notes"] = "veto levantado: reactivado para descarga"
+        save(df)
+    return affected
+
+
+def blocked_dois() -> Set[str]:
+    """DOIs vetados, normalizados (strip+lower) para comparar contra el CSV
+    de entrada de 3a_download_pdfs.py."""
+    if not REGISTRY_PATH.exists():
+        return set()
+    df = load()
+    blocked = df[df["status"] == "blocked"]["doi"].astype(str)
+    return {_norm(d) for d in blocked if _norm(d)}
