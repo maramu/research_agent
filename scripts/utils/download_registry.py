@@ -232,6 +232,11 @@ def block(dois: List[str], reason: str = "", rows: Optional[List[Dict]] = None) 
     fallos). `rows` (list de dicts con doi/title/year/category) permite rellenar
     los metadatos de esas filas nuevas.
 
+    NO toca `snooze_until`: status='blocked' ya saca la fila de pending_active()
+    por sí solo, y limpiarlo destruiría un aplazamiento previo que unblock() no
+    sabe restaurar (vetar y reactivar un DOI pospuesto lo devolvería al email
+    semanal de inmediato).
+
     Devuelve el nº de DOIs vetados (actualizados + insertados).
     """
     if not dois:
@@ -252,7 +257,6 @@ def block(dois: List[str], reason: str = "", rows: Optional[List[Dict]] = None) 
         mask = doi_norm == key
         if mask.any():
             df.loc[mask, "status"] = "blocked"
-            df.loc[mask, "snooze_until"] = ""
             df.loc[mask, "reason"] = reason
             df.loc[mask, "last_checked"] = today
         else:

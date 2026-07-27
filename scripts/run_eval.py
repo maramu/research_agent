@@ -15,16 +15,27 @@ Uso:
     python run_eval.py --category anoxic_biogas_biodesulfurization --k 10 --hybrid
     python run_eval.py --category anoxic_biogas_biodesulfurization --phase all
 
+    # Golden alternativo + etiqueta para no pisar/confundir corridas (item 33 fase 2):
+    python run_eval.py --category anoxic_biogas_biodesulfurization \\
+        --golden golden_anoxic_biogas_biodesulfurization_EN.jsonl --tag en_denso
+    python run_eval.py --category anoxic_biogas_biodesulfurization \\
+        --golden golden_anoxic_biogas_biodesulfurization_EN.jsonl --tag en_hibrido --hybrid
+
 Salida:
     - Tabla por pregunta en stdout (Hit@k, MRR, posición del primer hit)
     - Resumen agregado (Hit@k promedio, MRR promedio)
-    - CSV: metadatos/eval/results_<categoria>_<timestamp>.csv
+    - CSV: metadatos/eval/results_<categoria>[_<tag>]_<timestamp>.csv
+
+La cabecera imprime la RUTA del golden y el --tag usados, para que el .txt de la
+corrida diga por sí solo qué se evaluó (cuatro corridas del mismo minuto eran
+indistinguibles antes de --tag).
 """
 
 import argparse
 import csv
 import json
 import os
+import re
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -51,8 +62,22 @@ DEFAULT_BASE = "/Volumes/research/categorias"
 OLLAMA_HOST  = os.getenv("OLLAMA_HOST", "http://127.0.0.1:11435")
 
 
-def load_golden(category: str, eval_dir: Path) -> list[dict]:
-    path = eval_dir / f"golden_{category}.jsonl"
+def golden_path(category: str, eval_dir: Path, golden_file: str = "") -> Path:
+    """Ruta del golden a evaluar.
+
+    Sin `golden_file` → el nombre por defecto `golden_<categoria>.jsonl`.
+    Con `golden_file` → esa ruta: absoluta tal cual, relativa contra `eval_dir`.
+    Permite comparar goldens alternativos (traducido, reanotado, subconjunto)
+    contra el mismo índice sin renombrar ficheros.
+    """
+    if golden_file:
+        p = Path(golden_file)
+        return p if p.is_absolute() else eval_dir / p
+    return eval_dir / f"golden_{category}.jsonl"
+
+
+def load_golden(category: str, eval_dir: Path, golden_file: str = "") -> list[dict]:
+    path = golden_path(category, eval_dir, golden_file)
     if not path.exists():
         raise SystemExit(f"No existe golden set: {path}")
     rows = []
@@ -138,12 +163,19 @@ def main():
     ap.add_argument("--k", type=int, default=8, help="Top-k a recuperar (defecto: 8, igual que UI)")
     ap.add_argument("--hybrid", action="store_true", help="Usar recuperación híbrida (denso + BM25)")
     ap.add_argument("--eval-dir", default="", help="Directorio de golden sets (defecto: <base>/../metadatos/eval)")
+    ap.add_argument("--golden", default="",
+                    help="Golden alternativo: ruta absoluta, o relativa a --eval-dir "
+                         "(defecto: golden_<categoria>.jsonl)")
+    ap.add_argument("--tag", default="",
+                    help="Etiqueta para el CSV de salida: results_<cat>[_<tag>]_<ts>.csv. "
+                         "Distingue corridas del mismo minuto (denso vs híbrido, ES vs EN)")
     args = ap.parse_args()
 
     base = Path(args.base)
     eval_dir = Path(args.eval_dir) if args.eval_dir else base.parent / "metadatos" / "eval"
 
-    golden = load_golden(args.category, eval_dir)
+    gpath = golden_path(args.category, eval_dir, args.golden)
+    golden = load_golden(args.category, eval_dir, args.golden)
     index, meta, cfg = load_index_and_meta(args.category, args.phase, base)
     embed_model = cfg.get("model", OLLAMA_MODEL_EMBED)
 
@@ -158,6 +190,8 @@ def main():
 
     print(f"Categoría  : {args.category}")
     print(f"Fase       : {args.phase}")
+    print(f"Golden     : {gpath}")
+    print(f"Tag        : {args.tag or '—'}")
     print(f"Preguntas  : {len(golden)}")
     print(f"k          : {args.k}")
     print(f"Modo       : {'híbrido' if (args.hybrid and bm25) else 'denso'}")
@@ -202,7 +236,8 @@ def main():
     # CSV de resultados
     eval_dir.mkdir(parents=True, exist_ok=True)
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    out_path = eval_dir / f"results_{args.category}_{ts}.csv"
+    tag = re.sub(r"[^A-Za-z0-9._-]+", "_", args.tag).strip("_")
+    out_path = eval_dir / f"results_{args.category}{('_' + tag) if tag else ''}_{ts}.csv"
     fieldnames = ["question", "relevant_paper_ids", "retrieved_paper_ids", "hit", "rr", "first_hit_pos"]
     with out_path.open("w", newline="", encoding="utf-8-sig") as f:
         w = csv.DictWriter(f, fieldnames=fieldnames)

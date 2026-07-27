@@ -54,7 +54,7 @@ from utils.citations import (
     attachment_citation_key,
 )
 from utils.retrieval import (dense_rank, bm25_rank, rrf_fuse,
-                             passes_filters, pool_size)
+                             passes_filters, pool_size, looks_spanish)
 from utils.attachments import (
     extract_text, chunk_text, embed_texts, rank_attachment,
     fuse_results, content_hash, make_attachment_metas,
@@ -707,7 +707,11 @@ with st.sidebar:
     use_hybrid = st.toggle(
         "Recuperación híbrida (denso + BM25)", value=False,
         help="Fusiona FAISS (semántico) con BM25 (léxico exacto: siglas, cepas) "
-             "vía RRF. OFF = solo denso.",
+             "vía RRF. OFF = solo denso. **BM25 no cruza idiomas**: el corpus "
+             "está en inglés, así que con la pregunta en español solo casa "
+             "cognados poco discriminantes y el RRF funde ese ruido a peso igual "
+             "con el denso. Con preguntas en español, déjalo OFF (el denso, "
+             "bge-m3, sí es multilingüe).",
     )
 
     st.divider()
@@ -846,6 +850,16 @@ query = st.text_area(
     height=80,
     placeholder="Ej: ¿Qué pretratamientos mejoran el rendimiento de biometanización de PLA?",
 )
+
+if use_hybrid and bm25 is not None and looks_spanish(query):
+    st.warning(
+        "🌐 **Consulta en español con recuperación híbrida activada.** BM25 es "
+        "léxico y el corpus está en inglés: solo casará cognados poco "
+        "discriminantes (*biogas*, *filter*, *pH*), y el RRF funde ese brazo a "
+        "peso igual con el denso, así que **puede empeorar el orden**. "
+        "Recomendado: apagar el híbrido o preguntar en inglés. El denso (bge-m3) "
+        "es multilingüe y no tiene este problema."
+    )
 
 # Estimación de coste antes de buscar (basada en k y output esperado)
 if do_synth and synth_model:

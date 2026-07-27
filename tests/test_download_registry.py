@@ -184,7 +184,23 @@ class TestBlockUnblock:
         row = dr.load().iloc[0]
         assert row["status"] == "blocked"
         assert row["reason"] == "fuera de alcance"
-        assert row["snooze_until"] == ""
+
+    def test_block_preserva_el_snooze_previo(self):
+        """Vetar y reactivar un DOI pospuesto debe devolverlo a su aplazamiento,
+        no al email semanal: 'blocked' ya lo excluye de pending_active() sin
+        necesidad de limpiar snooze_until, y unblock() no sabría restaurarlo."""
+        future = (date.today() + timedelta(days=730)).isoformat()
+        dr.save(pd.DataFrame([_row(doi="10.x/test", snooze_until=future)]))
+
+        dr.block(["10.x/test"], reason="fuera de alcance")
+        assert dr.load().iloc[0]["snooze_until"] == future
+
+        dr.unblock(["10.x/test"])
+
+        row = dr.load().iloc[0]
+        assert row["status"] == "pending"
+        assert row["snooze_until"] == future
+        assert dr.pending_active(dr.load()).empty   # sigue pospuesto, no reaparece
 
     def test_block_inserta_doi_ausente_del_registro(self):
         """Un DOI que se descargó bien nunca pasa por upsert(): al vetarlo hay

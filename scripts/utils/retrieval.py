@@ -63,6 +63,46 @@ def tokenize(text: str):
     return out
 
 
+_ES_STOPWORDS = {
+    "de", "la", "el", "en", "para", "con", "que", "del", "los", "las",
+    "una", "un", "es", "por", "se", "cual", "como",
+}
+_ES_CHARS = set("ñáéíóúü")
+
+
+def looks_spanish(text: str) -> bool:
+    """Heurístico barato: ¿la consulta está en español? True si ≥2 indicios.
+
+    Vive aquí, junto a ``tokenize``, porque es una propiedad del comportamiento
+    de BM25, no de la UI: **BM25 es puramente léxico y el corpus está en inglés**.
+    Una consulta en español solo casa los cognados —`biogas`, `filter`, `pH`,
+    `bioreactor`—, que por ser frecuentes en el corpus tienen IDF baja y aportan
+    poca señal, mientras que los términos realmente discriminantes de la pregunta
+    (`azufre`, `eliminación`, `anóxico`, `lavador`) no aparecen en ningún
+    documento y su brazo se queda sin recall. El resultado no es "BM25 no ayuda":
+    es que ``rrf_fuse`` funde ese ranking casi aleatorio **a peso igual** con el
+    denso, así que puede empeorar activamente el orden que daba el denso solo.
+    El denso (bge-m3) sí es multilingüe y no tiene este problema.
+
+    Aciertos: cada stopword DISTINTA encontrada (sobre los tokens ya plegados de
+    ``tokenize``, así que funciona con o sin tildes) suma 1, y la presencia de
+    ñ/tildes en el texto crudo suma 1 más. Con ≥2 → True. Se cuentan stopwords
+    distintas y no repeticiones para que un "de … de … de" no dispare solo.
+    Exigir tildes Y stopwords sería demasiado estricto: mucha gente escribe la
+    consulta sin acentos, y ese caso hay que cogerlo igual. Ninguna stopword de
+    la lista es palabra inglesa, así que el riesgo en el otro sentido es bajo.
+
+    Es deliberadamente tosco: solo alimenta un aviso en la interfaz, nunca
+    bloquea ni cambia el retrieval.
+    """
+    if not text:
+        return False
+    hits = len(_ES_STOPWORDS & set(tokenize(text)))
+    if any(c in _ES_CHARS for c in text.lower()):
+        hits += 1
+    return hits >= 2
+
+
 def build_bm25(texts):
     """Construye un BM25Okapi desde una lista de textos (en orden). None si falla."""
     try:

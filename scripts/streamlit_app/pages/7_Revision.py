@@ -24,7 +24,7 @@ from utils.citations import (
     load_papers_metadata, build_cite_map, apply_citations, CITE_PROMPT_RULES,
 )
 from utils.retrieval import (dense_rank, bm25_rank, rrf_fuse,
-                             passes_filters, pool_size)
+                             passes_filters, pool_size, looks_spanish)
 from app_utils import (
     ANTHROPIC_MODELS, OPENAI_MODELS, OLLAMA_MODELS_LLM, OLLAMA_MODEL_EMBED,
     OLLAMA_HOST, ANTHROPIC_API_KEY, OPENAI_API_KEY,
@@ -201,7 +201,11 @@ with st.sidebar:
     use_hybrid = st.toggle(
         "Recuperación híbrida (denso + BM25)", value=False,
         help="Fusiona FAISS (semántico) con BM25 (léxico exacto: siglas, cepas) "
-             "vía RRF. OFF = solo denso.",
+             "vía RRF. OFF = solo denso. **BM25 no cruza idiomas**: el corpus "
+             "está en inglés, así que con el foco en español solo casa cognados "
+             "poco discriminantes y el RRF funde ese ruido a peso igual con el "
+             "denso. Con foco en español, déjalo OFF (el denso, bge-m3, sí es "
+             "multilingüe).",
     )
 
     st.divider()
@@ -247,6 +251,17 @@ focus = st.text_input(
         "condiciones anóxicas"
     ),
 )
+
+# El bm25 se carga más abajo (tras pulsar el botón), así que aquí basta el toggle.
+if use_hybrid and looks_spanish(focus):
+    st.warning(
+        "🌐 **Foco en español con recuperación híbrida activada.** BM25 es léxico "
+        "y el corpus está en inglés: solo casará cognados poco discriminantes "
+        "(*biogas*, *filter*, *pH*), y el RRF funde ese brazo a peso igual con el "
+        "denso, así que **puede empeorar el orden**. Recomendado: apagar el "
+        "híbrido o escribir el foco en inglés. El denso (bge-m3) es multilingüe y "
+        "no tiene este problema."
+    )
 
 # Estimación coste
 if synth_model and focus:

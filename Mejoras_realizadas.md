@@ -2,6 +2,63 @@
 > Histórico append-only (lo más nuevo arriba). Backlog: Mejoras_pendientes.md · Estado/arquitectura: ESTADO.md
 
 ---
+### ✅ Golden alternativo en `run_eval.py` + aviso de BM25 con consultas en español (2026-07-27)
+
+Solo edición de código; nada ejecutado contra `/Volumes/research/`. Esto **no verifica** la
+hipótesis del desajuste de idioma (item 33, fase 2): construye las herramientas para verificarla y
+mitiga el daño mientras tanto.
+
+**`run_eval.py` — evaluar un golden alternativo sin renombrar nada.**
+`load_golden(category, eval_dir, golden_file="")` delega en un `golden_path()` nuevo: sin
+`golden_file` mantiene `golden_<categoria>.jsonl`; con él, ruta absoluta tal cual o relativa
+resuelta contra `eval_dir`. Flags `--golden` y `--tag`; el tag se intercala en el CSV
+(`results_<cat>[_<tag>]_<ts>.csv`) y se sanea a `[A-Za-z0-9._-]` porque va a un nombre de fichero.
+El motivo del `--tag` es concreto: la prueba del item 33 son **cuatro corridas** (ES/EN × denso/
+híbrido) que con un timestamp a segundos salían del mismo minuto e **indistinguibles**. La cabecera
+imprime ahora la **ruta del golden** y el tag, así que el `.txt` de la corrida documenta por sí
+solo qué se evaluó — antes había que reconstruirlo de memoria.
+
+**`utils/retrieval.py::looks_spanish(text)` — heurístico de idioma sin dependencias.** Cuenta
+stopwords españolas **distintas** sobre los tokens ya plegados de `tokenize()` (funciona con y sin
+tildes) y suma 1 más si hay ñ/tildes en el crudo; ≥2 → True. Vive junto a `tokenize` y no en la UI
+**porque es una propiedad del comportamiento de BM25, no de la interfaz**: BM25 es léxico y el
+corpus está en inglés, así que una consulta en español solo casa cognados (`biogas`, `filter`,
+`pH`) que por frecuentes tienen IDF baja, mientras los términos discriminantes (`azufre`,
+`eliminación`, `lavador`) no aparecen en ningún documento. Lo importante no es que BM25 "no ayude":
+es que `rrf_fuse` funde ese ranking casi aleatorio **a peso igual** con el denso, así que puede
+**empeorar** el orden que daba el denso solo.
+
+**Aviso en las dos páginas (`2_RAG.py` y `7_Revision.py`).** El `help` del toggle explica que BM25
+no cruza idiomas y que con preguntas en español conviene dejarlo OFF (el denso, bge-m3, sí es
+multilingüe). Y donde ya se conoce la consulta —`query` en 2_RAG, `focus` en 7_Revision— un
+`st.warning` si el híbrido está ON y `looks_spanish()` da True. No bloquea nada. En 7_Revision el
+aviso solo mira el toggle: el `bm25` se carga más abajo, después del botón, así que no está
+disponible al pintar el foco (en 2_RAG sí, y ahí se comprueba también `bm25 is not None`).
+
+**Fix — `block()` destruía el snooze previo.** La versión de esta mañana hacía
+`df.loc[mask, "snooze_until"] = ""` al vetar. Como `unblock()` no lo restaura, la secuencia
+**posponer → vetar → reactivar** devolvía el DOI al email semanal de inmediato, que es exactamente
+lo contrario de lo que el usuario pidió en los dos pasos anteriores. Limpiarlo nunca fue necesario:
+`status='blocked'` ya excluye la fila de `pending_active()` por sí solo. Test nuevo con el
+round-trip completo, incluido el `pending_active()` vacío al final.
+
+**Decisión de criterio en `looks_spanish`.** "≥2 aciertos" admitía dos lecturas: contar cada
+criterio una vez (exigiría tildes **y** stopwords) o contar stopwords individuales. La primera
+falla con "eliminacion de H2S en biogas con bacterias NR-SOB" —español sin tildes, caso muy común
+al teclear rápido—, así que se contaron stopwords distintas. Ninguna de las 17 stopwords de la
+lista es palabra inglesa, luego el riesgo de falso positivo sobre una consulta en inglés es bajo.
+Comprobado sobre 9 casos (4 español con y sin tildes, 3 inglés técnico del dominio, 1 palabra
+suelta, 1 vacío): 9/9 como se esperaba.
+
+**Verificación:** `py_compile` de los 5 ficheros; resolución de `golden_path()` en sus 4 formas
+(defecto / relativa / relativa con subdirectorio / absoluta) y saneado del tag; suite completa
+**301 passed, 2 skipped**.
+
+**Pendiente en pciq22:** redactar `golden_<cat>_EN.jsonl` con las 2-3 preguntas traducidas y correr
+las cuatro combinaciones. Hasta entonces el item 33 fase 2 sigue bloqueado y el aviso de la UI es
+una recomendación por prudencia, no una conclusión medida.
+
+---
 ### ✅ Veto persistente de DOIs (`blocked`) + purga dura del corpus (2026-07-27)
 
 Solo edición de código (máquina de casa); nada ejecutado contra `/Volumes/research/`.

@@ -314,6 +314,31 @@ versiones** (4 combinaciones). Si el híbrido en inglés sube y el denso apenas 
 queda confirmada y hay que rehacer el golden en inglés antes de tocar la fusión. Ver también el
 item 37.
 
+> **✅ HERRAMIENTAS LISTAS 2026-07-27 (edición en casa; la prueba sigue pendiente de correr en
+> pciq22).** Las 4 combinaciones ya no requieren renombrar ficheros ni adivinar qué CSV es cuál:
+>
+> ```bash
+> C=biogas_upgrading_biomethanation
+> python run_eval.py --category $C --tag es_denso
+> python run_eval.py --category $C --tag es_hibrido  --hybrid
+> python run_eval.py --category $C --golden golden_${C}_EN.jsonl --tag en_denso
+> python run_eval.py --category $C --golden golden_${C}_EN.jsonl --tag en_hibrido --hybrid
+> ```
+>
+> `--golden` acepta ruta absoluta o relativa a `--eval-dir`; `--tag` se intercala en el nombre del
+> CSV (`results_<cat>_<tag>_<ts>.csv`) — **antes las cuatro corridas del mismo minuto eran
+> indistinguibles**. La cabecera imprime ahora la RUTA del golden y el tag, así que el `.txt` de la
+> corrida documenta por sí solo qué se evaluó. Falta únicamente **redactar el
+> `golden_<cat>_EN.jsonl`** con las 2-3 preguntas traducidas (mismos `relevant_paper_ids`: la
+> traducción no cambia qué papers son relevantes, y eso es justo lo que hace la comparación
+> válida).
+>
+> **Mitigación provisional en la UI (mismo commit):** `utils/retrieval.py::looks_spanish()` +
+> aviso en `2_RAG.py` y `7_Revision.py` cuando el híbrido está ON y la consulta parece española.
+> No prejuzga el resultado de la prueba: si la hipótesis se confirma, el aviso pasa a ser la
+> recomendación permanente; si se refuta, se quita. Mientras tanto, evita que alguien saque
+> conclusiones de un híbrido que está funcionando con un brazo ciego.
+
 Pendiente (fase 2, BLOQUEADA por lo anterior): reranking opcional sobre el top-N fusionado con
 `bge-reranker` (vía Ollama) o un cross-encoder pequeño, antes de pasar al LLM de síntesis.
 - Tocar `8_query_rag.py` y la capa de retrieval de `2_RAG.py` / `7_Revision.py`.
@@ -423,6 +448,12 @@ para que un fallo a mitad no obligue a reprocesar todo ni deje entradas a medias
 > resolver esto** — sería multiplicar por 6 el coste de anotación sobre una base metodológicamente
 > rota. Prueba barata previa (detallada en el item 33): traducir 2-3 preguntas al inglés y correr
 > denso e híbrido con ambas versiones.
+>
+> **2026-07-27 — el harness ya soporta el golden alternativo.** `run_eval.py --golden <ruta>`
+> (absoluta o relativa a `--eval-dir`) y `--tag <etiqueta>` (se intercala en el CSV de salida).
+> Evaluar una versión traducida ya no obliga a sobrescribir `golden_<cat>.jsonl` ni a distinguir
+> corridas por el timestamp. Sigue pendiente **redactar el golden en inglés y correrlo en pciq22**;
+> hasta entonces la ampliación a ~25 preguntas continúa bloqueada, que era el punto de esta nota.
 
 **Siguiente paso natural tras 32/33/34 (2026-06-11):** es la única forma de medir si el
 chunking estructural (32), el híbrido denso+BM25 (33) y los filtros sección/año (34)
