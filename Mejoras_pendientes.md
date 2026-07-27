@@ -42,6 +42,19 @@
 > 4. **Item 64** — pureza del corpus, después del 65.
 > 5. Item 55b(d) (invariante de coherencia externa con `chunks/`) y 55c, luego 54, 57 y el resto.
 
+> **ACTUALIZACIÓN 2026-07-27 (tras el test de idioma).** El orden de arriba cambia en tres puntos:
+> - **El item 37 pasa a ser el ÚNICO cuello de botella real.** Ya no depende del item 64, y el
+>   item 33 fase 2 depende ahora de él por un motivo nuevo (ver abajo).
+> - **Item 33 fase 2 — sigue BLOQUEADA, con motivo distinto.** La hipótesis del idioma quedó
+>   *apoyada* por el test 2×2 (denso indiferente al idioma; híbrido peor solo en español), así que
+>   ese ya no es el bloqueo. El bloqueo ahora es de **instrumento**: la n efectiva del test fue ~1
+>   pregunta útil, insuficiente para calibrar RRF o un reranker. Detalle en el item 33.
+> - **Item 64 baja a BAJA y deja de bloquear nada:** su premisa era falsa (los papers de
+>   limnología/sedimentos están a propósito, confirmado por Martín). Ver la corrección en el item.
+>
+> Orden vivo: **1) item 37** · 2) item 65 · 3) item 33 fase 2 (tras el 37) · 4) 55b(d), 55c, 54,
+> 57 y el resto · 5) item 64 cuando apetezca.
+
 ## Hallazgos pendientes (revisión 2026-06-12)
 - ~~`detect_affected_categories` compara stems por igualdad exacta sin `_norm` → riesgo de reproceso
   por puntuación/guiones.~~ ✅ RESUELTO 2026-06-13.
@@ -68,7 +81,7 @@ Revisar y afinar:
 - `config/scopus_queries.yml` — para búsquedas Scopus directas (flujo scopus)
 
 Categorías con pocas queries actuales (ampliar si hace falta):
-- `anoxic_biogas_biodesulfurization` — solo 1 query (12 resultados). **2026-06-15:** anoxic ya está en el cron semanal con esta query. Decisión: no afinar — volumen bajo, falsos positivos de limnología/sedimentos se descartan manualmente.
+- `anoxic_biogas_biodesulfurization` — solo 1 query (12 resultados). **2026-06-15:** anoxic ya está en el cron semanal con esta query. Decisión: no afinar — volumen bajo, lo que entra se revisa manualmente. ~~falsos positivos de limnología/sedimentos se descartan manualmente~~ **corregido 2026-07-27: los papers de limnología/sedimentos NO son falsos positivos — documentan condiciones anóxicas y poblaciones microbianas de interés directo, y entran a propósito (confirmado por Martín). Ver item 64.**
 - `bioleaching_critical_materials` — solo 1 query (39 resultados)
 
 ---
@@ -339,6 +352,52 @@ item 37.
 > recomendación permanente; si se refuta, se quita. Mientras tanto, evita que alguien saque
 > conclusiones de un híbrido que está funcionando con un brazo ciego.
 
+#### 🔬 TEST DE IDIOMA EJECUTADO (2026-07-27) — hipótesis apoyada, fase 2 SIGUE BLOQUEADA
+
+Corridas las 4 combinaciones (ES/EN × denso/híbrido, k=8, `anoxic_biogas_biodesulfurization`).
+Datos en `/Volumes/research/metadatos/eval/idioma_20260727/`.
+
+| | Hit@8 | MRR |
+|---|---|---|
+| denso ES | 0,50 | 0,086 |
+| denso EN | 0,50 | 0,098 |
+| híbrido ES | **0,25** | 0,098 |
+| híbrido EN | 0,50 | **0,175** |
+
+**Lectura:** el denso es **indiferente al idioma** (MRR 0,086 ES vs 0,098 EN — bge-m3 multilingüe,
+como se esperaba). El híbrido es **sistemáticamente peor en español** (Hit@8 cae de 0,50 a 0,25:
+el brazo BM25 ciego arrastra hacia abajo el ranking que el denso ya tenía bien) pero **no es peor
+en inglés** — ahí sube el MRR de 0,098 a 0,175. Es decir: la penalización del híbrido no era una
+propiedad del híbrido, era el desajuste de idioma, que es exactamente lo que decía la hipótesis.
+El aviso de la UI y la recomendación "en español, híbrido OFF" quedan respaldados por medición.
+
+**PERO LA FASE 2 SIGUE BLOQUEADA — y por un motivo NUEVO, no por el de idioma.** Al revisar de
+dónde salen esos números: de las 4 preguntas del golden de anoxic, **P1 no discrimina** (decenas de
+papers del corpus la responden igual de bien — ver item 37) y **P2 es la única observación limpia
+del efecto**. La n efectiva del experimento es ~1. Los números de la tabla son direccionalmente
+coherentes con la hipótesis, pero **no bastan para calibrar un peso de RRF ni evaluar un reranker**:
+eso exige medir diferencias pequeñas, y aquí una sola pregunta mueve Hit@8 25 puntos.
+
+> **No hay instrumento válido hasta el item 37.** Cambia el motivo del bloqueo, no el bloqueo: antes
+> era "no sabemos si el brazo BM25 ve la consulta", ahora es "no tenemos con qué medir si la fusión
+> mejora". Cerrar la fase 2 sobre estos datos sería repetir el error de las líneas base infladas.
+
+**Dos ideas nuevas, para cuando el golden esté listo (no antes):**
+
+- **(a) Traducir la consulta SOLO para el brazo BM25.** Alternativa a reponderar el RRF que ataca la
+  causa en vez del síntoma: el denso recibe la consulta original (le da igual el idioma) y BM25
+  recibe una versión en inglés, vía glosario de dominio (barato, determinista, ~50 términos cubren
+  la mayoría: azufre→sulfur, lavador→scrubber, nitrito→nitrite…) o vía qwen local. Si funciona, el
+  híbrido deja de tener penalización por idioma y la pregunta "¿cuánto pesa BM25?" se puede volver a
+  hacer en condiciones limpias.
+- **(b) Hipótesis concreta que testear con el golden ampliado — distinciones léxicas finas.** P2
+  (ratio N/S **con nitrito**) sugiere que el denso trata como cuasi-sinónimos distinciones que SÍ
+  deberían discriminar: recuperó un paper de **nitrato** para una pregunta de **nitrito** (ver
+  item 37). Ese es el arquetipo donde el léxico exacto de BM25 o de un reranker debería ayudar de
+  verdad, y donde el denso solo tiene una debilidad estructural. Al estratificar las 25 preguntas
+  (ver item 37), incluir explícitamente varias de este tipo: si el híbrido/reranker gana en algún
+  sitio, es ahí, y con una sola observación (P2) no se puede afirmar.
+
 Pendiente (fase 2, BLOQUEADA por lo anterior): reranking opcional sobre el top-N fusionado con
 `bge-reranker` (vía Ollama) o un cross-encoder pequeño, antes de pasar al LLM de síntesis.
 - Tocar `8_query_rag.py` y la capa de retrieval de `2_RAG.py` / `7_Revision.py`.
@@ -510,8 +569,57 @@ cualquier cambio de chunking, embeddings, modelo o estrategia de retrieval.
   `corpus_manifest.py` ya genera casi todo). Reformular en docs: "sin evidencia de beneficio
   del híbrido a n=10; OFF por parsimonia", no "denso gana". El Hit@8=1.0 de biogas es casi
   seguro artefacto de pooling.
-- **Auditoría de chunks 2026-07-25:** anotar el golden a nivel de CHUNK, no de paper. El item 64
-  (pureza del corpus) es prerrequisito: no anotar sobre un corpus con papers fuera de dominio.
+- **Auditoría de chunks 2026-07-25:** anotar el golden a nivel de CHUNK, no de paper.
+  ~~El item 64 (pureza del corpus) es prerrequisito: no anotar sobre un corpus con papers fuera de
+  dominio.~~ **RETIRADO 2026-07-27:** la premisa del item 64 era falsa (los papers de
+  limnología/sedimentos están a propósito, ver item 64 reescrito). El item 37 **ya no depende del
+  64**.
+
+#### ⛔ CRITERIO DE DISCRIMINANCIA (2026-07-27) — el requisito que faltaba para redactar las 25
+
+**Antes de dar una pregunta por buena, estimar cuántos papers del corpus podrían responderla
+razonablemente. Más de 3-4 → la pregunta NO sirve para Hit@k/MRR**, por correcta que sea, por bien
+anotada que esté y aunque el hecho esté efectivamente en el corpus. No es un problema de anotación
+que se arregle añadiendo `relevant_paper_ids`: si medio corpus responde, el orden entre esos papers
+es arbitrario y la métrica mide ruido.
+
+Esto es distinto de los tres casos de métricas infladas de julio (pooling, colisión de substring,
+IDF=0). Aquí no hay bug: la pregunta está bien y el retrieval funciona; el defecto está en usarla
+como instrumento de medida.
+
+**Caso real — P1 del golden de anoxic, RETIRADA.** "¿Cuál es el rango de pH óptimo?". Verificada a
+mano con k=50 y revisión de los `retrieved_paper_ids` por título: decenas de papers del núcleo del
+dominio la responden igual de bien. El resultado **#2** era `2023_almenglo_recent_advances…`, una
+revisión del propio grupo y probablemente **LA mejor respuesta posible del corpus** — y la métrica
+la contaba como **fallo** porque no estaba entre los 4 `relevant_paper_ids` anotados. El golden de
+anoxic baja así a **2 preguntas útiles de 4**, y sus métricas históricas (Hit@8 0,50 / MRR ~0,1)
+dejan de ser interpretables como calidad de retrieval.
+
+**Caso real — P2, CONSERVADA y validada.** "Ratio N/S **con nitrito**". Durante el diagnóstico
+apareció un candidato con ratio molar N/S en el propio título
+(`2019_cano_influence_trickling_liquid_velocity_low_molar_ratio_nitrogen`) que parecía un relevante
+no anotado. **No lo es: es con NITRATO, no con nitrito** — confirmado por Martín leyendo el
+contenido. La anotación original era correcta; P2 no se corrige, se valida. Y la razón por la que
+P2 sí discrimina y P1 no es precisamente esa **especificidad léxica**: "con nitrito" (no solo
+"ratio N/S") reduce el conjunto de papers que responden a unos pocos. **P2 es la referencia de
+estilo para redactar las 25.**
+
+**Idioma del golden — decisión (revisa la del 2026-07-25).** Redactar en **español + traducción
+emparejada al inglés**, con los **mismos `relevant_paper_ids`**. Motivo: el test de idioma
+(item 33) mostró que **el denso es indiferente al idioma** y producción es **dense-only** (híbrido
+OFF por defecto), así que el español mide el **uso real** del sistema; el par en inglés queda
+preparado para el día que se evalúe híbrido o reranker, sin volver a anotar nada. `run_eval.py
+--golden <ruta> --tag <etiqueta>` ya soporta las dos versiones sin renombrar ficheros. Esto sustituye
+al "NO ampliar el golden en español" del 2026-07-25: aquello asumía que había que elegir un idioma,
+y el par emparejado no obliga a elegir.
+
+**Redactar a mano — confirmado otra vez, ahora con evidencia directa.** Nunca generar preguntas
+desde chunks recuperados (sesgo de pooling). El propio caso de P2 lo demuestra: **Cano 2019 casi
+cuela como relevante por el título**, que contiene literalmente "molar ratio nitrogen", y solo se
+descartó al leer el contenido y ver que era nitrato. Un generador automático —y también una
+revisión humana que se quede en título/abstract— lo habría anotado como relevante y habría metido
+un falso positivo en el patrón oro. **La revisión del CONTENIDO, pregunta a pregunta, no es
+opcional.**
 
 ### 38. Batch API de Anthropic para resúmenes — BAJA prioridad
 
@@ -1177,59 +1285,69 @@ corpus — refuerzo concreto para retomar el `embed_truncated: true` (+ longitud
 
 Prioridad: ALTA.
 
-### 64. Pureza del corpus: papers fuera de dominio en anoxic — MEDIA prioridad
+### 64. Revisión de títulos de anoxic — BAJA prioridad (⚠️ PREMISA ORIGINAL CORREGIDA 2026-07-27)
 
-**⚠️ PRERREQUISITO 2026-07-25: ítem 65 (vectores fantasma).** Cuarentenar aquí sin resolver antes
-el ítem 65 (o sin forzar un `--force` de `5_build_embeddings.py` inmediatamente después) NO saca
-los papers fuera de dominio del RAG — solo del catálogo bibliográfico. Ver ítem 65 para la evidencia
-(`2019_santos_clotas_..._sewage_biogas_2`, 6 semanas de vectores fantasma tras su cuarentena).
+> ## ⛔ CORRECCIÓN 2026-07-27 — este item estaba MAL PLANTEADO de raíz
+>
+> **Los papers de limnología y sedimentos NO son contaminación fuera de dominio. Están a propósito.**
+> `1989_anderson` (uranio en sedimentos de Saanich Inlet), `1997_gervais` (migración vertical de
+> Cryptomonas/Chromatium), `2018_zheng` (isótopos de mercurio, euxinia mesoproterozoica),
+> `1998_searcy` (reducción de azufre en eritrocitos) y `2004_shikano_volcanic_heat_flux` (lago
+> Katanuma) documentan **condiciones anóxicas y poblaciones microbianas de interés directo para el
+> proyecto**. Confirmado por Martín.
+>
+> El error no fue de cribado: fue de la auditoría, que juzgó la pertinencia de cinco papers **por el
+> título** y desde fuera del dominio, sin preguntar. Los cinco pasaron el cribado porque **debían
+> pasarlo**. Queda retirada toda la propuesta de cuarentenarlos, y con ella la estimación de
+> prevalencia ("muy superior a 4/87") que se construyó sobre la misma premisa falsa.
+>
+> **Consecuencias en cadena, ya aplicadas:** el item 37 **deja de depender** de este item (no hay
+> corpus que limpiar antes de anotar el golden), y este item deja de ser prerrequisito de nada, con
+> lo que baja de MEDIA a BAJA.
 
-Entre los papers tocados por la muestra hay al menos 4 fuera de dominio: 1989_anderson (uranio en
-sedimentos de Saanich Inlet), 1997_gervais (migración vertical de Cryptomonas/Chromatium),
-2018_zheng (isótopos de mercurio, euxinia mesoproterozoica) y discutiblemente 1998_searcy
-(reducción de azufre en eritrocitos humanos). La muestra era dirigida, así que NO es una estimación
-de prevalencia. Pero `Mejoras_pendientes.md` da por hecho que "los falsos positivos de
-limnología/sedimentos se descartan manualmente" (ver categoría `anoxic_biogas_biodesulfurization`
-más arriba) y estos sobrevivieron. Es un problema de cribado, no de extracción, y contamina el
-corpus sobre el que se va a anotar el golden del item 37.
+**Lo que queda del item, sin presunción de cuarentena:** revisar a mano los 87 títulos de
+`anoxic_biogas_biodesulfurization` (~30 min) como higiene periódica del catálogo — comprobar que no
+hay entradas manifiestamente erróneas (duplicados con nombre distinto, papers de otra categoría
+colados por la query de Scopus, PDFs mal emparejados). **El desenlace por defecto es "no tocar
+nada".** Cualquier caso dudoso se pregunta antes de actuar: el criterio de pertinencia al dominio lo
+pone Martín, no el título ni quien revise.
 
-Acción: revisar los 87 títulos de anoxic a mano (~30 min) y cuarentenar los fuera de dominio con el
-mecanismo reversible existente.
+Si de esa revisión saliera algún paper que sí hay que retirar, las herramientas existen: cuarentena
+reversible (`quarantine_paper()`, página Duplicados) o, para retirada definitiva, el circuito veto +
+purga (`15_Pendientes.py` → "🗑️ Eliminar del corpus" → `pipeline.purge_paper_by_doi()`, borrado
+duro con preview y confirmación). Ambas siguen necesitando el `--force` posterior de
+`5_build_embeddings.py` mientras el item 65 esté abierto.
 
-**Anotación 2026-07-27 — herramienta disponible.** Para los que se decida sacar definitivamente
-(no solo apartar), ya existe el circuito veto + purga: vetar el DOI en `15_Pendientes.py` evita que
-la ingesta semanal lo vuelva a bajar, y "🗑️ Eliminar del corpus" ejecuta
-`pipeline.purge_paper_by_doi()` (borrado DURO, sin cuarentena, con preview y confirmación
-explícita). Sigue haciendo falta el `--force` posterior por el item 65.
+> **~~PENDIENTE DE MIRAR~~ — DESCARTADO 2026-07-27.** El bloque decía: "anoxic tiene Hit@8 0,50 y
+> MRR 0,098 frente a 1,00 y 0,708 de upgrading; revisar qué papers salen por encima del correcto —
+> si son los de limnología/sedimentos, la contaminación del corpus explica la diferencia".
+> **La hipótesis está descartada por dos vías independientes:** (1) esos papers no son
+> contaminación, luego no hay nada que explicar por esa vía; (2) el diagnóstico con k=50 del
+> 2026-07-27 mostró que **la diferencia la explica el golden, no el corpus** — de las 4 preguntas de
+> anoxic, P1 no es discriminante y su Hit@8 0,50 mide un instrumento roto (ver item 37). No hay
+> nada que mirar aquí.
 
-**Anotación 2026-07-25 — quinto paper fuera de dominio.** Aparece
-`2004_shikano_volcanic_heat_flux` (lago Katanuma), encontrado INCIDENTALMENTE en la verificación P3,
-sin buscarlo. Van cinco, y los fuera de dominio siguen apareciendo sin buscarlos, así que la
-prevalencia real es probablemente **muy superior a 4/87** y el conteo actual es un suelo, no una
-estimación.
+Prioridad: BAJA. Ya no bloquea el item 37 ni ningún otro.
 
-**PENDIENTE DE MIRAR (diagnóstico gratis, hazlo antes de la revisión manual):** anoxic tiene
-Hit@8 **0,50** con MRR **0,098** frente a **1,00** y **0,708** de upgrading. Revisar en el CSV por
-pregunta **qué papers salen por encima del correcto**. Si son los de limnología/sedimentos, el item
-64 se adelanta al resto: significa que la contaminación del corpus, y no el retrieval, explica la
-diferencia entre categorías. Un MRR de 0,098 está cerca del suelo de ruido (~0,18), lo que es
-compatible con esa hipótesis.
+### 65. Vectores fantasma: el modo incremental de `5_build_embeddings.py` nunca borra — ALTA prioridad
 
-Prioridad: MEDIA, antes del item 37.
-
-### 65. Vectores fantasma: el modo incremental de `5_build_embeddings.py` nunca borra — PRERREQUISITO del item 64 — ALTA prioridad
+> **Nota 2026-07-27 — este item ya NO se justifica como "prerrequisito del item 64"** (la premisa
+> del 64 era falsa y ha bajado a BAJA). Se mantiene en ALTA por sí solo: el defecto es real,
+> verificado con 6 semanas de vectores fantasma, y afecta a **cualquier** retirada de un paper —
+> cuarentena de duplicados, TEI huérfanos, `prune_orphan_*` y la purga nueva
+> `purge_paper_by_doi()`. No necesita al 64 para importar.
 
 `5_build_embeddings.py` en modo incremental (el modo por defecto, sin `--force`) solo AÑADE
 vectores de papers nuevos por `paper_id`; nunca comprueba si un `paper_id` que ya está en el índice
 ha desaparecido de `chunks/` y, si es así, nunca lo retira del FAISS ni de `metadata.jsonl`. Es una
 lectura, no una sincronización — el índice solo crece, nunca se poda solo.
 
-**Consecuencia directa para el item 64 (y para cualquier cuarentena):** `quarantine_paper()` /
-`prune_orphan_metadata()` / `prune_orphan_tei()` quitan el paper de `papers_metadata.jsonl` y mueven
-sus ficheros de trabajo a cuarentena, pero **NO tocan el índice de embeddings**. El paper sigue
-siendo 100% recuperable por el RAG hasta el próximo `--force`. Cuarentenar un paper fuera de dominio
-(item 64) da la falsa sensación de haberlo sacado del sistema cuando en realidad solo ha dejado de
-aparecer en el catálogo bibliográfico — sus chunks siguen compitiendo por hueco en el top-k de
+**Consecuencia directa para CUALQUIER retirada de un paper:** `quarantine_paper()` /
+`prune_orphan_metadata()` / `prune_orphan_tei()` / `purge_paper_by_doi()` quitan el paper de
+`papers_metadata.jsonl` y mueven (o borran) sus ficheros de trabajo, pero **NO tocan el índice de
+embeddings**. El paper sigue siendo 100% recuperable por el RAG hasta el próximo `--force`. Retirar
+un paper da así la falsa sensación de haberlo sacado del sistema cuando en realidad solo ha dejado
+de aparecer en el catálogo bibliográfico — sus chunks siguen compitiendo por hueco en el top-k de
 cualquier consulta.
 
 **Evidencia real, no hipotética — verificada durante el rollout de items 62/63 (2026-07-25):**
@@ -1266,13 +1384,14 @@ El invariante que sí lo caza es el de la resta corregida —
 `paper_ids_en_indice - paper_ids_en_chunks == ∅` — y **hay que añadirlo al 55b**, no dejarlo solo
 como propuesta de este item 65.
 
-**DECISIÓN:** este item es prerrequisito del 64, no independiente. La acción de "revisar los 87
-títulos de anoxic a mano y cuarentenar los fuera de dominio" (item 64) es **inútil para el RAG
-sin este fix o sin forzar un `--force` inmediatamente después de cada tanda de cuarentenas** —
-cuarentenar sin re-indexar deja el problema exactamente donde estaba, solo que invisible en el
-catálogo.
+**DECISIÓN (revisada 2026-07-27):** ~~este item es prerrequisito del 64, no independiente~~ — el 64
+se ha caído como justificación (premisa falsa). El item se sostiene solo, y con el mismo argumento
+de fondo: **retirar un paper sin re-indexar deja el problema exactamente donde estaba, solo que
+invisible en el catálogo.** Vale para cualquier retirada, venga de donde venga. Regla operativa
+mientras el fix no exista: **todo apartado/borrado de papers va seguido de un `--force` de
+`5_build_embeddings.py` sobre esa categoría**, o no ha surtido efecto en el RAG.
 
-Prioridad: ALTA (bloquea que el item 64 cumpla su propósito real).
+Prioridad: ALTA (defecto real y verificado; afecta a cuarentena, prune_orphan_* y purga).
 
 **Anotación 2026-07-27 — el veto de DOIs añade un tercer camino que deja fantasmas.** La purga
 `pipeline.purge_paper_by_doi(doi, apply=True)` (nueva, ver `Mejoras_realizadas.md`) borra en duro
@@ -1303,3 +1422,16 @@ purga del índice directamente en vez de dejar el aviso.
 - **Menor, sin acción:** 2014_mora tiene un 8º autor espurio ": D Cantero" (GROBID capturó el
   bloque de afiliaciones como `<author>`); 2018_zheng pierde el nombre chino del autor y produce
   "O cean" por un drop-cap de PNAS.
+
+### Descartado con evidencia 2026-07-27 (test de idioma + diagnóstico k=50)
+
+- **"El embedding de los chunks de tabla es malo y por eso no se recuperan": NO ABRIR ITEM.** La
+  hipótesis surgió al ver que P1/P2 fallaban con k=8 y que sus respuestas viven en tablas. Queda
+  descartada con el diagnóstico a **k=50**: los papers relevantes **SÍ aparecen** en el ranking,
+  solo que por debajo del top-8. No hay un problema de representación de tablas — hay preguntas mal
+  diseñadas como métrica (P1, ver item 37) y un top-8 estrecho para preguntas poco específicas. Si
+  en el futuro reaparece la sospecha, el diagnóstico barato es el mismo: subir k y mirar si el paper
+  está o no está.
+- **"Los papers de limnología/sedimentos contaminan anoxic y explican su Hit@8 bajo": FALSO por
+  partida doble.** Ni son contaminación (están a propósito, confirmado por Martín — ver item 64), ni
+  explican la métrica (la explica el golden: P1 no discrimina — ver item 37).
