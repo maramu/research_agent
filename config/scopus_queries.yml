@@ -26,3 +26,15 @@ advanced_oxidation_processes:
 bioleaching_critical_materials:
 - TITLE-ABS-KEY(bioleaching AND ("platinum group metals" OR "PGM" OR "palladium" OR
   "platinum" OR "rhodium"))
+thiosulfate:
+- TITLE-ABS-KEY ( ( thiosulfate OR thiosulphate ) AND ( polysulfide* OR polysulphide* OR "sulfur selectivity" ) AND ( biodesulfuri* OR biodesulphuri* OR "sulfide oxidation" ) AND ( haloalkal* OR alkaline OR "high pH" ) )
+- TITLE-ABS-KEY ( ( sulfide OR sulphide OR polysulfide* OR polysulphide* ) W/3 ( oxidation OR autoxidation ) AND ( abiotic OR chemical OR kinetic* ) AND ( thiosulfate OR thiosulphate ) )
+- TITLE-ABS-KEY ( ( sulfite OR sulphite ) AND ( "elemental sulfur" OR "elemental sulphur" OR "zero-valent sulfur" ) AND ( thiosulfate OR thiosulphate ) AND ( formation OR reaction OR kinetic* ) )
+- TITLE-ABS-KEY ( ( biogenic OR biological OR microbial OR bacterial ) W/3 ( thiosulfate OR thiosulphate ) AND ( production OR accumulation OR lixiviant OR leaching ) )
+- TITLE-ABS-KEY ( ( thiosulfate OR thiosulphate ) W/3 leach* AND ( sulfate OR sulphate OR polythionate* OR "thiosulfate consumption" OR "thiosulfate degradation" ) AND ( gold OR palladium OR "precious metal*" OR "platinum group metal*" ) )
+- TITLE-ABS-KEY ( ( thiosulfate OR thiosulphate ) AND ( "ion chromatography" OR iodometr* ) AND ( sulfate OR sulfite OR polythionate* OR "sulfur species" OR speciation ) )
+- TITLE-ABS-KEY ( ( "sulfide:quinone oxidoreductase" OR sqr OR "flavocytochrome c" OR fccB OR "sox system" OR soxB ) AND ( haloalkaliphil* OR biodesulfuri* OR "sulfur-oxidizing bacteria" ) )
+- TITLE-ABS-KEY ( thioalkalimicrobium OR "thiomicrospira aerophila" OR thioalkalivibrio OR desulfurispirillum )
+- TITLE-ABS-KEY ( ( "microbial community" OR "bacterial community" OR 16S ) AND ( biodesulfuri* OR "biological desulfurization" OR "sulfide-oxidizing bioreactor" ) AND ( haloalkal* OR alkaline OR halomonas ) )
+- TITLE-ABS-KEY ( bioaugmentation AND ( sulfide OR sulphide OR "sulfur-oxidizing" OR desulfuri* OR "H2S removal" ) )
+- TITLE-ABS-KEY ( biodesulfuri* AND ( "dual-reactor" OR "sulfidic bioreactor" OR "two-stage" ) AND ( selectivity OR alkalinity OR "caustic consumption" OR "bleed stream" ) )

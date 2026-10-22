@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-13_RAG_multiple.py — Batería de consultas RAG ("RAG múltiple"). Solo app privada.
+13_RAG_multiple.py — Batería de consultas RAG ("RAG múltiple"). App privada y pública.
 
 Edita los parámetros de una batería, la lanza reutilizando
 ``run_rag_batch.run_batch`` (sin duplicar lógica) y descarga los .md generados
@@ -32,13 +32,14 @@ from run_rag_batch import run_batch, DEFAULT_BASE
 
 st.set_page_config(page_title="RAG múltiple", page_icon="🗂️", layout="wide")
 
-# ── Guard: solo app privada ────────────────────────────────────────────────────
-if is_public_app():
-    st.warning("Esta página solo está disponible en la app privada.")
+# ── Autenticación (app pública o privada) ─────────────────────────────────────
+_pwd_env = "PUBLIC_APP_PASSWORD" if is_public_app() else "PRIVATE_APP_PASSWORD"
+if not check_password(_pwd_env):
     st.stop()
 
-if not check_password("PRIVATE_APP_PASSWORD"):
-    st.stop()
+# En la app pública la batería ocupa Ollama durante todo el run: se limita el nº
+# de preguntas (la privada no tiene tope).
+MAX_QUESTIONS_PUBLIC = 10
 
 st.title("🗂️ RAG múltiple — batería de consultas")
 st.caption(
@@ -103,6 +104,9 @@ if submitted:
     questions = [{"q": ln.strip()} for ln in questions_raw.splitlines() if ln.strip()]
     if not questions:
         st.error("Introduce al menos una pregunta.")
+        st.stop()
+    if is_public_app() and len(questions) > MAX_QUESTIONS_PUBLIC:
+        st.error(f"Máximo {MAX_QUESTIONS_PUBLIC} preguntas por batería en la app pública.")
         st.stop()
 
     cfg = {

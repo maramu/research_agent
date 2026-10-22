@@ -21,6 +21,7 @@ CANONICAL_CATEGORIES = [
     "single_cell_protein",
     "advanced_oxidation_processes",
     "bioleaching_critical_materials",
+    "thiosulfate",
 ]
 
 # Secciones canónicas (debe coincidir con canonical_section() de
