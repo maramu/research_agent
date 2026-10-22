@@ -37,10 +37,6 @@ _pwd_env = "PUBLIC_APP_PASSWORD" if is_public_app() else "PRIVATE_APP_PASSWORD"
 if not check_password(_pwd_env):
     st.stop()
 
-# En la app pública la batería ocupa Ollama durante todo el run: se limita el nº
-# de preguntas (la privada no tiene tope).
-MAX_QUESTIONS_PUBLIC = 10
-
 st.title("🗂️ RAG múltiple — batería de consultas")
 st.caption(
     "Lanza una lista de preguntas contra una categoría y descarga un .md por "
@@ -104,9 +100,6 @@ if submitted:
     questions = [{"q": ln.strip()} for ln in questions_raw.splitlines() if ln.strip()]
     if not questions:
         st.error("Introduce al menos una pregunta.")
-        st.stop()
-    if is_public_app() and len(questions) > MAX_QUESTIONS_PUBLIC:
-        st.error(f"Máximo {MAX_QUESTIONS_PUBLIC} preguntas por batería en la app pública.")
         st.stop()
 
     cfg = {
