@@ -2,6 +2,79 @@
 > Histórico append-only (lo más nuevo arriba). Backlog: Mejoras_pendientes.md · Estado/arquitectura: ESTADO.md
 
 ---
+### ✅ 67. Selección masiva por categoría en `15_Pendientes.py` (2026-10-27)
+
+Petición de Martín: al añadir una categoría nueva aparecen de golpe muchos DOIs pendientes, y
+marcarlos uno a uno para posponer/vetar es tedioso. Añadido:
+- Selector "Filtrar por categoría" sobre la tabla de pendientes (opción `(Todas)` + categorías
+  presentes en la vista actual).
+- Botones "☑️ Seleccionar los N visibles" / "☐ Deseleccionar todos", que marcan de golpe el
+  checkbox `Sel` de todas las filas visibles (ya filtradas por categoría). Streamlit no permite
+  mutar el estado de un `data_editor` ya creado, así que el truco es el mismo patrón "nonce" que
+  usa `11_Articulos.py` (`art_editor_nonce`): cada click cambia la `key` del editor
+  (`pendientes_editor_<nonce>`) y se le pasa un dataframe nuevo con la columna `Sel` ya puesta a
+  `True`/`False`, forzando una instancia de widget fresca con ese valor por defecto.
+- El "seleccionar todos" se resetea solo tras posponer/reactivar/vetar (`_reset_seleccion()`), para
+  que no se arrastre marcado a la siguiente vista de la página.
+
+Verificación: `py_compile`; no se ha podido probar en el navegador en esta sesión (sin acceso a la
+app Streamlit corriendo), revisar visualmente tras desplegar.
+
+---
+### ✅ 66. Cuarentena que resucitaba papers al reprocesar + ediciones perdidas en `4_extract_metadata.py` (2026-10-27)
+
+Reporte de Martín: al revisar categorías en `11_Articulos.py`, mandar papers a cuarentena a veces
+no los quitaba de verdad de la carpeta, y además las ediciones manuales de metadata (título/DOI/
+año/autores) parecían perderse al pulsar "Reprocesar pendientes". Investigación por lectura de
+código + tests sintéticos (sin acceso al NAS real en esta sesión — permiso denegado al montar
+`/Volumes/research`; todo lo de abajo está verificado con datos de prueba, pendiente de confirmar
+contra producción).
+
+**66.1 — `4_extract_metadata.py` no tenía la skip-logic que su propio docstring documentaba.**
+Decía "si `<paper_id>.metadata.json` ya existe y `--force` no está activo, el paper se salta", pero
+no había ningún argumento `--force` en el script ni ningún chequeo de skip: el bucle principal
+reescribía `papers_metadata.jsonl` **completo** y todos los `per_paper/*.json` desde el TEI, para
+TODOS los papers de la categoría, en cada ejecución — compárese con `3_process_corpus.py` y
+`3b_summarize.py`, que sí implementan `--force` correctamente. `PRESERVE_FIELDS` protegía
+`title`/`doi`/`journal`/`year`/`authors` solo si el valor previo era no vacío y la clave `paper_id`
+coincidía exactamente; cualquier otro campo (`quality_score`, `warnings`, `access_type`, etc.) se
+recalculaba de cero cada vez. Fix: `--force` real; sin él, si `<paper_id>.metadata.json` ya existe
+se reutiliza directamente el registro vigente de `papers_metadata.jsonl` (el que ya incluye
+cualquier edición manual hecha desde el editor de Artículos) en vez de re-extraer del TEI.
+Verificado con test funcional: edición manual de título sobrevive a un reproceso sin `--force`;
+con `--force` se re-extrae (pero `PRESERVE_FIELDS`, preexistente, sigue protegiendo el campo no
+vacío — hay que vaciarlo a mano para forzar el refresco desde el TEI, comportamiento documentado
+y correcto).
+
+**66.2 — la cuarentena podía dejar huérfanos asimétricos que "resucitaban" al reprocesar.**
+`candidate_paths()` (en `9_cleanup_duplicates.py`, usada por `quarantine_paper()`) solo tenía
+fallback difuso (normalización de nombre vía `file_key`) para localizar PDFs con nombre "sucio";
+tei/md_clean/chunks/summaries solo se buscaban por match exacto. Si el PDF tenía un nombre que no
+coincidía ni exacta ni difusamente con el `paper_id`, la cuarentena movía TEI/md_clean/chunks/
+metadata pero dejaba el PDF físico en `pdfs/`. Como `4_extract_metadata.py` decidía qué reprocesar
+mirando solo si el TEI tenía `md_clean` correspondiente (nunca si el PDF o la metadata seguían
+existiendo), ese PDF huérfano volvía a entrar por el flujo normal de "PDF nuevo" en el siguiente
+reproceso de la categoría, regenerando TEI/md_clean/metadata desde cero — el paper "reaparecía".
+Fix en dos partes: (1) el fallback difuso de `candidate_paths()` ahora cubre también tei/md_clean/
+chunks/summaries, simétrico con PDFs; (2) `quarantine_paper()` añade un último fallback por **DOI
+embebido en el PDF** (`utils.pdf_utils.extract_doi_from_pdf`) cuando ni el match exacto ni el
+difuso localizan ningún PDF — compara contra el DOI de la línea de metadata que se está retirando.
+Complementa esto (65.3): `4_extract_metadata.py` ahora exige que el PDF siga existiendo, además del
+`md_clean`, para no emitir metadata de un TEI huérfano (cubre cualquier otra causa de cuarentena
+parcial, no solo la de nombre de PDF).
+
+Verificación: `py_compile` de los dos ficheros; test con PDF real (PyMuPDF) de nombre sin ninguna
+relación textual con el stem (`"Smith - Paper [v2].pdf"` vs `smith_2020_paper`) — antes quedaba
+huérfano en `pdfs/`, ahora se localiza por DOI y se mueve con el resto; roundtrip completo con
+`restore_from_quarantine()` verificado sobre el mismo caso. Test funcional de `4_extract_metadata.py`
+(subprocess real, no mock): edición manual preservada sin `--force`; paper sin PDF deja de
+regenerarse en `papers_metadata.jsonl`.
+
+**Pendiente:** confirmar ambos fixes contra el NAS real en pciq22/casa (esta sesión no tuvo acceso
+de lectura a `/Volumes/research/categorias`); el item 65 (vectores fantasma en FAISS tras cualquier
+retirada de paper) sigue abierto y es ortogonal a esto — estos fixes no lo cubren.
+
+---
 ### 📋 Sesión 2026-07-27 — resumen: veto de DOIs, test de idioma y dos premisas corregidas
 
 Sesión de tres bloques. Los dos primeros son código (commits `c0321a5` y `7f66679`, detallados en

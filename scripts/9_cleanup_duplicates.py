@@ -475,14 +475,31 @@ def candidate_paths(project_dir: Path, stem: str) -> list[Path]:
     candidates.append(project_dir / "chunks" / f"{stem}.chunks.jsonl")
     candidates.append(project_dir / "chunks" / f"{stem}.jsonl")
 
-    # Fallback para PDFs antiguos donde el stem del PDF difiere levemente del TEI
-    # (guiones, espacios o corchetes) pero conserva la misma clave normalizada.
-    pdf_dir = project_dir / "pdfs"
-    if pdf_dir.exists():
-        target_key = file_key(stem)
-        for pdf in pdf_dir.iterdir():
-            if pdf.is_file() and pdf.suffix in PDF_EXTS and file_key(pdf.stem) == target_key:
-                candidates.append(pdf)
+    # Fallback difuso: localiza también artefactos antiguos cuyo nombre difiere
+    # levemente del stem (guiones, espacios o corchetes) pero conserva la misma
+    # clave normalizada. Antes esto solo cubría pdfs/; sin cubrir también
+    # tei/md_clean/chunks/summaries, una cuarentena podía mover el PDF y dejar
+    # huérfanos el resto de artefactos (o viceversa), que luego "resucitaban"
+    # al reprocesar la categoría.
+    target_key = file_key(stem)
+    _FUZZY_DIRS = (
+        ("pdfs",      tuple(PDF_EXTS)),
+        ("tei",       (".tei.xml", ".xml")),
+        ("md_clean",  (".clean.md",)),
+        ("summaries", (".summary.md",)),
+        ("chunks",    (".chunks.jsonl", ".jsonl")),
+    )
+    for sub, exts in _FUZZY_DIRS:
+        sub_dir = project_dir / sub
+        if not sub_dir.exists():
+            continue
+        for f in sub_dir.iterdir():
+            if not f.is_file():
+                continue
+            for ext in exts:
+                if f.name.endswith(ext) and file_key(f.name[: -len(ext)]) == target_key:
+                    candidates.append(f)
+                    break
 
     seen: set[Path] = set()
     unique = []
@@ -513,26 +530,13 @@ def quarantine_paper(category: str, paper_id: str, base: Path, dest_root: Path) 
     dest_dir = Path(dest_root) / category
     moved: list[tuple[Path, Path]] = []
 
-    # Artefactos estándar (pdf, tei, md_clean, summary, chunks) vía candidate_paths
-    paths = list(candidate_paths(project_dir, paper_id))
-    # per_paper/<stem>*
-    per_paper = project_dir / "metadata" / "per_paper"
-    if per_paper.exists():
-        paths.extend(sorted(per_paper.glob(f"{paper_id}*")))
-
-    for path in paths:
-        if path.exists():
-            rel = path.relative_to(project_dir)
-            target = dest_dir / rel
-            target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.move(str(path), str(target))   # mismo volumen (SSD) → rename rápido
-            moved.append((path, target))
-            log.info("Cuarentena: %s -> %s", path, target)
-
-    # Quitar del papers_metadata.jsonl por file_key del stem (con backup .bak)
+    # Quitar del papers_metadata.jsonl por file_key del stem (con backup .bak).
+    # Se hace ANTES de mover ficheros para poder usar el DOI retirado como
+    # último fallback al localizar el PDF (ver más abajo).
     meta_path = project_dir / "metadata" / "papers_metadata.jsonl"
     meta_updated = False
     removed_lines: list[str] = []
+    removed_doi = ""
     if meta_path.exists():
         target_key = file_key(paper_id)
         kept: list[str] = []
@@ -548,6 +552,7 @@ def quarantine_paper(category: str, paper_id: str, base: Path, dest_root: Path) 
                 stem, _ = infer_stem(data)
                 if stem and file_key(stem) == target_key:
                     removed_lines.append(line.rstrip("\n"))
+                    removed_doi = normalize_doi(data.get("doi") or "") or removed_doi
                     continue
                 kept.append(line.rstrip("\n"))
         if removed_lines:
@@ -555,6 +560,44 @@ def quarantine_paper(category: str, paper_id: str, base: Path, dest_root: Path) 
             meta_path.write_text("\n".join(kept) + ("\n" if kept else ""), encoding="utf-8")
             meta_updated = True
             log.info("Metadata: %d línea(s) quitada(s) de %s", len(removed_lines), meta_path)
+
+    # Artefactos estándar (pdf, tei, md_clean, summary, chunks) vía candidate_paths
+    paths = list(candidate_paths(project_dir, paper_id))
+    # per_paper/<stem>*
+    per_paper = project_dir / "metadata" / "per_paper"
+    if per_paper.exists():
+        paths.extend(sorted(per_paper.glob(f"{paper_id}*")))
+
+    # Fallback por DOI: si ni el match exacto ni el difuso de candidate_paths
+    # localizaron ningún PDF (nombre del PDF demasiado distinto del stem,
+    # p.ej. nunca renombrado), busca en pdfs/ uno cuyo DOI embebido coincida
+    # con el de la metadata retirada. Sin esto, ese PDF quedaba huérfano en
+    # pdfs/ tras la cuarentena y "resucitaba" (se reprocesaba como nuevo) en
+    # el siguiente reproceso de la categoría.
+    if removed_doi and not any(p.suffix in PDF_EXTS and p.exists() for p in paths):
+        pdf_dir = project_dir / "pdfs"
+        if pdf_dir.exists():
+            try:
+                from utils.pdf_utils import extract_doi_from_pdf  # perezoso: PyMuPDF
+            except Exception:
+                extract_doi_from_pdf = None
+            if extract_doi_from_pdf is not None:
+                for pdf in sorted(pdf_dir.iterdir()):
+                    if pdf.is_file() and pdf.suffix in PDF_EXTS:
+                        found = normalize_doi(extract_doi_from_pdf(pdf) or "")
+                        if found and found == removed_doi:
+                            paths.append(pdf)
+                            log.info("PDF localizado por DOI (nombre no coincidía): %s", pdf)
+                            break
+
+    for path in paths:
+        if path.exists():
+            rel = path.relative_to(project_dir)
+            target = dest_dir / rel
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(path), str(target))   # mismo volumen (SSD) → rename rápido
+            moved.append((path, target))
+            log.info("Cuarentena: %s -> %s", path, target)
 
     # Manifiesto para poder restaurar (ficheros movidos + líneas de metadata retiradas)
     if moved or removed_lines:

@@ -29,7 +29,12 @@ Campos de calidad añadidos (item 17):
 
 Skip logic:
     Si <paper_id>.metadata.json ya existe y --force no está activo, el paper
-    se salta. Permite reanudar sin reprocesar lo ya completado.
+    NO se re-extrae del TEI: se reutiliza el registro vigente de
+    papers_metadata.jsonl (que ya incluye ediciones manuales hechas desde el
+    editor de Artículos) para reescribir el JSONL agregado. Permite reanudar
+    sin reprocesar ni machacar ediciones de lo ya completado. Además, un TEI
+    sin PDF correspondiente (p.ej. tras una cuarentena parcial) se trata como
+    huérfano y no se emite su metadata.
 
 Ficheros leídos:
     /Volumes/research/categorias/<project>/tei/**/*.tei.xml
@@ -571,6 +576,8 @@ def main():
     ap.add_argument("--base",    default=DEFAULT_BASE, help=f"Directorio raíz (defecto: {DEFAULT_BASE})")
     ap.add_argument("--tei-dir",     default="", help="Ruta TEI; si no, usa <base>/<project>/tei")
     ap.add_argument("--source-type", default="", help="Fuente de los PDFs: scopus, inbox, adhoc, manual (defecto: auto)")
+    ap.add_argument("--force",       action="store_true",
+                    help="Reprocesa aunque los metadatos ya existan (por defecto se saltan)")
     args = ap.parse_args()
 
     base        = Path(args.base)
@@ -617,6 +624,17 @@ def main():
         for p in md_dir.glob("*.clean.md"):
             md_stems.add(_norm(p.name[: -len(".clean.md")]))
 
+    # Además, exige que el PDF siga existiendo. Si una cuarentena movió el PDF
+    # pero dejó atrás el TEI/md_clean (match parcial), sin este chequeo el
+    # paper "resucitaba" en papers_metadata.jsonl en el siguiente reproceso
+    # aunque ya no tuviera PDF. Si pdfs/ no existe (caso raro), no se exige.
+    pdfs_dir = base / project / "pdfs"
+    require_pdf = pdfs_dir.exists()
+    pdf_stems: set[str] = set()
+    if require_pdf:
+        for p in list(pdfs_dir.glob("*.pdf")) + list(pdfs_dir.glob("*.PDF")):
+            pdf_stems.add(_norm(p.stem))
+
     total_refs    = 0
     papers_written = 0
     orphans: List[str] = []
@@ -625,21 +643,60 @@ def main():
          refs_path.open("w", encoding="utf-8") as f_refs:
 
         for tei_file in tei_files:
+            paper_id = infer_paper_id(tei_file)
+            phase    = phase_from_path(tei_file)
+
+            # Saltar TEI huérfanos: sin md_clean correspondiente, o sin PDF
+            # (p.ej. restos de dedup/renombrados, o de una cuarentena que solo
+            # movió parte de los artefactos) no se emite metadata.
+            tei_stem = _tei_stem(tei_file.name)
+            if _norm(tei_stem) not in md_stems:
+                orphans.append(tei_stem)
+                continue
+            if require_pdf and _norm(tei_stem) not in pdf_stems:
+                orphans.append(tei_stem)
+                continue
+
+            # ── Skip logic ──
+            # Si <paper_id>.metadata.json ya existe y --force no está activo,
+            # reutiliza el registro vigente de papers_metadata.jsonl (que ya
+            # incluye ediciones manuales hechas desde el editor de Artículos)
+            # en vez de re-extraer del TEI y machacarlo. Esto evita que CADA
+            # reproceso regenere desde cero la metadata de TODOS los papers
+            # de la categoría (antes no existía ningún --force real, pese a
+            # lo que decía el docstring).
+            meta_json_path = per_paper_dir / f"{paper_id}.metadata.json"
+            refs_json_path = per_paper_dir / f"{paper_id}.references.json"
+            if meta_json_path.exists() and not args.force:
+                meta = prev_meta.get(paper_id)
+                if meta is None:
+                    try:
+                        meta = json.loads(meta_json_path.read_text(encoding="utf-8"))
+                    except Exception:
+                        meta = None
+                if meta is not None:
+                    try:
+                        refs_saved = (json.loads(refs_json_path.read_text(encoding="utf-8"))
+                                     if refs_json_path.exists() else [])
+                    except Exception:
+                        refs_saved = []
+                    f_meta.write(json.dumps(meta, ensure_ascii=False) + "\n")
+                    papers_written += 1
+                    for r in refs_saved:
+                        r2 = dict(r)
+                        r2["project"], r2["phase"], r2["paper_id"] = project, phase, paper_id
+                        f_refs.write(json.dumps(r2, ensure_ascii=False) + "\n")
+                        total_refs += 1
+                    meta_json_path.write_text(
+                        json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"
+                    )
+                    continue
+
             try:
                 tree = ET.parse(tei_file)
                 root = tree.getroot()
             except Exception as e:
                 print(f"⚠️  No puedo parsear {tei_file.name}: {e}")
-                continue
-
-            paper_id = infer_paper_id(tei_file)
-            phase    = phase_from_path(tei_file)
-
-            # Saltar TEI huérfanos: sin md_clean correspondiente no se emite
-            # metadata (restos de dedup/renombrados).
-            tei_stem = _tei_stem(tei_file.name)
-            if _norm(tei_stem) not in md_stems:
-                orphans.append(tei_stem)
                 continue
 
             new_rec = {

@@ -127,8 +127,36 @@ st.caption(f"{len(view)} DOI(s) pendiente(s)"
            + (" (incluye pospuestos)." if mostrar_pospuestos
               else " activos (no pospuestos)."))
 
+# ── Filtro por categoría (útil para categorías nuevas con muchos pendientes) ──
+categorias_disp = sorted(view["category"].dropna().unique().tolist()) if not view.empty else []
+filtro_cat = st.selectbox(
+    "Filtrar por categoría", options=["(Todas)"] + categorias_disp, index=0,
+    key="pendientes_filtro_cat",
+)
+if filtro_cat != "(Todas)":
+    view = view[view["category"] == filtro_cat]
+
 view = view.copy()
-view.insert(0, "Sel", False)
+
+# ── Seleccionar/deseleccionar todos los visibles (tras el filtro) ──
+if "pendientes_sel_nonce" not in st.session_state:
+    st.session_state["pendientes_sel_nonce"] = 0
+
+sa1, sa2 = st.columns(2)
+with sa1:
+    if st.button(f"☑️ Seleccionar los {len(view)} visibles", disabled=view.empty,
+                 use_container_width=True):
+        st.session_state["pendientes_sel_default"] = True
+        st.session_state["pendientes_sel_nonce"] += 1
+        st.rerun()
+with sa2:
+    if st.button("☐ Deseleccionar todos", use_container_width=True):
+        st.session_state["pendientes_sel_default"] = False
+        st.session_state["pendientes_sel_nonce"] += 1
+        st.rerun()
+
+default_sel = st.session_state.get("pendientes_sel_default", False)
+view.insert(0, "Sel", default_sel)
 
 col_cfg = {
     "Sel":          st.column_config.CheckboxColumn("Sel", width="small", default=False),
@@ -148,7 +176,7 @@ edited = st.data_editor(
                   "reason", "last_checked", "snooze_until"],
     hide_index=True,
     use_container_width=True,
-    key="pendientes_editor",
+    key=f"pendientes_editor_{st.session_state['pendientes_sel_nonce']}",
 )
 
 sel_dois = edited.loc[edited["Sel"], "doi"].tolist() if not edited.empty else []
@@ -159,18 +187,27 @@ motivo = st.text_input(
     placeholder="p.ej. fuera de alcance / paper retractado / sin acceso institucional",
 )
 
+def _reset_seleccion() -> None:
+    """Limpia el 'seleccionar todos' tras una acción en lote, para que no se
+    arrastre marcado a la siguiente vista (p.ej. tras cambiar de categoría)."""
+    st.session_state["pendientes_sel_default"] = False
+    st.session_state["pendientes_sel_nonce"] += 1
+
+
 c1, c2, c3 = st.columns(3)
 with c1:
     if st.button("😴 Posponer 2 años seleccionados", disabled=not sel_dois,
                  use_container_width=True):
         n = download_registry.snooze(sel_dois, years=2)
         st.success(f"✓ {n} DOI(s) pospuestos 2 años.")
+        _reset_seleccion()
         st.rerun()
 with c2:
     if st.button("🔄 Reactivar seleccionados", disabled=not sel_dois,
                  use_container_width=True):
         n = download_registry.unsnooze(sel_dois)
         st.success(f"✓ {n} DOI(s) reactivados.")
+        _reset_seleccion()
         st.rerun()
 with c3:
     if st.button("🚫 Vetar (no volver a descargar)", disabled=not sel_dois,
@@ -178,6 +215,8 @@ with c3:
         n = download_registry.block(sel_dois, reason=motivo)
         st.session_state["vetados_recientes"] = list(sel_dois)
         st.success(f"✓ {n} DOI(s) vetados: no se volverán a intentar descargar.")
+        _reset_seleccion()
+        st.rerun()
 
 st.caption("Pospuesto = no aparece en el email semanal hasta la fecha snooze_until. "
            "Vetado = no vuelve a intentarse nunca (reversible desde 'Vetados').")
