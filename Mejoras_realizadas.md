@@ -2,6 +2,72 @@
 > Histórico append-only (lo más nuevo arriba). Backlog: Mejoras_pendientes.md · Estado/arquitectura: ESTADO.md
 
 ---
+### ✅ 68+69. Renombrar ficheros con metadata corregida + 3 filtros nuevos en `11_Articulos.py` (2026-10-27)
+
+Petición de Martín: tras corregir a mano título/DOI/año/autores de toda una categoría en el editor
+de Artículos, poder renombrar los PDFs (y el resto de artefactos) para que reflejen esos datos.
+Preguntó explícitamente si eso podía romper un reproceso/ingesta posterior — pregunta justificada,
+así que antes de tocar la UI se mapeó dónde vive el `paper_id` y se verificó con tests reales.
+
+**68 — por qué no basta con renombrar el PDF.** `1_rename_papers_by_doi.py` ya tiene el esquema de
+nombre (`{año}_{apellido}_{título_corto}`, `build_new_filename`), pero solo actúa en el inbox,
+**antes** de que existan TEI/md_clean/chunks. Renombrar solo el PDF de un paper YA PROCESADO
+reproduce exactamente el defecto del item 66: TEI/md_clean quedan con el nombre viejo, el PDF con
+el nuevo, y el próximo reproceso los trata como huérfanos — el paper desaparece.
+
+**El `paper_id` vive en 8 sitios, no solo en el nombre de fichero:** los propios ficheros
+(pdf/tei/md_clean/chunks/summaries/per_paper), `papers_metadata.jsonl` (+ `stable_id` + `tei_file`),
+`references.jsonl`, el campo interno `"paper_id"` de **cada línea** de `chunks/*.jsonl` (no solo el
+nombre del fichero), `embeddings/*/metadata.jsonl`, `embeddings/*/indexed_papers.json` (si no se
+actualiza, el siguiente embedding incremental trata el paper como "nuevo" y duplica sus vectores —
+el mismo mecanismo del item 65) y `validation_overrides.csv`. **Buena noticia:** `index.faiss` es
+puramente posicional (correlacionado por orden con `metadata.jsonl`, sin paper_id propio), así que
+nada de esto requiere re-embeber ni reindexar con `--force`.
+
+**Implementado en `9_cleanup_duplicates.py`:** `build_new_paper_id(rec)` (nombre canónico desde
+`title`/`year`/`authors` YA corregidos localmente, sin llamar a Crossref — es justo el dato que el
+usuario acaba de arreglar a mano) y `rename_paper(category, old_id, new_id, base)`, que renombra y
+parchea los 8 puntos atómicamente: valida ANTES de mover nada que ningún artefacto del `new_id`
+exista ya (si colisiona, `FileExistsError` sin tocar un solo fichero — nunca deja un renombrado a
+medias), backup `.bak` en cada JSON/JSONL escrito. `validation_overrides.rename_paper_id()` nuevo
+en ese módulo para el punto 8. Sin "restore" de un clic (a diferencia de la cuarentena, que sí lo
+tiene) — para deshacer, restaurar los `.bak` y revertir los renombrados de fichero con la lista
+`files_renamed` del resultado.
+
+**UI en `11_Articulos.py`:** botón "🏷️ Renombrar seleccionados" junto a "Guardar cambios"/"Eliminar
+seleccionados", reutilizando las mismas casillas `_sel`. Vista previa old→new antes de aplicar
+(omite los que ya tienen nombre canónico, no tienen título, o no se encontraron); dedup de
+colisiones dentro del mismo lote (dos seleccionados que generarían el mismo nombre) y contra el
+filesystem vía `_dedupe_new_id()` (sufijo `_2`, `_3`…).
+
+**Verificación — la pregunta de "¿esto rompe el reproceso?" se respondió empíricamente, no por
+inspección de código:** `tests/test_cleanup_rename.py` (13 casos) cubre los 8 puntos de parcheo, el
+abort limpio por colisión (nada se toca si falla la validación) y, el test que importa de verdad,
+**un reproceso real:** se crea un paper procesado con TEI/md_clean/PDF reales, se renombra con
+`rename_paper()`, y se ejecuta `4_extract_metadata.py` de verdad (subprocess, no mock) contra el
+proyecto renombrado. Resultado: `papers_metadata.jsonl` sigue teniendo exactamente 1 línea, con el
+`paper_id` nuevo, y no queda **ningún** rastro del nombre viejo en ningún artefacto — ni huérfano ni
+duplicado. También se confirmó que el nuevo nombre cumple `already_renamed()` de
+`1_rename_papers_by_doi.py`, así que un futuro "Renombrar PDFs por DOI" sobre esa categoría lo
+saltaría sin tocarlo. Suite completa: 312 passed, 2 skipped.
+
+**69 — tres filtros nuevos en "Mostrar" del editor:** "Sin revista", "Sin título" (triviales, mismo
+patrón que "Sin DOI"/"Sin año" ya existentes) y "Nombres juntos" — autores camelCase pegados sin
+espacios (p.ej. "ViolaCorbellini"). Este último reutiliza `check_glued_authors()` de
+`utils/metadata_validation.py` (la misma heurística que ya usa `validate_metadata.py`, única fuente
+de verdad) en vez de duplicar la regex: como esa función necesita la lista estructurada de autores
+y la tabla del editor solo tiene el texto ya aplanado (`_fmt_authors`), el filtro carga los
+registros crudos de `papers_metadata.jsonl` solo para las filas visibles (`_load_raw_records()`,
+reutilizado también por el renombrado del punto 68).
+
+**Pendiente:** confirmar ambos contra el NAS real (igual que el item 66, esta sesión no tuvo acceso
+de lectura a `/Volumes/research/`) y probar la UI en el navegador — sin acceso a la app corriendo
+en esta sesión. Recordatorio operativo: `9_cleanup_duplicates.py` se cachea en `sys.modules` por
+`11_Articulos.py`/`pipeline.py` (solo `10_Duplicados.py` lo recarga siempre fresco) — el proceso de
+Streamlit necesita reiniciarse para que `build_new_paper_id`/`rename_paper` estén disponibles, igual
+que ya pasaba con el fix del item 66.2.
+
+---
 ### ✅ 67. Selección masiva por categoría en `15_Pendientes.py` (2026-10-27)
 
 Petición de Martín: al añadir una categoría nueva aparecen de golpe muchos DOIs pendientes, y

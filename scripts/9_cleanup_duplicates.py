@@ -698,6 +698,264 @@ def restore_from_quarantine(
     return restored, meta_updated, warnings
 
 
+# ============================================================
+# RENOMBRADO DE PAPERS YA PROCESADOS (item 68)
+# ============================================================
+# A diferencia de 1_rename_papers_by_doi.py (que solo renombra el PDF, antes
+# de que existan TEI/md_clean/chunks — paso 1 del pipeline, inbox/), esto
+# renombra un paper YA PROCESADO: hay que tocar todos los sitios donde vive
+# su paper_id o un reproceso posterior lo trataría como huérfano (el PDF
+# nuevo sin TEI/md_clean, o viceversa — el mismo defecto que resucitaba
+# papers en cuarentena, ver item 66).
+
+_RENAME_ARTIFACT_DIRS = (
+    ("tei",       (".tei.xml", ".xml")),
+    ("md_clean",  (".clean.md",)),
+    ("summaries", (".summary.md",)),
+    ("chunks",    (".chunks.jsonl", ".jsonl")),
+)
+
+
+def build_new_paper_id(rec: dict, max_words: int = 8) -> str:
+    """Construye el nombre canónico `{año}_{apellido}_{título_corto}` (mismo
+    esquema que `1_rename_papers_by_doi.py::build_new_filename`) a partir de
+    un registro YA CORREGIDO de `papers_metadata.jsonl` — sin llamar a
+    Crossref: usa title/year/authors locales, que es justo lo que el usuario
+    acaba de arreglar a mano en el editor de Artículos."""
+    from utils.pdf_utils import slugify, shorten_title, sanitize_filename  # noqa: PLC0415
+
+    year = str(rec.get("year") or "0000")
+    authors = rec.get("authors") or []
+    surname = ""
+    if authors:
+        a0 = authors[0]
+        if isinstance(a0, dict):
+            surname = (a0.get("surname") or "").strip()
+            if not surname:
+                full = (a0.get("full") or "").strip()
+                surname = full.split()[-1] if full else ""
+        else:
+            txt = str(a0).strip()
+            surname = txt.split()[-1] if txt else ""
+    surname_slug = slugify(surname) or "unknownauthor"
+    title = (rec.get("title") or "").strip() or "untitled"
+    short_title = shorten_title(title, max_words=max_words)
+    filename = sanitize_filename(f"{year}_{surname_slug}_{short_title}.pdf")
+    return Path(filename).stem
+
+
+def _existing_artifact_paths(project_dir: Path, stem: str) -> list[Path]:
+    """Rutas que existirían para `stem` en cada carpeta de artefactos, EXISTAN
+    o no (a diferencia de candidate_paths, que solo busca ficheros de OTRO
+    stem a mover). Se usa para detectar colisión con un `new_id` candidato."""
+    paths = [project_dir / "pdfs" / f"{stem}{ext}" for ext in PDF_EXTS]
+    for sub, exts in _RENAME_ARTIFACT_DIRS:
+        paths.extend(project_dir / sub / f"{stem}{ext}" for ext in exts)
+    paths.append(project_dir / "metadata" / "per_paper" / f"{stem}.metadata.json")
+    paths.append(project_dir / "metadata" / "per_paper" / f"{stem}.references.json")
+    return paths
+
+
+def _patch_jsonl_field(path: Path, field: str, old_val: str, new_val: str) -> bool:
+    """Reescribe `path` (JSONL) sustituyendo `field` donde valga `old_val`.
+    Backup `.bak` solo si hay cambios. Devuelve True si se modificó algo."""
+    lines: list[str] = []
+    changed = False
+    with path.open(encoding="utf-8") as f:
+        for line in f:
+            s = line.rstrip("\n")
+            stripped = s.strip()
+            if not stripped:
+                lines.append(s)
+                continue
+            try:
+                d = json.loads(stripped)
+            except Exception:
+                lines.append(s)
+                continue
+            if d.get(field) == old_val:
+                d[field] = new_val
+                changed = True
+                s = json.dumps(d, ensure_ascii=False)
+            lines.append(s)
+    if changed:
+        shutil.copy(path, path.with_name(path.name + ".bak"))
+        path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
+    return changed
+
+
+def _patch_papers_metadata(meta_path: Path, old_id: str, new_id: str, project_dir: Path) -> bool:
+    """Como _patch_jsonl_field pero además actualiza stable_id (si coincidía
+    con el paper_id viejo, caso sin DOI) y tei_file (ruta al nuevo TEI)."""
+    lines: list[str] = []
+    changed = False
+    with meta_path.open(encoding="utf-8") as f:
+        for line in f:
+            s = line.rstrip("\n")
+            stripped = s.strip()
+            if not stripped:
+                lines.append(s)
+                continue
+            try:
+                d = json.loads(stripped)
+            except Exception:
+                lines.append(s)
+                continue
+            if d.get("paper_id") == old_id:
+                d["paper_id"] = new_id
+                if d.get("stable_id") == old_id:
+                    d["stable_id"] = new_id
+                if d.get("tei_file"):
+                    d["tei_file"] = str(project_dir / "tei" / f"{new_id}.tei.xml")
+                changed = True
+                s = json.dumps(d, ensure_ascii=False)
+            lines.append(s)
+    if changed:
+        shutil.copy(meta_path, meta_path.with_name(meta_path.name + ".bak"))
+        meta_path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
+    return changed
+
+
+def rename_paper(category: str, old_id: str, new_id: str, base: Path) -> dict:
+    """Renombra TODOS los artefactos de un paper ya procesado de `old_id` a
+    `new_id` y actualiza su paper_id en cada sitio donde vive: ficheros
+    (pdf/tei/md_clean/chunks/summary/per_paper), papers_metadata.jsonl,
+    references.jsonl, el campo interno "paper_id" de cada chunk,
+    embeddings/*/metadata.jsonl, embeddings/*/indexed_papers.json y
+    validation_overrides.csv. El índice FAISS (index.faiss) NO se toca: es
+    puramente posicional, correlacionado por orden con metadata.jsonl, así
+    que no hace falta re-embeber nada.
+
+    Valida ANTES de mover nada que ningún artefacto de `new_id` exista ya
+    (si lo hace, levanta FileExistsError sin tocar un solo fichero — nunca
+    deja un renombrado a medias). Cada JSON/JSONL tocado se respalda en
+    `.bak` antes de escribir, igual que el resto del pipeline; no hay un
+    "restore_from_rename" dedicado (a diferencia de la cuarentena) — para
+    deshacer, restaura los `.bak` y revierte los renombrados de fichero con
+    la lista `files_renamed` del resultado.
+
+    Devuelve {"old_id","new_id","category","files_renamed":[[old,new],...],
+              "patched":[...]} o {"skipped": motivo} si old_id==new_id.
+    """
+    if old_id == new_id:
+        return {"old_id": old_id, "new_id": new_id, "category": category,
+                "files_renamed": [], "patched": [], "skipped": "mismo nombre"}
+
+    project_dir = base / category
+
+    # ── Validación: ningún artefacto de new_id puede existir ya ──
+    for target in _existing_artifact_paths(project_dir, new_id):
+        if target.exists():
+            raise FileExistsError(
+                f"Ya existe {target}: elige otro nombre o no renombres '{old_id}'."
+            )
+
+    files_renamed: list[tuple[Path, Path]] = []
+    patched: list[str] = []
+
+    # 1) pdf + tei + md_clean + summaries + chunks (candidate_paths ya incluye
+    #    el fallback difuso/por DOI si el nombre actual no es exacto)
+    for path in candidate_paths(project_dir, old_id):
+        if not path.exists():
+            continue
+        new_name = None
+        if path.parent.name == "pdfs" and path.suffix in PDF_EXTS:
+            new_name = f"{new_id}.pdf"
+        else:
+            for sub, exts in _RENAME_ARTIFACT_DIRS:
+                if path.parent.name != sub:
+                    continue
+                for ext in exts:
+                    if path.name.endswith(ext):
+                        new_name = f"{new_id}{ext}"
+                        break
+                break
+        if new_name is None:
+            continue
+        target = path.with_name(new_name)
+        path.rename(target)
+        files_renamed.append((path, target))
+        log.info("Renombrado: %s -> %s", path, target)
+
+    # 2) per_paper/<old_id>.metadata.json + .references.json: renombrar y
+    #    parchear paper_id/stable_id/tei_file dentro del .metadata.json
+    per_paper = project_dir / "metadata" / "per_paper"
+    if per_paper.exists():
+        for p in sorted(per_paper.glob(f"{old_id}.*")):
+            suffix = p.name[len(old_id):]
+            target = per_paper / f"{new_id}{suffix}"
+            p.rename(target)
+            files_renamed.append((p, target))
+            log.info("Renombrado: %s -> %s", p, target)
+            if suffix == ".metadata.json":
+                try:
+                    d = json.loads(target.read_text(encoding="utf-8"))
+                    if d.get("paper_id") == old_id:
+                        d["paper_id"] = new_id
+                    if d.get("stable_id") == old_id:
+                        d["stable_id"] = new_id
+                    if d.get("tei_file"):
+                        d["tei_file"] = str(project_dir / "tei" / f"{new_id}.tei.xml")
+                    target.write_text(
+                        json.dumps(d, ensure_ascii=False, indent=2), encoding="utf-8")
+                except Exception as e:
+                    log.warning("No se pudo parchear %s: %s", target, e)
+
+    # 3) campo interno "paper_id" de cada línea de chunks/<new_id>.*
+    chunks_dir = project_dir / "chunks"
+    if chunks_dir.exists():
+        for ext in (".chunks.jsonl", ".jsonl"):
+            cpath = chunks_dir / f"{new_id}{ext}"
+            if cpath.exists() and _patch_jsonl_field(cpath, "paper_id", old_id, new_id):
+                patched.append(str(cpath))
+
+    # 4) papers_metadata.jsonl (paper_id + stable_id + tei_file)
+    meta_path = project_dir / "metadata" / "papers_metadata.jsonl"
+    if meta_path.exists() and _patch_papers_metadata(meta_path, old_id, new_id, project_dir):
+        patched.append(str(meta_path))
+
+    # 5) references.jsonl
+    refs_path = project_dir / "metadata" / "references.jsonl"
+    if refs_path.exists() and _patch_jsonl_field(refs_path, "paper_id", old_id, new_id):
+        patched.append(str(refs_path))
+
+    # 6) embeddings/*/metadata.jsonl + indexed_papers.json — el índice FAISS
+    #    es posicional y no se toca; solo su metadata lateral.
+    emb_dir = project_dir / "embeddings"
+    if emb_dir.exists():
+        for phase_dir in sorted(p for p in emb_dir.iterdir() if p.is_dir()):
+            emeta = phase_dir / "metadata.jsonl"
+            if emeta.exists() and _patch_jsonl_field(emeta, "paper_id", old_id, new_id):
+                patched.append(str(emeta))
+            idx_path = phase_dir / "indexed_papers.json"
+            if idx_path.exists():
+                try:
+                    data = json.loads(idx_path.read_text(encoding="utf-8"))
+                    ids = data.get("paper_ids", [])
+                    if old_id in ids:
+                        shutil.copy(idx_path, idx_path.with_name(idx_path.name + ".bak"))
+                        data["paper_ids"] = sorted((set(ids) - {old_id}) | {new_id})
+                        idx_path.write_text(
+                            json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+                        patched.append(str(idx_path))
+                except Exception as e:
+                    log.warning("No se pudo parchear %s: %s", idx_path, e)
+
+    # 7) validation_overrides.csv (campos "verificados" del usuario)
+    try:
+        from utils import validation_overrides  # noqa: PLC0415
+        if validation_overrides.rename_paper_id(category, old_id, new_id):
+            patched.append("validation_overrides.csv")
+    except Exception as e:
+        log.warning("No se pudo actualizar validation_overrides.csv: %s", e)
+
+    return {
+        "old_id": old_id, "new_id": new_id, "category": category,
+        "files_renamed": [[str(o), str(t)] for o, t in files_renamed],
+        "patched": patched,
+    }
+
+
 def rewrite_metadata(decisions: list[DuplicateDecision]) -> None:
     removals_by_meta: dict[Path, set[int]] = defaultdict(set)
     for dec in decisions:

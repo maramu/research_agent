@@ -90,6 +90,20 @@ def undismiss(category: str, paper_id: str, field: str) -> int:
     return affected
 
 
+def rename_paper_id(category: str, old_id: str, new_id: str) -> int:
+    """Actualiza paper_id tras un renombrado de ficheros (9_cleanup_duplicates
+    .rename_paper(), botón de 11_Articulos.py) para que un campo ya marcado
+    como "verificado" no quede huérfano bajo el id viejo. Devuelve el nº de
+    filas afectadas."""
+    df = load()
+    mask = (df["category"] == category) & (df["paper_id"] == old_id)
+    affected = int(mask.sum())
+    if affected:
+        df.loc[mask, "paper_id"] = new_id
+        save(df)
+    return affected
+
+
 def list_dismissed(category: str) -> pd.DataFrame:
     """Filas de `category` (más recientes primero) — para revisar/revertir."""
     df = load()

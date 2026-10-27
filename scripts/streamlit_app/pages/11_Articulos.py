@@ -42,7 +42,9 @@ from app_utils import (
 )
 from utils import validation_overrides
 from utils.crossref import fetch_work
-from utils.metadata_validation import build_validate_cmd, issue_is_stale, year_delta_severity
+from utils.metadata_validation import (
+    build_validate_cmd, check_glued_authors, issue_is_stale, year_delta_severity,
+)
 
 # ── Helpers para DOI ──
 
@@ -357,6 +359,74 @@ def delete_papers(category: str, paper_ids: list[str]) -> dict:
     return {"deleted": deleted, "dest": str(dest_root)}
 
 
+def _load_raw_records(category: str, paper_ids: set) -> dict:
+    """{paper_id: registro completo} desde papers_metadata.jsonl, para los
+    renombrados: load_articles() solo expone columnas aplanadas (autores como
+    texto), y build_new_paper_id() necesita la lista estructurada de autores."""
+    path = CATEGORIAS_DIR / category / "metadata" / "papers_metadata.jsonl"
+    out: dict = {}
+    if not path.exists():
+        return out
+    with path.open(encoding="utf-8") as f:
+        for line in f:
+            s = line.strip()
+            if not s:
+                continue
+            try:
+                d = json.loads(s)
+            except Exception:
+                continue
+            pid = d.get("paper_id") or d.get("stable_id") or ""
+            if pid in paper_ids:
+                out[pid] = d
+    return out
+
+
+def _dedupe_new_id(base_new_id: str, seen: set, cleanup_mod, project_dir) -> str:
+    """Evita colisión de new_id tanto con otro paper del mismo lote como con
+    ficheros ya existentes en disco (de CUALQUIER otro paper)."""
+    candidate = base_new_id
+    i = 2
+    while candidate in seen or any(
+        p.exists() for p in cleanup_mod._existing_artifact_paths(project_dir, candidate)
+    ):
+        candidate = f"{base_new_id}_{i}"
+        i += 1
+    return candidate
+
+
+def build_rename_preview(category: str, paper_ids: list) -> list:
+    """Para cada paper_id seleccionado: calcula su new_id canónico (a partir
+    de la metadata YA corregida en papers_metadata.jsonl, sin llamar a
+    Crossref) y marca como 'omitido' los que no se pueden o no necesitan
+    renombrar. No toca nada en disco — solo construye la vista previa."""
+    cleanup_mod = _load_cleanup_module()
+    project_dir = CATEGORIAS_DIR / category
+    raw = _load_raw_records(category, set(paper_ids))
+    seen_new_ids: set = set()
+    candidatos = []
+    for pid in paper_ids:
+        rec = raw.get(pid)
+        if rec is None:
+            candidatos.append({"paper_id": pid, "new_id": "", "status": "omitido",
+                                "motivo": "no encontrado en papers_metadata.jsonl"})
+            continue
+        if not str(rec.get("title") or "").strip():
+            candidatos.append({"paper_id": pid, "new_id": "", "status": "omitido",
+                                "motivo": "sin título: no se puede construir un nombre"})
+            continue
+        new_id = cleanup_mod.build_new_paper_id(rec)
+        if new_id == pid:
+            candidatos.append({"paper_id": pid, "new_id": new_id, "status": "omitido",
+                                "motivo": "ya tiene el nombre canónico"})
+            continue
+        new_id = _dedupe_new_id(new_id, seen_new_ids, cleanup_mod, project_dir)
+        seen_new_ids.add(new_id)
+        candidatos.append({"paper_id": pid, "new_id": new_id, "status": "pendiente",
+                            "motivo": ""})
+    return candidatos
+
+
 # ── Fin helpers DOI ─────────────────────────────────────────────────────────
 
 st.set_page_config(page_title="Artículos", page_icon="📋", layout="wide")
@@ -640,7 +710,9 @@ if not PUBLIC:
                 )
             with fcol2:
                 mostrar = st.radio(
-                    "Mostrar", ["Todos", "Sin DOI", "Sin año", "Sin autores", "Incompletos"],
+                    "Mostrar", ["Todos", "Sin DOI", "Sin año", "Sin autores",
+                               "Sin revista", "Sin título", "Nombres juntos",
+                               "Incompletos"],
                     index=0, key=f"art_edit_show_{sel}",
                 )
 
@@ -661,6 +733,18 @@ if not PUBLIC:
                 edit_rows = [r for r in edit_rows if r.get("year") in (None, "")]
             elif mostrar == "Sin autores":
                 edit_rows = [r for r in edit_rows if not str(r.get("authors") or "").strip()]
+            elif mostrar == "Sin revista":
+                edit_rows = [r for r in edit_rows if not str(r.get("journal") or "").strip()]
+            elif mostrar == "Sin título":
+                edit_rows = [r for r in edit_rows if not str(r.get("title") or "").strip()]
+            elif mostrar == "Nombres juntos":
+                # Autores camelCase pegados sin espacios (p.ej. "ViolaCorbellini"):
+                # misma heurística que validate_metadata.py (check_glued_authors),
+                # aplicada aquí sobre el registro crudo (necesita la lista
+                # estructurada de autores, no el texto ya aplanado de la tabla).
+                _raw = _load_raw_records(sel, {r["paper_id"] for r in edit_rows})
+                edit_rows = [r for r in edit_rows
+                             if check_glued_authors(_raw.get(r["paper_id"], {})) is not None]
             elif mostrar == "Incompletos":
                 edit_rows = [r for r in edit_rows if _incompleto(r)]
 
@@ -719,8 +803,10 @@ if not PUBLIC:
                     key=f"art_editor_{sel}_{nonce}_{abs(hash((q_ed, mostrar)))}",
                 )
                 orig = {r["paper_id"]: r for r in edit_rows}
+                selected_ids = [row["paper_id"] for _, row in edited.iterrows()
+                               if row.get("_sel")]
 
-                cga, cgb = st.columns(2)
+                cga, cgb, cgc = st.columns(3)
                 with cga:
                     if st.button("💾 Guardar cambios", type="primary", use_container_width=True):
                         updates = {}
@@ -754,18 +840,77 @@ if not PUBLIC:
                             load_articles.clear(); _summary_rows.clear()
                             st.rerun()
                 with cgb:
-                    to_delete = [row["paper_id"] for _, row in edited.iterrows() if row.get("_sel")]
-                    st.caption(f"{len(to_delete)} marcado(s) para eliminar.")
+                    st.caption(f"{len(selected_ids)} marcado(s).")
                     confirm = st.checkbox("Confirmo eliminar (reversible → quarantine/)",
                                           key=f"confirm_del_{sel}")
                     if st.button("🗑 Eliminar seleccionados", use_container_width=True,
-                                 disabled=not (to_delete and confirm)):
-                        with st.spinner(f"Eliminando {len(to_delete)} y re-indexando…"):
-                            res = delete_papers(sel, to_delete)
+                                 disabled=not (selected_ids and confirm)):
+                        with st.spinner(f"Eliminando {len(selected_ids)} y re-indexando…"):
+                            res = delete_papers(sel, selected_ids)
                         st.success(f"✓ {res['deleted']} eliminado(s) → {res['dest']}. FAISS re-indexado.")
                         st.session_state["art_editor_nonce"] = nonce + 1
                         load_articles.clear(); _summary_rows.clear()
                         st.rerun()
+                with cgc:
+                    st.caption("Usa los datos ya corregidos arriba.")
+                    if st.button("🏷️ Renombrar seleccionados", use_container_width=True,
+                                 disabled=not selected_ids):
+                        st.session_state[f"rename_candidatos_{sel}"] = build_rename_preview(
+                            sel, selected_ids)
+                        st.rerun()
+
+                # ── Vista previa + aplicación del renombrado ──
+                _ren_key = f"rename_candidatos_{sel}"
+                _candidatos = st.session_state.get(_ren_key)
+                if _candidatos:
+                    st.markdown("###### 🏷️ Vista previa del renombrado")
+                    st.caption(
+                        "Renombra PDF + TEI + md\\_clean + chunks + summary + per\\_paper y "
+                        "actualiza paper\\_id en papers\\_metadata.jsonl, references.jsonl, "
+                        "embeddings/*/metadata.jsonl e indexed\\_papers.json, y "
+                        "validation\\_overrides.csv. El índice FAISS no se toca (es posicional, "
+                        "no hace falta re-indexar). Backup `.bak` en cada fichero tocado; sin "
+                        "deshacer con un clic — para revertir, restaura los `.bak` y renombra "
+                        "los ficheros de vuelta."
+                    )
+                    st.dataframe(pd.DataFrame(_candidatos), hide_index=True,
+                                use_container_width=True)
+                    _aplicables = [c for c in _candidatos if c["status"] == "pendiente"]
+                    _omitidos = len(_candidatos) - len(_aplicables)
+                    if _omitidos:
+                        st.caption(f"{_omitidos} omitido(s) — no se tocarán (ver motivo arriba).")
+                    rc1, rc2, rc3 = st.columns([2, 1, 1])
+                    with rc1:
+                        confirm_ren = st.checkbox(
+                            f"Confirmo renombrar {len(_aplicables)} paper(s)",
+                            key=f"confirm_ren_{sel}", disabled=not _aplicables)
+                    with rc2:
+                        if st.button("🏷️ Aplicar", type="primary", use_container_width=True,
+                                     disabled=not (_aplicables and confirm_ren)):
+                            cleanup_mod = _load_cleanup_module()
+                            ok, errores = 0, []
+                            for c in _aplicables:
+                                try:
+                                    cleanup_mod.rename_paper(
+                                        sel, c["paper_id"], c["new_id"], CATEGORIAS_DIR)
+                                    ok += 1
+                                except Exception as e:
+                                    errores.append(f"{c['paper_id']}: {e}")
+                            st.session_state.pop(_ren_key, None)
+                            st.session_state["art_editor_nonce"] = nonce + 1
+                            load_articles.clear(); _summary_rows.clear()
+                            if errores:
+                                st.warning(f"✓ {ok} renombrado(s). {len(errores)} con error:")
+                                for e in errores:
+                                    st.caption(f"- {e}")
+                            else:
+                                st.success(f"✓ {ok} paper(s) renombrado(s).")
+                            st.rerun()
+                    with rc3:
+                        if st.button("Cancelar", use_container_width=True,
+                                     key=f"cancel_ren_{sel}"):
+                            st.session_state.pop(_ren_key, None)
+                            st.rerun()
 
 
 # ───────────────────────────────────────────────────────────────────────────

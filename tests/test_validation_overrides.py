@@ -59,6 +59,26 @@ class TestDismissUndismiss:
         assert ("p1", "title") not in vo.dismissed_set("cat2")
 
 
+class TestRenamePaperId:
+    def test_renames_matching_rows(self):
+        vo.dismiss("cat1", "old_id", "year", note="verificado")
+        affected = vo.rename_paper_id("cat1", "old_id", "new_id")
+        assert affected == 1
+        df = vo.load()
+        assert "old_id" not in set(df["paper_id"])
+        assert ("new_id", "year") in vo.dismissed_set("cat1")
+
+    def test_does_not_touch_other_category_or_paper(self):
+        vo.dismiss("cat1", "old_id", "year")
+        vo.dismiss("cat2", "old_id", "year")
+        vo.rename_paper_id("cat1", "old_id", "new_id")
+        assert ("old_id", "year") in vo.dismissed_set("cat2")
+        assert ("new_id", "year") not in vo.dismissed_set("cat2")
+
+    def test_no_matching_rows_returns_zero(self):
+        assert vo.rename_paper_id("cat1", "ghost", "new_id") == 0
+
+
 class TestListDismissed:
     def test_list_dismissed_scoped_to_category(self):
         vo.dismiss("cat1", "p1", "title", note="a")
