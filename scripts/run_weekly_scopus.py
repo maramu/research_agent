@@ -437,9 +437,19 @@ def main(dry_run: bool = False) -> None:
             overall     = result.get("status", "error")
             log.info("run_scopus completado — estado: %s", overall)
         except concurrent.futures.TimeoutError:
+            # Item 54: antes solo se abandonaba el hilo y los subprocesos seguían vivos
+            # (launchd veía el job activo, Ollama ocupado, y el recuento de PDFs del email
+            # se tomaba a mitad de la ingesta). Ahora se cancelan de verdad.
+            import pipeline
+            n_killed = pipeline.cancel_active_steps()
+            try:
+                future.result(timeout=60)      # el hilo termina al volver los pasos cancelados
+            except Exception:
+                pass
             error_msg = (
                 f"run_scopus superó el timeout de {SCOPUS_TIMEOUT}s "
-                f"({SCOPUS_TIMEOUT // 60} min). El subproceso sigue en background."
+                f"({SCOPUS_TIMEOUT // 60} min). Se cancelaron {n_killed} subproceso(s); "
+                "los recuentos del email corresponden al estado tras la cancelación."
             )
             overall   = "timeout"
             cat_results = {cat: {"status": "timeout"} for cat in WEEKLY_CATEGORIES}
