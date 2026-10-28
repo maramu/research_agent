@@ -143,21 +143,13 @@ def verify_index_integrity(out_dir, index) -> tuple[int, float]:
     return n_meta, mean_norm
 
 
-def embed_texts(client, texts: list, model: str, truncated_out: list | None = None) -> list:
-    """Embeddea uno a uno. Si un chunk excede el contexto del modelo, lo trunca
-    progresivamente (2/3 cada vez) y reintenta: la densidad en tokens del texto
-    con fórmulas/subíndices puede superar el contexto aun con pocos caracteres.
+EMBED_BATCH = 16          # textos por llamada a /api/embed
+_batch_disabled = False   # se activa si el servidor no soporta /api/embed
 
-    Devuelve una lista de np.ndarray float32 (uno por texto, en orden). Los
-    vectores se devuelven CRUDOS (sin normalizar): normaliza el constructor del
-    índice con ``l2_normalize`` justo antes de ``index.add``.
 
-    ``truncated_out`` (opcional, P2 de la auditoría Kimi): si se pasa una lista,
-    se le añade un booleano por texto indicando si el vector representa solo
-    PARTE del texto — sea por el recorte previo a ``MAX_EMBED_CHARS`` o por el
-    truncado reactivo. El caller lo persiste como ``embed_truncated`` en
-    metadata.jsonl para poder auditar qué vectores no cubren su texto completo.
-    """
+def _embed_one_by_one(client, texts: list, model: str, truncated_out: list | None) -> list:
+    """Camino original: un chunk por llamada; si excede el contexto del modelo lo
+    trunca progresivamente (2/3 cada vez) y reintenta."""
     out = []
     for text in texts:
         full_len = len(text)
@@ -177,6 +169,51 @@ def embed_texts(client, texts: list, model: str, truncated_out: list | None = No
             raise RuntimeError("No se pudo embeber un chunk ni tras truncarlo al mínimo")
         if truncated_out is not None:
             truncated_out.append(len(t) < full_len)
+    return out
+
+
+def embed_texts(client, texts: list, model: str, truncated_out: list | None = None,
+                batch: int = EMBED_BATCH) -> list:
+    """Embeddea `texts` en lotes de `batch` con /api/embed (item 77): una llamada
+    por lote en vez de una por chunk, ≈2× más rápido (medido; coseno 0,9999999 con
+    el camino uno a uno). Se pide ``truncate=False`` para que un chunk que excede
+    el contexto DÉ ERROR en vez de truncarse en silencio; ese lote cae entonces al
+    camino uno a uno, que sí trunca progresivamente y lo anota. Si el servidor no
+    soporta /api/embed se usa siempre el camino uno a uno.
+
+    Devuelve una lista de np.ndarray float32 (uno por texto, en orden). Los
+    vectores se devuelven CRUDOS (sin normalizar): normaliza el constructor del
+    índice con ``l2_normalize`` justo antes de ``index.add``.
+
+    ``truncated_out`` (opcional, P2 de la auditoría Kimi): si se pasa una lista,
+    se le añade un booleano por texto indicando si el vector representa solo
+    PARTE del texto — sea por el recorte previo a ``MAX_EMBED_CHARS`` o por el
+    truncado reactivo. El caller lo persiste como ``embed_truncated`` en
+    metadata.jsonl para poder auditar qué vectores no cubren su texto completo.
+    """
+    global _batch_disabled
+    out: list = []
+    for i in range(0, len(texts), max(1, batch)):
+        chunk = texts[i:i + batch]
+        done = False
+        if not _batch_disabled and len(chunk) > 1 and hasattr(client, "embed"):
+            clipped = [t if len(t) <= MAX_EMBED_CHARS else t[:MAX_EMBED_CHARS] for t in chunk]
+            try:
+                resp = client.embed(model=model, input=clipped, truncate=False)
+                embs = resp["embeddings"]
+                if len(embs) != len(chunk):
+                    raise RuntimeError("lote con nº de vectores distinto")
+                out.extend(np.array(e, dtype="float32") for e in embs)
+                if truncated_out is not None:
+                    truncated_out.extend(len(c) < len(t) for c, t in zip(clipped, chunk))
+                done = True
+            except Exception as e:
+                msg = str(e).lower()
+                if not ("context" in msg or "length" in msg or "too long" in msg):
+                    _batch_disabled = True       # servidor sin /api/embed u otro fallo
+                    print(f"  ℹ️ embedding por lotes desactivado ({type(e).__name__}); uno a uno")
+        if not done:
+            out.extend(_embed_one_by_one(client, chunk, model, truncated_out))
     return out
 
 

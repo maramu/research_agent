@@ -468,3 +468,52 @@ def test_build_embeddings_incremental_poda_papers_sin_chunks(tmp_path):
     assert "Podados del índice: 2 chunks de 1 paper(s)" in r.stdout
     assert faiss.read_index(str(out / "index.faiss")).ntotal == 2
     assert json.loads((out / "indexed_papers.json").read_text())["paper_ids"] == ["a"]
+
+
+class _FakeOllama:
+    """Cliente falso: .embed por lotes (puede fallar por contexto) y .embeddings."""
+    def __init__(self, batch_error=None, has_embed=True):
+        self.batch_calls = 0; self.single_calls = 0; self.batch_error = batch_error
+        if not has_embed:
+            self.embed = None
+            del self.embed
+
+    def embed(self, model, input, truncate=True):
+        self.batch_calls += 1
+        if self.batch_error:
+            raise RuntimeError(self.batch_error)
+        assert truncate is False
+        return {"embeddings": [[float(len(t)), 1.0] for t in input]}
+
+    def embeddings(self, model, prompt):
+        self.single_calls += 1
+        if len(prompt) > 5000:
+            raise RuntimeError("the input length exceeds the context length")
+        return {"embedding": [float(len(prompt)), 1.0]}
+
+
+def test_embed_texts_usa_lotes_y_conserva_orden():
+    from utils import embeddings as E
+    E._batch_disabled = False
+    c = _FakeOllama(); tr = []
+    out = E.embed_texts(c, ["a", "bb", "ccc", "dddd", "e"], "m", truncated_out=tr, batch=2)
+    assert [v[0] for v in out] == [1, 2, 3, 4, 1] and tr == [False] * 5
+    assert c.batch_calls == 2 and c.single_calls == 1     # 2+2 en lote; el último (1) suelto
+
+
+def test_embed_texts_error_de_contexto_cae_a_uno_a_uno_y_marca_truncado():
+    from utils import embeddings as E
+    E._batch_disabled = False
+    c = _FakeOllama(batch_error="the input length exceeds the context length"); tr = []
+    out = E.embed_texts(c, ["x" * 6000, "yy"], "m", truncated_out=tr, batch=8)
+    assert tr == [True, False] and out[1][0] == 2
+    assert E._batch_disabled is False                     # un error de contexto no desactiva lotes
+
+
+def test_embed_texts_servidor_sin_embed_se_desactiva_y_sigue():
+    from utils import embeddings as E
+    E._batch_disabled = False
+    c = _FakeOllama(batch_error="404 not found"); tr = []
+    out = E.embed_texts(c, ["a", "bb", "ccc"], "m", truncated_out=tr, batch=8)
+    assert [v[0] for v in out] == [1, 2, 3] and E._batch_disabled is True
+    E._batch_disabled = False

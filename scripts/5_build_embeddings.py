@@ -94,6 +94,7 @@ Notas:
 import argparse
 import json
 import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -349,6 +350,12 @@ def main():
     # que ningún consumidor cambia su "menor = mejor".
     X = l2_normalize(np.vstack(all_vectors))
 
+    # Item 77: escritura atómica. Índice y metadata van posicionalmente alineados;
+    # antes se escribía metadata.jsonl y después index.faiss, y una muerte del
+    # proceso entre ambas dejaba un índice desalineado. Ahora ambos se escriben a
+    # ficheros temporales y se renombran juntos al final (os.replace).
+    meta_path = out_dir / "metadata.jsonl"
+    tmp_idx, tmp_meta = out_dir / "index.faiss.tmp", out_dir / "metadata.jsonl.tmp"
     if incremental:
         index = faiss.read_index(str(index_path))
         # Antes de mezclar: si el índice existente es anterior al item 55a sus
@@ -356,21 +363,23 @@ def main():
         # ranking basura en silencio. Se comprueba ANTES de escribir nada.
         assert_index_normalized(index, context=str(index_path))
         index.add(X)
-        with (out_dir / "metadata.jsonl").open("a", encoding="utf-8") as f:
-            for m in all_meta:
-                f.write(json.dumps(m, ensure_ascii=False) + "\n")
+        if meta_path.exists():
+            shutil.copyfile(meta_path, tmp_meta)
+        mode = "a"
         new_paper_ids    = {rec.get("paper_id", "") for rec in all_meta}
         all_indexed_ids  = indexed_ids | new_paper_ids
     else:
         dim   = X.shape[1]
         index = faiss.IndexFlatL2(dim)
         index.add(X)
-        with (out_dir / "metadata.jsonl").open("w", encoding="utf-8") as f:
-            for m in all_meta:
-                f.write(json.dumps(m, ensure_ascii=False) + "\n")
+        mode = "w"
         all_indexed_ids = {rec.get("paper_id", "") for rec in all_meta}
-
-    faiss.write_index(index, str(index_path))
+    with tmp_meta.open(mode, encoding="utf-8") as f:
+        for m in all_meta:
+            f.write(json.dumps(m, ensure_ascii=False) + "\n")
+    faiss.write_index(index, str(tmp_idx))
+    os.replace(tmp_idx, index_path)
+    os.replace(tmp_meta, meta_path)
 
     dim          = index.d
     total_chunks = index.ntotal

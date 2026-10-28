@@ -2,6 +2,28 @@
 > Histórico append-only (lo más nuevo arriba). Backlog: Mejoras_pendientes.md · Estado/arquitectura: ESTADO.md
 
 ---
+### ✅ 77. Embeddings por lotes y escritura atómica del índice en `5_build_embeddings.py` (2026-10-28)
+
+**77.1 — Embeddings por lotes.** `embed_texts()` (`utils/embeddings.py`) hacía una llamada a Ollama por
+chunk. Ahora agrupa en lotes de 16 con `client.embed(input=[...], truncate=False)` (`/api/embed`): medido
+≈2× más rápido (8 chunks: 2,96 s → 1,43 s) y con coseno 0,9999999 respecto al camino uno a uno.
+`truncate=False` es deliberado: un chunk que excede el contexto debe DAR ERROR, no truncarse en silencio;
+ese lote cae al camino uno a uno original (truncado progresivo 2/3 + anotado en `embed_truncated`, el
+registro de la auditoría Kimi P2), conservando los lotes para el resto. Comprobado con Ollama real: un
+texto denso de símbolos en medio de un lote sale `embed_truncated=True` y el orden de los vectores se
+mantiene. Si el servidor no soporta `/api/embed`, se desactiva el modo lote en ese proceso
+(`_batch_disabled`) y se sigue uno a uno. La firma sigue siendo compatible para `2_RAG.py` y
+`books/embed.py`. 3 tests con un cliente falso (lotes y orden, error de contexto, servidor sin `/embed`).
+
+**77.2 — Escritura atómica.** Antes: `metadata.jsonl` se escribía ("w" o append) y DESPUÉS
+`index.faiss`; una muerte del proceso entre ambos dejaba índice y metadata desalineados (la consulta
+apuntaría al chunk equivocado). Ahora ambos se escriben a `*.tmp` y se renombran juntos con `os.replace`
+al final, tanto en `--force` como en incremental (en incremental la metadata temporal parte de una copia
+de la existente). Un proceso cortado a mitad deja el índice anterior intacto. Prueba de extremo a extremo
+con Ollama real sobre un mini-corpus: `--force` (29 chunks) + incremental (+6 = 35) con integridad 55b OK,
+sin ficheros `.tmp` residuales.
+
+---
 ### ✅ 76. El modo incremental de `5_build_embeddings.py` poda papers borrados; fuera `--force` de Duplicados y adhoc (2026-10-28)
 
 Cierra el límite del item 65 ("el incremental solo crece, nunca poda") reutilizando
