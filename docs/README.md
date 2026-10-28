@@ -9,3 +9,4 @@ La documentación viva está en la raíz: `CLAUDE.md`, `ESTADO.md`, `Mejoras_pen
 - `historico/` — material congelado:
   - `Mejoras_copia20260612.md` — copia del backlog original de junio.
   - `PENDIENTES_STREAMLIT.md` — nota de la pestaña Pendientes (ya implementada; ver `ESTADO.md`).
+- `noches/` — informes de las sesiones autónomas nocturnas (qué se hizo, cómo se verificó, qué quedó bloqueado).
