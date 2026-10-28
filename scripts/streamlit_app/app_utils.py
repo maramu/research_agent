@@ -940,8 +940,17 @@ def get_paper_status(category: str) -> list[dict]:
     rows = []
     for pdf in sorted(pdfs_dir.glob("*.pdf")):
         try:
-            from utils.pdf_utils import normalize_stem
+            from utils.pdf_utils import normalize_stem, stem_key
             paper_id = normalize_stem(pdf.stem)
+            # PDF con nombre largo y paper_id truncado: usar el id real (item 73)
+            if not (md_dir / f"{paper_id}.clean.md").exists():
+                _k = stem_key(pdf.stem)
+                for _m in md_dir.glob("*.clean.md"):
+                    _mid = _m.name[: -len(".clean.md")]
+                    _mk = stem_key(_mid)
+                    if len(_mk) >= 60 and _k.startswith(_mk):
+                        paper_id = _mid
+                        break
         except Exception:
             paper_id = pdf.stem
 

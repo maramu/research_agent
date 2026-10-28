@@ -411,6 +411,15 @@ def scan_quarantine_entries(category: str | None = None) -> list[dict]:
                 "pdf": any(f.suffix.lower() == ".pdf" for f in present),
                 "mb": round(sum(f.stat().st_size for f in present) / 1e6, 2),
             })
+    # PDFs apartados por el cribado de PDFs nuevos (quarantine/duplicates/<ts>/_manifest.csv)
+    for r in _load_cleanup_module().scan_screened_quarantine(qroot):
+        if category and r["category"] != category:
+            continue
+        out.append({
+            "manifest": r["csv"], "origen": "cribado", "lote": r["lote"],
+            "category": r["category"], "paper_id": r["filename"], "tipo": "pdf",
+            "ficheros": 1, "pdf": True, "mb": r["mb"], "motivo": r["reason"],
+        })
     out.sort(key=lambda e: e["lote"], reverse=True)
     return out
 
@@ -991,9 +1000,12 @@ if not PUBLIC:
 if not PUBLIC:
     st.divider()
     st.subheader("🗑 Cuarentena")
-    st.caption("Papers eliminados desde esta pestaña (`quarantine/deleted/`) o por "
-               "duplicados (`quarantine/duplicates/`). Restaurar los devuelve a su "
-               "sitio y re-indexa FAISS; eliminar definitivamente es **irreversible**.")
+    st.caption("Papers eliminados desde esta pestaña (`quarantine/deleted/`), por "
+               "duplicados (`quarantine/duplicates/`) y PDFs apartados por el cribado "
+               "(origen `cribado`; restaurar uno lo devuelve a `pdfs/` como PDF nuevo, "
+               "y volverá a detectarse como duplicado si su DOI ya está en el corpus). "
+               "Restaurar un paper re-indexa FAISS; eliminar definitivamente es "
+               "**irreversible**.")
     _qflash = st.session_state.pop("quarantine_flash", None)
     if _qflash:
         st.success(_qflash)
@@ -1010,7 +1022,7 @@ if not PUBLIC:
         _qed = st.data_editor(
             _qdf, hide_index=True, use_container_width=True, num_rows="fixed",
             column_order=["_sel", "lote", "origen", "category", "paper_id",
-                          "ficheros", "pdf", "mb"],
+                          "ficheros", "pdf", "mb", "motivo"],
             disabled=[c for c in _qdf.columns if c != "_sel"],
             column_config={"_sel": st.column_config.CheckboxColumn("✓"),
                            "mb": st.column_config.NumberColumn("MB")},
@@ -1026,6 +1038,14 @@ if not PUBLIC:
                 cleanup_mod = _load_cleanup_module()
                 n_files, warns, cats = 0, [], set()
                 for e in _qsel:
+                    if e.get("tipo") == "pdf":      # PDF apartado por el cribado
+                        w = cleanup_mod.restore_screened_pdf(
+                            Path(e["manifest"]), e["category"], e["paper_id"])
+                        if w:
+                            warns.append(f"{e['paper_id']}: {w}")
+                        else:
+                            n_files += 1
+                        continue
                     restored, _, w = cleanup_mod.restore_from_quarantine(
                         Path(e["manifest"]), CATEGORIAS_DIR)
                     n_files += len(restored)
@@ -1052,8 +1072,13 @@ if not PUBLIC:
                          disabled=not (_qsel and _qconf)):
                 cleanup_mod = _load_cleanup_module()
                 qroot = CATEGORIAS_DIR.parent / "quarantine"
-                n = sum(cleanup_mod.purge_quarantine_manifest(Path(e["manifest"]), qroot)
-                        for e in _qsel)
+                n = 0
+                for e in _qsel:
+                    if e.get("tipo") == "pdf":
+                        n += int(cleanup_mod.purge_screened_pdf(
+                            Path(e["manifest"]), e["category"], e["paper_id"]))
+                    else:
+                        n += cleanup_mod.purge_quarantine_manifest(Path(e["manifest"]), qroot)
                 st.session_state["quarantine_flash"] = (
                     f"✓ {len(_qsel)} paper(s) purgado(s) ({n} fichero(s) borrados).")
                 st.session_state["quarantine_nonce"] = _qn + 1

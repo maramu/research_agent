@@ -2,6 +2,41 @@
 > Histórico append-only (lo más nuevo arriba). Backlog: Mejoras_pendientes.md · Estado/arquitectura: ESTADO.md
 
 ---
+### ✅ 73. Auditoría de nombres + DOI manual: DOI desde el nombre del fichero, cuarentena del cribado, validación global (2026-10-28)
+
+**73.1 — Helper único de "paper ya procesado".** `utils/pdf_utils.py`: `stem_key`, `md_stem_keys`,
+`is_processed_stem` (clave exacta o prefijo ≥60 car.), sustituyendo las copias locales de
+`pipeline.screen_new_pdfs_against_corpus` y `1_rename_papers_by_doi.is_processed_pdf`. Auditados los
+demás usos de `normalize_stem`: `detect_affected_categories()` marcaba una categoría como "con PDFs
+sin procesar" para siempre si un PDF procesado tenía nombre largo, y `app_utils.get_paper_status()`
+lo mostraba incompleto — ambos corregidos. Los usos TEI/metadata↔md_clean (huérfanos) comparan
+ids de la misma procedencia y no tienen el problema. **Descartado a propósito:** emparejar PDF↔paper
+por DOI — rompería la detección de duplicados (dos PDFs con el mismo DOI son justo lo que el cribado
+debe apartar); el prefijo de ≥60 car. cubre el caso real.
+
+**73.2 — Cuarentena del cribado en la vista de Artículos.** `scan_screened_quarantine`,
+`restore_screened_pdf`, `purge_screened_pdf` en `9_cleanup_duplicates.py` para las carpetas
+`quarantine/duplicates/<ts>/_manifest.csv`; aparecen en la sección "🗑 Cuarentena" con origen
+`cribado` y su motivo (restaurar = devolver a `pdfs/` como PDF nuevo; purgar = borrar). Test de
+escaneo/restauración/purga.
+
+**73.3 — Pestaña DOI manual con filas "sin DOI" que sí lo tenían.** 19 filas de `doi_manual.xlsx`
+sin DOI: 16 eran PDFs descargados con el DOI en el nombre (`... [10.1016_j.x].pdf`, y
+`10.1515_znb-1986-1208.pdf`, que es el nombre original con que la descarga guardó el paper
+`1986_regine_autoxidation…`). `1_rename_papers_by_doi.py` solo buscaba el DOI en manual/CSV/texto del
+PDF, y al fallar añadía la fila vacía. Y peor: cuando el texto del PDF traía un DOI ajeno (nota legal de
+editorial → "Modern Slavery", el caso Alcántara) ese DOI ganaba al bueno del nombre.
+**Fix:** `extract_doi_from_filename()` (`utils/pdf_utils.py`) y nueva prioridad
+manual → CSV Scopus → **nombre de fichero** → texto del PDF. Limpieza puntual de las 19 filas:
+17 rellenadas (verificadas con Crossref salvo Jia, DOI de Scopus que Crossref no conoce); quedan 2
+sin DOI legítimo (capítulos del SpringerBrief). Backup `doi_manual.xlsx.bak`.
+
+**73.4 — Validación local+Crossref de todas las categorías** (sidecars estaban obsoletos). Resultado
+de marcados: biogas_upgrading 69, bioplastics 23, odor 8, y pocos más; incluye títulos que son el
+nombre de la revista ("Engineering Microbiology", "Introduction", "Chemical Engineering Journal"…).
+Se corrigen desde la sección de validación de Artículos (adoptar título de Crossref).
+
+---
 ### ✅ 72. Prevención en origen (nombre canónico antes de procesar) + borrado "sin rastro" automático (2026-10-28)
 
 Cierra los dos puntos de prevención que quedaron tras los items 70 y 71.

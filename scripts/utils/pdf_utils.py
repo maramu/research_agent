@@ -48,6 +48,50 @@ def normalize_stem(s: str) -> str:
     return s.strip("_")
 
 
+# Longitud mínima de clave para emparejar un PDF con un paper por PREFIJO.
+PREFIX_MATCH_MIN_KEY = 60
+
+
+def stem_key(s: str) -> str:
+    """Clave de comparación de nombres: minúsculas, todo lo no [a-z0-9] → '_'.
+    A diferencia de normalize_stem, ignora corchetes y paréntesis del "[doi]"."""
+    return re.sub(r"[^a-z0-9]+", "_", s.lower()).strip("_")
+
+
+def md_stem_keys(md_dir: Path) -> set[str]:
+    """Claves (stem_key) de los paper_id con md_clean en `md_dir`."""
+    if not md_dir.is_dir():
+        return set()
+    return {stem_key(m.name[: -len(".clean.md")]) for m in md_dir.glob("*.clean.md")}
+
+
+def is_processed_stem(pdf_stem: str, md_keys: set[str]) -> bool:
+    """True si el PDF `pdf_stem` ya corresponde a un paper procesado: clave
+    exacta, o prefijo de ≥PREFIX_MATCH_MIN_KEY caracteres (el paper_id puede
+    estar truncado respecto al nombre largo "Año - Autor - Título [doi]").
+    Deliberadamente NO empareja por DOI: dos PDFs con el mismo DOI son justo
+    el duplicado que el cribado debe detectar."""
+    k = stem_key(pdf_stem)
+    return k in md_keys or any(
+        len(mk) >= PREFIX_MATCH_MIN_KEY and k.startswith(mk) for mk in md_keys)
+
+
+_DOI_IN_NAME = re.compile(r"\[(10\.\d{4,9}_[^\]]+)\]|^(10\.\d{4,9}_[^\s]+)$")
+
+
+def extract_doi_from_filename(name: str) -> Optional[str]:
+    """DOI embebido en un nombre de fichero hecho por 3a_download_pdfs.py:
+    "Año - Autor - Título [10.1016_j.x.2025.1].pdf" o "10.1515_znb-1986-1208.pdf"
+    (el '/' del DOI se guarda como '_'). Mejor esfuerzo: solo se repone el primer
+    '/' (tras el registrante); el llamador debe validar el resultado (Crossref)."""
+    stem = Path(name).stem if name.lower().endswith(".pdf") else name
+    m = _DOI_IN_NAME.search(stem.strip())
+    if not m:
+        return None
+    raw = m.group(1) or m.group(2)
+    return normalize_doi(raw.replace("_", "/", 1)) or None
+
+
 def shorten_title(title: str, max_words: int = 8) -> str:
     """Acorta un título a las primeras max_words palabras significativas (sin stopwords)."""
     clean = strip_accents(title).lower()

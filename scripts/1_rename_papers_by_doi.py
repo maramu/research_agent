@@ -102,19 +102,13 @@ def unique_path(path: Path) -> Path:
 
 
 def is_processed_pdf(pdf_path: Path) -> bool:
-    """True si `pdf_path` está en categorias/<cat>/pdfs/ y ya tiene md_clean.
-    Empareja por clave exacta o por prefijo (≥60 car.): el paper_id puede estar
-    truncado respecto al nombre largo del PDF ("Año - Autor - Título [doi]")."""
+    """True si `pdf_path` está en categorias/<cat>/pdfs/ y ya tiene md_clean
+    (ver utils.pdf_utils.is_processed_stem)."""
+    from utils.pdf_utils import md_stem_keys, is_processed_stem
     md_dir = pdf_path.parent.parent / "md_clean"
     if pdf_path.parent.name != "pdfs" or not md_dir.is_dir():
         return False
-    fk = lambda t: re.sub(r"[^a-z0-9]+", "_", t.lower()).strip("_")  # noqa: E731
-    k = fk(pdf_path.stem)
-    for m in md_dir.glob("*.clean.md"):
-        mk = fk(m.name[:-len(".clean.md")])
-        if k == mk or (len(mk) >= 60 and k.startswith(mk)):
-            return True
-    return False
+    return is_processed_stem(pdf_path.stem, md_stem_keys(md_dir))
 
 
 def already_renamed(filename: str) -> bool:
@@ -582,6 +576,17 @@ def process_pdf(
             doi = csv_doi
             result["estado_doi_origen"] = "CSV_SCOPUS"
             log.info("DOI desde CSV Scopus para '%s' → %s", original, doi)
+
+    if not doi:
+        # El DOI que 3a_download_pdfs.py dejó en el nombre ("... [10.1016_j.x.1].pdf",
+        # "10.1515_znb-1986-1208.pdf") viene de Scopus/Crossref: es más fiable que
+        # el primer DOI que aparezca en el texto del PDF (que puede ser de otra
+        # obra, p.ej. una nota legal de la editorial → paper "Modern Slavery").
+        from utils.pdf_utils import extract_doi_from_filename
+        doi = extract_doi_from_filename(original)
+        if doi:
+            result["estado_doi_origen"] = "NOMBRE_FICHERO"
+            log.info("DOI desde el nombre de fichero '%s' → %s", original, doi)
 
     if not doi:
         # Fallback: extraer del PDF (extract_doi_from_pdf atrapa sus excepciones)

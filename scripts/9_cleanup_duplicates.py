@@ -836,6 +836,76 @@ def restore_from_quarantine(
     return restored, meta_updated, warnings
 
 
+# ── Cuarentena del cribado de PDFs nuevos (pipeline.screen_new_pdfs_against_corpus) ──
+# Formato distinto al de quarantine_paper(): quarantine/duplicates/<ts>/_manifest.csv
+# (category, filename, reason, original_path) + los PDFs en <ts>/<cat>/<filename>.
+
+def scan_screened_quarantine(quarantine_root: Path) -> list[dict]:
+    """Lista los PDFs apartados por el cribado que siguen en cuarentena."""
+    out: list[dict] = []
+    for mp in sorted(Path(quarantine_root).glob("duplicates/*/_manifest.csv")):
+        try:
+            rows = list(csv.DictReader(mp.open(encoding="utf-8", newline="")))
+        except Exception:
+            continue
+        for r in rows:
+            f = mp.parent / r.get("category", "") / r.get("filename", "")
+            if f.is_file():
+                out.append({"csv": str(mp), "lote": mp.parent.name,
+                            "category": r["category"], "filename": r["filename"],
+                            "reason": r.get("reason", ""),
+                            "original_path": r.get("original_path", ""),
+                            "mb": round(f.stat().st_size / 1e6, 2)})
+    return out
+
+
+def _drop_screened_row(csv_path: Path, filename: str, category: str) -> None:
+    """Quita la fila del manifiesto CSV; si no quedan filas, borra el CSV y
+    poda el lote vacío."""
+    rows = list(csv.DictReader(csv_path.open(encoding="utf-8", newline="")))
+    keep = [r for r in rows if not (r["filename"] == filename and r["category"] == category)]
+    if keep:
+        with csv_path.open("w", encoding="utf-8", newline="") as fh:
+            w = csv.DictWriter(fh, fieldnames=["category", "filename", "reason", "original_path"])
+            w.writeheader(); w.writerows(keep)
+        return
+    csv_path.unlink()
+    for d in sorted(csv_path.parent.rglob("*"), key=lambda x: len(x.parts), reverse=True):
+        if d.is_dir():
+            try: d.rmdir()
+            except OSError: pass
+    try: csv_path.parent.rmdir()
+    except OSError: pass
+
+
+def restore_screened_pdf(csv_path: Path, category: str, filename: str) -> str | None:
+    """Devuelve el PDF a su ruta original (sin sobrescribir). Devuelve un
+    aviso si no se pudo, None si fue bien."""
+    csv_path = Path(csv_path)
+    src = csv_path.parent / category / filename
+    row = next((r for r in csv.DictReader(csv_path.open(encoding="utf-8", newline=""))
+                if r["filename"] == filename and r["category"] == category), None)
+    if row is None or not src.is_file():
+        return f"no encontrado en cuarentena: {filename}"
+    dst = Path(row["original_path"])
+    if dst.exists():
+        return f"el destino ya existe, no se sobrescribe: {dst}"
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    shutil.move(str(src), str(dst))
+    _drop_screened_row(csv_path, filename, category)
+    return None
+
+
+def purge_screened_pdf(csv_path: Path, category: str, filename: str) -> bool:
+    """Borra DEFINITIVAMENTE un PDF de la cuarentena del cribado."""
+    csv_path = Path(csv_path)
+    src = csv_path.parent / category / filename
+    if src.is_file():
+        src.unlink()
+    _drop_screened_row(csv_path, filename, category)
+    return True
+
+
 def purge_quarantine_manifest(manifest_path: Path, quarantine_root: Path) -> int:
     """Borra DEFINITIVAMENTE (irreversible) los ficheros de un manifiesto de
     cuarentena y el propio manifiesto. Solo toca rutas dentro de

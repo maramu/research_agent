@@ -357,3 +357,37 @@ def test_rename_script_is_processed_pdf(tmp_path):
     nuevo = proj / "pdfs" / "2024 - Otro A - Un paper nuevo [10.1_x].pdf"
     largo.write_bytes(b"x"); nuevo.write_bytes(b"x")
     assert mod.is_processed_pdf(largo) and not mod.is_processed_pdf(nuevo)
+
+
+def _make_screened(tmp_path):
+    q = tmp_path / "quarantine"; lote = q / "duplicates" / "20260101_000000"
+    (lote / "cat").mkdir(parents=True)
+    orig = tmp_path / "categorias" / "cat" / "pdfs" / "a.pdf"
+    (lote / "cat" / "a.pdf").write_bytes(b"%PDF"); (lote / "cat" / "b.pdf").write_bytes(b"%PDF")
+    mp = lote / "_manifest.csv"
+    mp.write_text("category,filename,reason,original_path\n"
+                  f"cat,a.pdf,DOI ya en corpus (x),{orig}\n"
+                  f"cat,b.pdf,hash,{tmp_path / 'categorias' / 'cat' / 'pdfs' / 'b.pdf'}\n",
+                  encoding="utf-8")
+    return q, mp, orig
+
+
+def test_cuarentena_del_cribado_scan_restore_purge(tmp_path):
+    q, mp, orig = _make_screened(tmp_path)
+    assert {e["filename"] for e in cleanup.scan_screened_quarantine(q)} == {"a.pdf", "b.pdf"}
+    assert cleanup.restore_screened_pdf(mp, "cat", "a.pdf") is None
+    assert orig.exists() and not (mp.parent / "cat" / "a.pdf").exists()
+    assert [e["filename"] for e in cleanup.scan_screened_quarantine(q)] == ["b.pdf"]
+    assert "destino ya existe" not in (cleanup.restore_screened_pdf(mp, "cat", "zz.pdf") or "")
+    cleanup.purge_screened_pdf(mp, "cat", "b.pdf")
+    assert cleanup.scan_screened_quarantine(q) == []
+    assert not mp.exists() and not mp.parent.exists()     # lote vacío podado
+
+
+def test_extract_doi_from_filename():
+    from utils.pdf_utils import extract_doi_from_filename as f
+    assert f("10.1515_znb-1986-1208.pdf") == "10.1515/znb-1986-1208"
+    assert f("1998 - Sorokin D - Purification [10.1016_S0014-5793(98)00379-2].pdf") \
+        == "10.1016/S0014-5793(98)00379-2"
+    assert f("2026_zhou_energy_positive_thiosulfate_production.pdf") is None
+    assert f("3. Biohydrometallurgical_Processes.pdf") is None
