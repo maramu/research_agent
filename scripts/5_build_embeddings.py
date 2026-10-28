@@ -115,6 +115,7 @@ if str(_SCRIPTS_DIR) not in sys.path:
 from utils.constants import OLLAMA_MODEL_EMBED, year_from_paper_id, MAX_EMBED_CHARS  # noqa: E402
 from utils.embeddings import (  # noqa: E402  (núcleo compartido con books/embed.py)
     embed_texts, l2_normalize, assert_index_normalized, verify_index_integrity,
+    prune_papers_from_index,
 )
 
 DEFAULT_BASE       = "/Volumes/research/categorias"
@@ -211,6 +212,15 @@ def iter_chunks(chunks_dir: Path, phase_filter: str):
                 yield rec
 
 
+def _chunk_paper_ids(chunks_dir: Path) -> set:
+    """paper_id de cada fichero de chunks (el nombre del fichero ES el paper_id)."""
+    ids = set()
+    for p in chunks_dir.rglob("*.jsonl"):
+        n = p.name
+        ids.add(n[:-len(".chunks.jsonl")] if n.endswith(".chunks.jsonl") else n[:-len(".jsonl")])
+    return ids
+
+
 def _model_suffix(model: str) -> str:
     """Sufijo para el directorio de salida según el modelo.
     Mantiene compatibilidad: el modelo por defecto no añade sufijo."""
@@ -257,6 +267,22 @@ def main():
         indexed_ids = set()
 
     out_dir.mkdir(parents=True, exist_ok=True)
+
+    # Item 76 (cierra el límite del item 65): el modo incremental solo crecía, así
+    # que un paper borrado o renombrado seguía en el índice hasta el siguiente
+    # --force. Ahora se podan sin re-embeber los papers indexados que ya no tienen
+    # fichero de chunks. Salvaguarda: si no hay ningún chunk no se poda nada.
+    if incremental and indexed_ids:
+        present = _chunk_paper_ids(chunks_dir)
+        stale = indexed_ids - present if present else set()
+        if stale:
+            try:
+                n_pruned = prune_papers_from_index(out_dir, stale)
+            except ValueError as e:
+                raise SystemExit(f"No se pudo podar el índice ({e}). Re-indexa con --force.")
+            indexed_ids = indexed_ids - stale
+            print(f"Podados del índice: {n_pruned} chunks de {len(stale)} paper(s) "
+                  f"sin chunks en disco.")
 
     ollama_host = os.getenv("OLLAMA_HOST", "http://127.0.0.1:11435")
     client      = ollama.Client(host=ollama_host)

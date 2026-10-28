@@ -254,7 +254,9 @@ if dup_affected:
             output_box = status_box.empty()
             cmd = [
                 sys.executable, str(SCRIPTS_DIR / "5_build_embeddings.py"),
-                "--project", cat, "--force", "--model", "bge-m3",
+                # Sin --force: el modo incremental poda del índice los papers
+                # apartados (sin re-embeber el resto) y añade los nuevos.
+                "--project", cat, "--model", "bge-m3",
             ]
             proc = subprocess.Popen(
                 cmd,

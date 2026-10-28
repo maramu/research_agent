@@ -441,3 +441,30 @@ def test_prune_papers_from_index_mantiene_alineado_el_indice(tmp_path):
     assert json.loads((d / "config.json").read_text())["chunks"] == 6
     assert json.loads((d / "indexed_papers.json").read_text())["paper_ids"] == ["a", "c"]
     assert prune_papers_from_index(d, {"zzz"}) == 0
+
+
+def test_build_embeddings_incremental_poda_papers_sin_chunks(tmp_path):
+    """Item 76: el modo incremental poda del índice los papers sin fichero de
+    chunks (sin llamar a Ollama: no hay nada nuevo que embeber)."""
+    import subprocess
+    import faiss
+    import numpy as np
+    from utils.embeddings import l2_normalize
+    cat = tmp_path / "cat"; (cat / "chunks").mkdir(parents=True)
+    out = cat / "embeddings" / "all"; out.mkdir(parents=True)
+    X = l2_normalize(np.random.default_rng(1).normal(size=(4, 8)).astype("float32"))
+    idx = faiss.IndexFlatL2(8); idx.add(X); faiss.write_index(idx, str(out / "index.faiss"))
+    pids = ["a", "a", "b", "b"]
+    (out / "metadata.jsonl").write_text(
+        "\n".join(json.dumps({"paper_id": p, "phase": "cat", "text": "t"}) for p in pids) + "\n")
+    (out / "config.json").write_text(json.dumps({"chunks": 4, "normalized": True, "model": "bge-m3"}))
+    (out / "indexed_papers.json").write_text(json.dumps({"paper_ids": ["a", "b"], "model": "bge-m3"}))
+    (cat / "chunks" / "a.jsonl").write_text(json.dumps({"paper_id": "a", "phase": "cat", "text": "t"}) + "\n")
+    # 'b' ya no tiene chunks en disco
+    script = Path(__file__).resolve().parents[1] / "scripts" / "5_build_embeddings.py"
+    r = subprocess.run([sys.executable, str(script), "--project", "cat", "--base", str(tmp_path)],
+                       capture_output=True, text=True, timeout=120)
+    assert r.returncode == 0, r.stderr[-400:]
+    assert "Podados del índice: 2 chunks de 1 paper(s)" in r.stdout
+    assert faiss.read_index(str(out / "index.faiss")).ntotal == 2
+    assert json.loads((out / "indexed_papers.json").read_text())["paper_ids"] == ["a"]

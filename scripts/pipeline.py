@@ -1392,10 +1392,11 @@ def integrate_adhoc(
 
     # ── Cadena de procesado completa (skip logic protege artefactos existentes) ──
     handler(f"\nProcesando cadena completa para '{target_category}'…")
+    # Sin --force: el modo incremental embeddea solo los papers integrados
+    # (nuevos) y poda los que ya no tengan chunks.
     proc_result = process_category(
         target_category,
         on_output=handler,
-        extra_args={"5_build_embeddings.py": ["--force"]},
     )
 
     if proc_result["status"] != "ok":

@@ -2,6 +2,26 @@
 > Histórico append-only (lo más nuevo arriba). Backlog: Mejoras_pendientes.md · Estado/arquitectura: ESTADO.md
 
 ---
+### ✅ 76. El modo incremental de `5_build_embeddings.py` poda papers borrados; fuera `--force` de Duplicados y adhoc (2026-10-28)
+
+Cierra el límite del item 65 ("el incremental solo crece, nunca poda") reutilizando
+`prune_papers_from_index` del item 75.
+
+**76.1 — Poda automática.** En modo incremental, antes de embeber nada, los `paper_id` de
+`indexed_papers.json` que ya no tienen fichero de chunks (`chunks/**/<paper_id>[.chunks].jsonl`, el nombre
+es el paper_id) se eliminan del índice y de `metadata.jsonl` sin re-embeber. Salvaguarda: si no hay ningún
+fichero de chunks no se poda nada; si el índice no se puede podar (`ValueError`) aborta pidiendo `--force`.
+Con esto, borrar/renombrar/apartar papers por CUALQUIER vía deja el índice limpio en la siguiente
+ejecución incremental. Comprobado en una copia del corpus real de `thiosulfate` (quitar el chunks de un
+paper → "Podados 16 chunks de 1 paper(s)"; ntotal 3123 → 3107 = metadata = config; 160 ids indexados) y
+con test de subproceso sin Ollama.
+
+**76.2 — Menos reconstrucciones completas.** `10_Duplicados.py` ("Reprocesar categorías afectadas") e
+`integrate_adhoc()` (`pipeline.py`) lanzaban `--force`; ahora usan el modo incremental (poda los
+apartados, embeddea solo los nuevos). Siguen con `--force` solo el fallback de `delete_papers()` cuando el
+índice está desalineado y la opción explícita "Forzar reconstrucción completa" de Mantenimiento.
+
+---
 ### ✅ 75. Eliminar un artículo ya no re-embebe toda la categoría (2026-10-28)
 
 **Problema.** `delete_papers()` lanzaba `5_build_embeddings.py --force` tras mover un solo paper a
