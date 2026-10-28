@@ -132,6 +132,7 @@ CATEGORY_KEYWORDS = {
 }
 
 PDF_EXTS = [".pdf", ".PDF"]
+_PREFIX_MATCH_MIN_KEY = 60  # longitud mínima de file_key para el match por prefijo de PDF
 
 log = logging.getLogger("cleanup_duplicates")
 
@@ -501,6 +502,18 @@ def candidate_paths(project_dir: Path, stem: str) -> list[Path]:
                     candidates.append(f)
                     break
 
+    # Fallback por prefijo (solo pdfs/): el stem del paper_id puede estar
+    # truncado respecto al nombre real del PDF (p.ej. stem "..._Thiobacil_10_108"
+    # vs PDF "... Thiobacil [10.1080_0959...].pdf"). Exige una clave larga para
+    # no confundir papers distintos con títulos que empiezan igual.
+    if len(target_key) >= _PREFIX_MATCH_MIN_KEY:
+        pdf_dir = project_dir / "pdfs"
+        if pdf_dir.exists():
+            for f in pdf_dir.iterdir():
+                if f.is_file() and f.suffix in PDF_EXTS and \
+                        file_key(f.stem).startswith(target_key):
+                    candidates.append(f)
+
     seen: set[Path] = set()
     unique = []
     for path in candidates:
@@ -696,6 +709,39 @@ def restore_from_quarantine(
             f"4_extract_metadata.py --project {category}")
 
     return restored, meta_updated, warnings
+
+
+def purge_quarantine_manifest(manifest_path: Path, quarantine_root: Path) -> int:
+    """Borra DEFINITIVAMENTE (irreversible) los ficheros de un manifiesto de
+    cuarentena y el propio manifiesto. Solo toca rutas dentro de
+    `quarantine_root`; poda los directorios que queden vacíos. Devuelve el
+    nº de ficheros borrados (sin contar el manifiesto)."""
+    manifest_path = Path(manifest_path)
+    root = Path(quarantine_root).resolve()
+    data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    removed = 0
+    for entry in data.get("moved", []) or []:
+        target = Path(entry[1])
+        try:
+            target.resolve().relative_to(root)
+        except ValueError:
+            log.warning("Fuera de la cuarentena, no se borra: %s", target)
+            continue
+        if target.is_file():
+            target.unlink()
+            removed += 1
+            log.info("Purgado: %s", target)
+    manifest_path.unlink()
+    for d in sorted({manifest_path.parent, *(Path(e[1]).parent for e in data.get("moved", []) or [])},
+                    key=lambda x: len(x.parts), reverse=True):
+        cur = d
+        while cur.resolve() != root and root in cur.resolve().parents:
+            try:
+                cur.rmdir()          # solo si está vacío
+            except OSError:
+                break
+            cur = cur.parent
+    return removed
 
 
 # ============================================================

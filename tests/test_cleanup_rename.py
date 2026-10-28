@@ -235,3 +235,37 @@ class TestRenamePaper:
         assert len(meta_lines) == 1, "huérfano o duplicado tras reprocesar"
         assert json.loads(meta_lines[0])["paper_id"] == new_id
         assert not list(proj.rglob(f"*{old_id}*")), "quedó rastro del nombre viejo"
+
+
+def test_candidate_paths_encuentra_pdf_con_stem_truncado(tmp_path):
+    """Regresión: stem truncado ('..._Thiobacil_10_108') vs PDF con nombre
+    largo y DOI entre corchetes. Antes el PDF quedaba huérfano al borrar."""
+    proj = tmp_path / "thiosulfate"
+    (proj / "pdfs").mkdir(parents=True)
+    stem = ("2004_Alcántara_S_Sulfur_formation_by_steady_state_continuous_"
+            "cultures_of_a_sulfoxidizing_consortium_and_Thiobacil_10_108")
+    pdf = proj / "pdfs" / ("2004 - Alcántara S - Sulfur formation by steady-state "
+                           "continuous cultures of a sulfoxidizing consortium and "
+                           "Thiobacil [10.1080_09593332508618381].pdf")
+    otro = proj / "pdfs" / "2004 - Otro A - Sulfur formation unrelated paper [10.1_x].pdf"
+    pdf.write_bytes(b"%PDF"); otro.write_bytes(b"%PDF")
+    found = cleanup.candidate_paths(proj, stem)
+    assert pdf in found and otro not in found
+
+
+def test_purge_quarantine_manifest_borra_solo_dentro_de_cuarentena(tmp_path):
+    qroot = tmp_path / "quarantine"
+    dest = qroot / "deleted" / "20260101_000000" / "cat"
+    (dest / "tei").mkdir(parents=True)
+    f = dest / "tei" / "p.tei.xml"; f.write_text("x")
+    fuera = tmp_path / "categorias" / "cat" / "pdfs" / "p.pdf"
+    fuera.parent.mkdir(parents=True); fuera.write_text("x")
+    mp = dest / "_manifest_p.json"
+    mp.write_text(json.dumps({"category": "cat", "paper_id": "p",
+                              "moved": [["/o", str(f)], ["/o2", str(fuera)]],
+                              "meta_lines": []}))
+    assert cleanup.purge_quarantine_manifest(mp, qroot) == 1
+    assert not f.exists() and not mp.exists()
+    assert fuera.exists()
+    assert not (qroot / "deleted" / "20260101_000000").exists()
+    assert qroot.exists()

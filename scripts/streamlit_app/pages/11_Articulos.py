@@ -359,6 +359,32 @@ def delete_papers(category: str, paper_ids: list[str]) -> dict:
     return {"deleted": deleted, "dest": str(dest_root)}
 
 
+def scan_quarantine_entries(category: str | None = None) -> list[dict]:
+    """Papers en cuarentena (deleted/ y duplicates/), más recientes primero."""
+    qroot = CATEGORIAS_DIR.parent / "quarantine"
+    out: list[dict] = []
+    for kind in ("deleted", "duplicates"):
+        for mp in (qroot / kind).glob("*/*/_manifest_*.json"):
+            try:
+                data = json.loads(mp.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            cat = data.get("category") or mp.parent.name
+            if category and cat != category:
+                continue
+            moved = data.get("moved", []) or []
+            present = [Path(e[1]) for e in moved if Path(e[1]).exists()]
+            out.append({
+                "manifest": str(mp), "origen": kind, "lote": mp.parent.parent.name,
+                "category": cat, "paper_id": data.get("paper_id", ""),
+                "ficheros": len(present),
+                "pdf": any(f.suffix.lower() == ".pdf" for f in present),
+                "mb": round(sum(f.stat().st_size for f in present) / 1e6, 2),
+            })
+    out.sort(key=lambda e: e["lote"], reverse=True)
+    return out
+
+
 def _load_raw_records(category: str, paper_ids: set) -> dict:
     """{paper_id: registro completo} desde papers_metadata.jsonl, para los
     renombrados: load_articles() solo expone columnas aplanadas (autores como
@@ -911,6 +937,80 @@ if not PUBLIC:
                                      key=f"cancel_ren_{sel}"):
                             st.session_state.pop(_ren_key, None)
                             st.rerun()
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# 🗑 Cuarentena — restaurar o purgar — SOLO INSTANCIA PRIVADA
+# ───────────────────────────────────────────────────────────────────────────
+if not PUBLIC:
+    st.divider()
+    st.subheader("🗑 Cuarentena")
+    st.caption("Papers eliminados desde esta pestaña (`quarantine/deleted/`) o por "
+               "duplicados (`quarantine/duplicates/`). Restaurar los devuelve a su "
+               "sitio y re-indexa FAISS; eliminar definitivamente es **irreversible**.")
+    _qflash = st.session_state.pop("quarantine_flash", None)
+    if _qflash:
+        st.success(_qflash)
+    for _w in st.session_state.pop("quarantine_warnings", []):
+        st.warning(_w)
+
+    _qents = scan_quarantine_entries(None if sel == TODAS else sel)
+    if not _qents:
+        st.info("No hay nada en cuarentena" + ("" if sel == TODAS else f" para `{sel}`") + ".")
+    else:
+        _qdf = pd.DataFrame(_qents)
+        _qdf.insert(0, "_sel", False)
+        _qn = st.session_state.get("quarantine_nonce", 0)
+        _qed = st.data_editor(
+            _qdf, hide_index=True, use_container_width=True, num_rows="fixed",
+            column_order=["_sel", "lote", "origen", "category", "paper_id",
+                          "ficheros", "pdf", "mb"],
+            disabled=[c for c in _qdf.columns if c != "_sel"],
+            column_config={"_sel": st.column_config.CheckboxColumn("✓"),
+                           "mb": st.column_config.NumberColumn("MB")},
+            key=f"quarantine_editor_{sel}_{_qn}")
+        _qsel = [_qents[i] for i, r in _qed.reset_index(drop=True).iterrows() if r["_sel"]]
+        qa, qb = st.columns(2)
+        with qa:
+            st.caption(f"{len(_qsel)} marcado(s).")
+            if st.button("♻️ Restaurar seleccionados", use_container_width=True,
+                         disabled=not _qsel):
+                import pipeline
+                from utils.constants import OLLAMA_MODEL_EMBED
+                cleanup_mod = _load_cleanup_module()
+                n_files, warns, cats = 0, [], set()
+                for e in _qsel:
+                    restored, _, w = cleanup_mod.restore_from_quarantine(
+                        Path(e["manifest"]), CATEGORIAS_DIR)
+                    n_files += len(restored)
+                    warns.extend(f"{e['paper_id']}: {x}" for x in w)
+                    if restored:
+                        cats.add(e["category"])
+                with st.spinner("Re-indexando FAISS…"):
+                    for c in sorted(cats):
+                        pipeline.run_step("5_build_embeddings.py",
+                                          ["--project", c, "--model", OLLAMA_MODEL_EMBED,
+                                           "--force"])
+                st.session_state["quarantine_flash"] = (
+                    f"✓ {n_files} fichero(s) restaurado(s); FAISS re-indexado en "
+                    f"{len(cats)} categoría(s).")
+                st.session_state["quarantine_warnings"] = warns
+                st.session_state["quarantine_nonce"] = _qn + 1
+                load_articles.clear(); _summary_rows.clear()
+                st.rerun()
+        with qb:
+            _qconf = st.checkbox("Confirmo eliminar DEFINITIVAMENTE (no se puede deshacer)",
+                                 key=f"confirm_purge_{sel}")
+            if st.button("🔥 Eliminar definitivamente", use_container_width=True,
+                         disabled=not (_qsel and _qconf)):
+                cleanup_mod = _load_cleanup_module()
+                qroot = CATEGORIAS_DIR.parent / "quarantine"
+                n = sum(cleanup_mod.purge_quarantine_manifest(Path(e["manifest"]), qroot)
+                        for e in _qsel)
+                st.session_state["quarantine_flash"] = (
+                    f"✓ {len(_qsel)} paper(s) purgado(s) ({n} fichero(s) borrados).")
+                st.session_state["quarantine_nonce"] = _qn + 1
+                st.rerun()
 
 
 # ───────────────────────────────────────────────────────────────────────────
