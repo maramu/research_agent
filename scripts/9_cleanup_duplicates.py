@@ -55,6 +55,7 @@ Notas:
 from __future__ import annotations
 
 import argparse
+import csv
 import hashlib
 import json
 import logging
@@ -536,6 +537,58 @@ def delete_secondary_files(rec: PaperRecord, base: Path) -> list[Path]:
     return deleted
 
 
+# Ficheros auxiliares con una fila/línea por paper_id que quarantine_paper() limpia
+# (item 72). Rutas relativas a la categoría.
+def _aux_line_files(category: str) -> list[tuple[str, str]]:
+    return [
+        (f"metadata/validation_{category}.jsonl", "jsonl"),
+        ("logs/3_process_corpus_report.csv", "csv"),
+        ("logs/3b_summarize_report.csv", "csv"),
+    ]
+
+
+def _strip_paper_lines(path: Path, fmt: str, target_key: str) -> list[str]:
+    """Quita de `path` las líneas cuyo paper_id (file_key) == target_key y las
+    devuelve tal cual (para guardarlas en el manifiesto). Backup `.bak`."""
+    if not path.exists():
+        return []
+    has_bom = path.read_bytes()[:3] == b"\xef\xbb\xbf"
+    lines = path.read_text(encoding="utf-8-sig").splitlines()
+    if not lines:
+        return []
+    kept: list[str] = []
+    removed: list[str] = []
+    idx = None
+    body = lines
+    if fmt == "csv":
+        hdr = next(csv.reader([lines[0]]))
+        if "paper_id" not in hdr:
+            return []
+        idx = hdr.index("paper_id")
+        kept.append(lines[0])
+        body = lines[1:]
+    for ln in body:
+        if not ln.strip():
+            continue
+        pid = ""
+        try:
+            if fmt == "csv":
+                row = next(csv.reader([ln]))
+                pid = row[idx] if idx < len(row) else ""
+            else:
+                pid = json.loads(ln).get("paper_id") or ""
+        except Exception:
+            pass
+        if pid and file_key(pid) == target_key:
+            removed.append(ln)
+        else:
+            kept.append(ln)
+    if removed:
+        shutil.copy(path, path.with_name(path.name + ".bak"))
+        path.write_text("\n".join(kept) + "\n", encoding="utf-8-sig" if has_bom else "utf-8")
+    return removed
+
+
 def quarantine_paper(category: str, paper_id: str, base: Path, dest_root: Path) -> tuple[list[tuple[Path, Path]], bool]:
     """Mueve los artefactos de un paper a cuarentena (reversible) y lo quita de
     papers_metadata.jsonl. Devuelve (lista de (origen, destino) movidos, metadata_actualizada)."""
@@ -601,8 +654,19 @@ def quarantine_paper(category: str, paper_id: str, base: Path, dest_root: Path) 
                                  encoding="utf-8")
             log.info("References: %d línea(s) quitada(s) de %s", len(removed_refs), refs_path)
 
+    # Sidecar de validación + informes de logs/: una fila por paper (item 72).
+    extra_lines: dict[str, list[str]] = {}
+    for rel, fmt in _aux_line_files(category):
+        got = _strip_paper_lines(project_dir / rel, fmt, file_key(paper_id))
+        if got:
+            extra_lines[rel] = got
+
     # Artefactos estándar (pdf, tei, md_clean, summary, chunks) vía candidate_paths
     paths = list(candidate_paths(project_dir, paper_id))
+    # logs/<stem>.log (reversible: viaja a cuarentena con el resto)
+    log_f = project_dir / "logs" / f"{paper_id}.log"
+    if log_f.exists():
+        paths.append(log_f)
     # per_paper/<stem>*
     per_paper = project_dir / "metadata" / "per_paper"
     if per_paper.exists():
@@ -640,14 +704,15 @@ def quarantine_paper(category: str, paper_id: str, base: Path, dest_root: Path) 
             log.info("Cuarentena: %s -> %s", path, target)
 
     # Manifiesto para poder restaurar (ficheros movidos + líneas de metadata retiradas)
-    if moved or removed_lines or removed_refs:
+    if moved or removed_lines or removed_refs or extra_lines:
         dest_dir.mkdir(parents=True, exist_ok=True)
         manifest = dest_dir / f"_manifest_{paper_id}.json"
         manifest.write_text(json.dumps(
             {"category": category, "paper_id": paper_id,
              "moved": [[str(o), str(t)] for o, t in moved],
              "meta_lines": removed_lines,
-             "refs_lines": removed_refs},
+             "refs_lines": removed_refs,
+             "extra_lines": extra_lines},
             indent=2, ensure_ascii=False), encoding="utf-8")
     return moved, meta_updated
 
@@ -753,6 +818,20 @@ def restore_from_quarantine(
                 refs_path.parent.mkdir(parents=True, exist_ok=True)
             refs_path.write_text("\n".join(have + to_add_refs) + "\n", encoding="utf-8")
             log.info("References: %d línea(s) restaurada(s) en %s", len(to_add_refs), refs_path)
+
+    # ── Sidecar de validación + informes de logs/ ─────────────────────────────
+    for rel, lines in (data.get("extra_lines", {}) or {}).items():
+        fpath = base / category / rel
+        if not fpath.exists() or not lines:
+            continue
+        has_bom = fpath.read_bytes()[:3] == b"\xef\xbb\xbf"
+        have = fpath.read_text(encoding="utf-8-sig").splitlines()
+        have_set = set(have)
+        add = [l for l in lines if l not in have_set]
+        if add:
+            shutil.copy(fpath, fpath.with_name(fpath.name + ".bak"))
+            fpath.write_text("\n".join(have + add) + "\n",
+                             encoding="utf-8-sig" if has_bom else "utf-8")
 
     return restored, meta_updated, warnings
 

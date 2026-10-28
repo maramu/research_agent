@@ -342,6 +342,34 @@ def _run_validator_live(category: str, crossref: bool) -> dict | None:
     return result
 
 
+def refresh_notebooklm_packages(category: str) -> bool:
+    """Regenera notebooklm_packages/ de la categoría (si existe) tras borrar,
+    restaurar o renombrar papers: los paquetes son una exportación derivada y
+    quedaban con papers ya borrados / ids viejos (item 72). Si la regeneración
+    falla se restaura la carpeta anterior. Devuelve True si se regeneró."""
+    import pipeline
+    pk = CATEGORIAS_DIR / category / "notebooklm_packages"
+    if not pk.exists():
+        return False
+    old = pk.with_name("notebooklm_packages.old")
+    if old.exists():
+        shutil.rmtree(old)
+    pk.rename(old)
+    ok = True
+    for script, args in (("6_make_packages.py", ["--project", category, "--repack-all"]),
+                         ("7_make_master_index.py", ["--project", category])):
+        res = pipeline.run_step(script, args)
+        if res.get("returncode") != 0:
+            ok = False
+            break
+    if ok:
+        shutil.rmtree(old, ignore_errors=True)
+    else:
+        shutil.rmtree(pk, ignore_errors=True)
+        old.rename(pk)
+    return ok
+
+
 def delete_papers(category: str, paper_ids: list[str]) -> dict:
     """Cuarentena reversible de cada paper + re-index FAISS de la categoría."""
     import pipeline
@@ -357,6 +385,7 @@ def delete_papers(category: str, paper_ids: list[str]) -> dict:
     if deleted:
         pipeline.run_step("5_build_embeddings.py",
                           ["--project", category, "--model", OLLAMA_MODEL_EMBED, "--force"])
+        refresh_notebooklm_packages(category)
     return {"deleted": deleted, "dest": str(dest_root)}
 
 
@@ -881,7 +910,7 @@ if not PUBLIC:
                                  disabled=not (selected_ids and confirm)):
                         with st.spinner(f"Eliminando {len(selected_ids)} y re-indexando…"):
                             res = delete_papers(sel, selected_ids)
-                        st.success(f"✓ {res['deleted']} eliminado(s) → {res['dest']}. FAISS re-indexado.")
+                        st.success(f"✓ {res['deleted']} eliminado(s) → {res['dest']}. FAISS re-indexado y paquetes NotebookLM regenerados.")
                         st.session_state["art_editor_nonce"] = nonce + 1
                         load_articles.clear(); _summary_rows.clear()
                         st.rerun()
@@ -939,6 +968,9 @@ if not PUBLIC:
                             st.session_state.pop(_ren_key, None)
                             st.session_state["art_editor_nonce"] = nonce + 1
                             load_articles.clear(); _summary_rows.clear()
+                            if ok:
+                                with st.spinner("Regenerando paquetes NotebookLM…"):
+                                    refresh_notebooklm_packages(sel)
                             if errores:
                                 st.warning(f"✓ {ok} renombrado(s). {len(errores)} con error:")
                                 for e in errores:
@@ -1000,11 +1032,12 @@ if not PUBLIC:
                     warns.extend(f"{e['paper_id']}: {x}" for x in w)
                     if restored:
                         cats.add(e["category"])
-                with st.spinner("Re-indexando FAISS…"):
+                with st.spinner("Re-indexando FAISS y regenerando paquetes…"):
                     for c in sorted(cats):
                         pipeline.run_step("5_build_embeddings.py",
                                           ["--project", c, "--model", OLLAMA_MODEL_EMBED,
                                            "--force"])
+                        refresh_notebooklm_packages(c)
                 st.session_state["quarantine_flash"] = (
                     f"✓ {n_files} fichero(s) restaurado(s); FAISS re-indexado en "
                     f"{len(cats)} categoría(s).")

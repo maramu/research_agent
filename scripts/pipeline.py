@@ -176,6 +176,22 @@ def process_category(
         except Exception as e:
             log.warning("screen_new_pdfs_against_corpus(%s) falló: %s", category, e)
 
+    # Renombrar a nombre canónico los PDFs NUEVOS (los ya procesados se saltan con
+    # --skip-processed). process_category es el punto común de todos los flujos
+    # (Scopus semanal, inbox, adhoc, botón "Procesar" de Ingestar), así que un PDF
+    # volcado a pdfs/ a mano ya no llega a procesarse con el nombre de la descarga
+    # ("Año - Autor - Título [doi].pdf"), origen de paper_ids truncados (item 72).
+    try:
+        run_step(
+            "1_rename_papers_by_doi.py",
+            ["--folder", str(CATEGORIAS_DIR / category / "pdfs"), "--apply",
+             "--skip-processed"],
+            on_output=on_output,
+            label=f"rename [{category}]",
+        )
+    except Exception as e:
+        log.warning("rename previo de %s falló, continuamos: %s", category, e)
+
     # Defaults: todos los flujos usan el modelo de embedding canónico
     _default_extra: Dict[str, List[str]] = {
         "5_build_embeddings.py": ["--model", OLLAMA_MODEL_EMBED],

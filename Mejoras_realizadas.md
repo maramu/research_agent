@@ -2,6 +2,37 @@
 > Histórico append-only (lo más nuevo arriba). Backlog: Mejoras_pendientes.md · Estado/arquitectura: ESTADO.md
 
 ---
+### ✅ 72. Prevención en origen (nombre canónico antes de procesar) + borrado "sin rastro" automático (2026-10-28)
+
+Cierra los dos puntos de prevención que quedaron tras los items 70 y 71.
+
+**72.1 — Renombrar antes de procesar, en el punto común.** Los PDFs volcados a mano en
+`categorias/<cat>/pdfs/` (Pendientes → botón "Procesar" de Ingestar) llegaban a `process_category()`
+sin pasar por `1_rename_papers_by_doi.py`; de ahí los `paper_id` truncados con DOI embebido
+(`..._Thiobacil_10_108`). `process_category()` ejecuta ahora el renombrado de la carpeta `pdfs/`
+justo después del cribado de duplicados y antes del procesado, con el flag nuevo `--skip-processed`
+de `1_rename_papers_by_doi.py` (`is_processed_pdf()`: ignora los PDFs que ya tienen md_clean, por
+clave exacta o prefijo ≥60 car.). Sin ese flag el script habría renombrado también PDFs ya procesados
+y los habría dejado huérfanos de su TEI/md_clean (el problema del item 68; para ésos está
+`rename_paper()`). Idempotente: los ya canónicos se saltan sin llamar a Crossref; si no hay DOI el PDF
+se queda como estaba. Todos los flujos (Scopus semanal, inbox, adhoc, Ingestar) pasan por
+`process_category()`. Comprobado en modo preview contra `thiosulfate`: 0 PDFs candidatos.
+
+**72.2 — El borrado ya no deja rastro.** `quarantine_paper()` (usada por Artículos y por Duplicados)
+ahora, además de lo anterior: mueve a cuarentena `logs/<paper_id>.log`, y quita del sidecar
+`metadata/validation_<cat>.jsonl` y de los informes `logs/3_process_corpus_report.csv` /
+`3b_summarize_report.csv` las filas del paper (backup `.bak`, BOM conservado), guardándolas en el
+manifiesto (`extra_lines`) para que `restore_from_quarantine()` las devuelva. En `11_Articulos.py`,
+`refresh_notebooklm_packages(cat)` regenera `notebooklm_packages/` (mueve el antiguo a `.old`,
+`6_make_packages.py --repack-all` + `7_make_master_index.py`; si falla restaura el anterior) tras
+**eliminar**, **restaurar** de cuarentena y **aplicar renombrado**. Tests: +2 en
+`tests/test_cleanup_rename.py` (ida y vuelta de log/sidecar/informes con BOM; `is_processed_pdf`).
+
+**Pendiente (siguiente tanda):** emparejar PDF↔paper por DOI además del prefijo, vista de cuarentena
+para carpetas con `_manifest.csv`, auditar otros usos de `normalize_stem` y la calidad de extracción
+(DOI/título basura de GROBID).
+
+---
 ### ✅ 71. `screen_new_pdfs_against_corpus` apartaba a cuarentena el PDF de papers ya procesados (2026-10-28)
 
 Síntoma (Martín): `thiosulfate` tenía 158 PDFs y 161 md_clean.

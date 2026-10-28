@@ -314,3 +314,46 @@ def test_screen_no_aparta_pdf_ya_procesado_con_nombre_largo(tmp_path, monkeypatc
     res = pipeline.screen_new_pdfs_against_corpus(cat)
     assert proc.exists()                       # el procesado se queda
     assert [q["file"] for q in res["quarantined"]] == ["nuevo_dup.pdf"]
+
+
+def test_quarantine_limpia_log_sidecar_e_informes_y_restore_los_devuelve(tmp_path):
+    """Item 72: borrar un paper no deja rastro en logs/, informes CSV ni sidecar."""
+    base = tmp_path / "categorias"; proj = base / "cat"
+    for d in ("metadata", "logs", "pdfs"):
+        (proj / d).mkdir(parents=True)
+    pid, otro = "p_uno", "p_otro"
+    (proj / "metadata" / "papers_metadata.jsonl").write_text(
+        json.dumps({"paper_id": pid, "title": "T"}) + "\n")
+    side = proj / "metadata" / "validation_cat.jsonl"
+    s1, s2 = json.dumps({"paper_id": pid, "x": 1}), json.dumps({"paper_id": otro, "x": 2})
+    side.write_text(s1 + "\n" + s2 + "\n")
+    rep = proj / "logs" / "3_process_corpus_report.csv"
+    rep.write_text("﻿phase,paper_id,status\ncat,p_uno,ok\ncat,p_otro,ok\n", encoding="utf-8")
+    (proj / "logs" / "p_uno.log").write_text("log")
+    dest = tmp_path / "q"
+    cleanup.quarantine_paper("cat", pid, base, dest)
+    assert side.read_text().splitlines() == [s2]
+    assert "p_uno" not in rep.read_text(encoding="utf-8-sig")
+    assert rep.read_bytes()[:3] == b"\xef\xbb\xbf"          # conserva BOM
+    assert not (proj / "logs" / "p_uno.log").exists()
+    man = dest / "cat" / "_manifest_p_uno.json"
+    cleanup.restore_from_quarantine(man, base)
+    assert set(side.read_text().splitlines()) == {s1, s2}
+    assert "cat,p_uno,ok" in rep.read_text(encoding="utf-8-sig")
+    assert (proj / "logs" / "p_uno.log").exists()
+
+
+def test_rename_script_is_processed_pdf(tmp_path):
+    spec = importlib.util.spec_from_file_location(
+        "rename_script_t", Path(__file__).resolve().parents[1] / "scripts" / "1_rename_papers_by_doi.py")
+    mod = importlib.util.module_from_spec(spec); sys.modules["rename_script_t"] = mod
+    spec.loader.exec_module(mod)
+    proj = tmp_path / "cat"; (proj / "pdfs").mkdir(parents=True); (proj / "md_clean").mkdir()
+    pid = ("2025_Karimi_T_Isolation_and_characterization_of_sulfur_oxidizing_"
+           "bacteria_at_the_Ilam_gas_refinery_in_Iran_10_22104_AET_")
+    (proj / "md_clean" / f"{pid}.clean.md").write_text("x")
+    largo = proj / "pdfs" / ("2025 - Karimi T - Isolation and characterization of sulfur-oxidizing "
+                             "bacteria at the Ilam gas refinery in Iran [10.22104_AET.2025.7467.2081].pdf")
+    nuevo = proj / "pdfs" / "2024 - Otro A - Un paper nuevo [10.1_x].pdf"
+    largo.write_bytes(b"x"); nuevo.write_bytes(b"x")
+    assert mod.is_processed_pdf(largo) and not mod.is_processed_pdf(nuevo)

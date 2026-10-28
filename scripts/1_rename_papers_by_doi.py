@@ -101,6 +101,22 @@ def unique_path(path: Path) -> Path:
         i += 1
 
 
+def is_processed_pdf(pdf_path: Path) -> bool:
+    """True si `pdf_path` está en categorias/<cat>/pdfs/ y ya tiene md_clean.
+    Empareja por clave exacta o por prefijo (≥60 car.): el paper_id puede estar
+    truncado respecto al nombre largo del PDF ("Año - Autor - Título [doi]")."""
+    md_dir = pdf_path.parent.parent / "md_clean"
+    if pdf_path.parent.name != "pdfs" or not md_dir.is_dir():
+        return False
+    fk = lambda t: re.sub(r"[^a-z0-9]+", "_", t.lower()).strip("_")  # noqa: E731
+    k = fk(pdf_path.stem)
+    for m in md_dir.glob("*.clean.md"):
+        mk = fk(m.name[:-len(".clean.md")])
+        if k == mk or (len(mk) >= 60 and k.startswith(mk)):
+            return True
+    return False
+
+
 def already_renamed(filename: str) -> bool:
     return bool(re.match(r"^\d{4}_[a-z0-9]+_.+\.pdf$", filename.lower()))
 
@@ -679,6 +695,12 @@ def main() -> int:
         help="No ignorar archivos ya renombrados"
     )
     parser.add_argument(
+        "--skip-processed", action="store_true",
+        help="Ignorar los PDFs de categorias/<cat>/pdfs/ que ya tienen md_clean: "
+             "renombrar solo el PDF de un paper procesado lo deja huérfano de su "
+             "TEI/md_clean/chunks (para eso está rename_paper() en 9_cleanup_duplicates)"
+    )
+    parser.add_argument(
         "--doi-manual", default=str(DEFAULT_DOI_MANUAL),
         help="Excel con DOIs manuales: columna A = nombre PDF, columna B = DOI"
     )
@@ -706,6 +728,8 @@ def main() -> int:
         failed_folder = ensure_failed_folder(folder)
 
     pdfs = sorted(set(folder.glob("*.pdf")) | set(folder.glob("*.PDF")))
+    if args.skip_processed:
+        pdfs = [p for p in pdfs if not is_processed_pdf(p)]
     if not pdfs:
         print(f"No se encontraron PDFs en {folder}")
         return 0
