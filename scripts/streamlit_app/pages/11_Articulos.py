@@ -383,8 +383,16 @@ def delete_papers(category: str, paper_ids: list[str]) -> dict:
         if moved:
             deleted += 1
     if deleted:
-        pipeline.run_step("5_build_embeddings.py",
-                          ["--project", category, "--model", OLLAMA_MODEL_EMBED, "--force"])
+        # Quitar vectores del índice es instantáneo (no hace falta re-embeber los
+        # demás papers); solo si el índice no es utilizable se reconstruye entero.
+        from utils.embeddings import prune_papers_from_index
+        out_dir = CATEGORIAS_DIR / category / "embeddings" / "all"
+        try:
+            prune_papers_from_index(out_dir, paper_ids)
+        except (ValueError, FileNotFoundError, SystemExit) as e:
+            pipeline.run_step("5_build_embeddings.py",
+                              ["--project", category, "--model", OLLAMA_MODEL_EMBED,
+                               "--force"])
         refresh_notebooklm_packages(category)
     return {"deleted": deleted, "dest": str(dest_root)}
 
@@ -917,9 +925,9 @@ if not PUBLIC:
                                           key=f"confirm_del_{sel}")
                     if st.button("🗑 Eliminar seleccionados", use_container_width=True,
                                  disabled=not (selected_ids and confirm)):
-                        with st.spinner(f"Eliminando {len(selected_ids)} y re-indexando…"):
+                        with st.spinner(f"Eliminando {len(selected_ids)}…"):
                             res = delete_papers(sel, selected_ids)
-                        st.success(f"✓ {res['deleted']} eliminado(s) → {res['dest']}. FAISS re-indexado y paquetes NotebookLM regenerados.")
+                        st.success(f"✓ {res['deleted']} eliminado(s) → {res['dest']}. índice FAISS actualizado y paquetes NotebookLM regenerados.")
                         st.session_state["art_editor_nonce"] = nonce + 1
                         load_articles.clear(); _summary_rows.clear()
                         st.rerun()
@@ -1052,11 +1060,12 @@ if not PUBLIC:
                     warns.extend(f"{e['paper_id']}: {x}" for x in w)
                     if restored:
                         cats.add(e["category"])
-                with st.spinner("Re-indexando FAISS y regenerando paquetes…"):
+                with st.spinner("Indexando lo restaurado y regenerando paquetes…"):
                     for c in sorted(cats):
+                        # Modo incremental: solo embeddea los papers que no
+                        # están en indexed_papers.json (los restaurados).
                         pipeline.run_step("5_build_embeddings.py",
-                                          ["--project", c, "--model", OLLAMA_MODEL_EMBED,
-                                           "--force"])
+                                          ["--project", c, "--model", OLLAMA_MODEL_EMBED])
                         refresh_notebooklm_packages(c)
                 st.session_state["quarantine_flash"] = (
                     f"✓ {n_files} fichero(s) restaurado(s); FAISS re-indexado en "

@@ -178,3 +178,55 @@ def embed_texts(client, texts: list, model: str, truncated_out: list | None = No
         if truncated_out is not None:
             truncated_out.append(len(t) < full_len)
     return out
+
+
+def prune_papers_from_index(out_dir, paper_ids) -> int:
+    """Quita de un índice FAISS (IndexFlat, posicional) los vectores de unos
+    paper_id SIN re-embeber nada (item 75). Borrar un paper no necesita
+    recalcular los demás: se eliminan sus filas del índice y de metadata.jsonl
+    (mismo orden, así que siguen alineados) y se actualizan config.json e
+    indexed_papers.json. Escritura atómica (temporal + os.replace) y verificación
+    de integridad al final.
+
+    Devuelve el nº de vectores eliminados. Lanza ValueError si índice y
+    metadata ya estaban desalineados (el llamador debe entonces reconstruir con
+    ``5_build_embeddings.py --force``) o si el índice no es de tipo plano.
+    """
+    import faiss  # perezoso: solo hace falta en este camino
+
+    out_dir = Path(out_dir)
+    ids = set(paper_ids)
+    idx_path, meta_path = out_dir / "index.faiss", out_dir / "metadata.jsonl"
+    index = faiss.read_index(str(idx_path))
+    if not isinstance(faiss.downcast_index(index), faiss.IndexFlat):
+        raise ValueError(f"índice no plano ({type(index).__name__}): reconstruir con --force")
+    lines = [l for l in meta_path.read_text(encoding="utf-8").splitlines() if l.strip()]
+    if index.ntotal != len(lines):
+        raise ValueError(f"índice ({index.ntotal}) y metadata ({len(lines)}) desalineados")
+
+    drop = [i for i, l in enumerate(lines) if json.loads(l).get("paper_id") in ids]
+    if not drop:
+        return 0
+    keep = [l for i, l in enumerate(lines) if i not in set(drop)]
+    index.remove_ids(np.array(drop, dtype=np.int64))
+
+    tmp_idx, tmp_meta = idx_path.with_suffix(".faiss.tmp"), meta_path.with_suffix(".jsonl.tmp")
+    faiss.write_index(index, str(tmp_idx))
+    tmp_meta.write_text("\n".join(keep) + ("\n" if keep else ""), encoding="utf-8")
+    os.replace(tmp_idx, idx_path)
+    os.replace(tmp_meta, meta_path)
+
+    cfg_path = out_dir / "config.json"
+    if cfg_path.exists():
+        cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
+        cfg["chunks"] = index.ntotal
+        cfg_path.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+    ip = out_dir / "indexed_papers.json"
+    if ip.exists():
+        data = json.loads(ip.read_text(encoding="utf-8"))
+        data["paper_ids"] = sorted(set(data.get("paper_ids", [])) - ids)
+        ip.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+    if index.ntotal:
+        verify_index_integrity(out_dir, index)
+    return len(drop)

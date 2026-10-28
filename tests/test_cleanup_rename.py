@@ -416,3 +416,28 @@ def test_extract_authors_no_pega_nombre_y_apellido():
         '<forename>Maria Elena</forename><surname>Acuña</surname></persName></author></titleStmt>'
         '</fileDesc></teiHeader></TEI>')
     assert mod.extract_authors(con_author, ns)[0]["full"] == "Maria Elena Acuña"
+
+
+def test_prune_papers_from_index_mantiene_alineado_el_indice(tmp_path):
+    import faiss
+    import numpy as np
+    from utils.embeddings import prune_papers_from_index, l2_normalize
+    rng = np.random.default_rng(0)
+    X = l2_normalize(rng.normal(size=(9, 8)).astype("float32"))
+    pids = ["a"] * 3 + ["b"] * 3 + ["c"] * 3
+    idx = faiss.IndexFlatL2(8); idx.add(X)
+    d = tmp_path / "all"; d.mkdir()
+    faiss.write_index(idx, str(d / "index.faiss"))
+    (d / "metadata.jsonl").write_text(
+        "\n".join(json.dumps({"paper_id": p, "n": i}) for i, p in enumerate(pids)) + "\n")
+    (d / "config.json").write_text(json.dumps({"chunks": 9, "normalized": True}))
+    (d / "indexed_papers.json").write_text(json.dumps({"paper_ids": ["a", "b", "c"], "model": "m"}))
+    assert prune_papers_from_index(d, {"b"}) == 3
+    idx2 = faiss.read_index(str(d / "index.faiss"))
+    meta = [json.loads(l) for l in (d / "metadata.jsonl").read_text().splitlines()]
+    assert idx2.ntotal == len(meta) == 6 and {m["paper_id"] for m in meta} == {"a", "c"}
+    _, I = idx2.search(X[7:8], 1)                      # un vector del paper 'c'
+    assert meta[I[0][0]]["n"] == 7
+    assert json.loads((d / "config.json").read_text())["chunks"] == 6
+    assert json.loads((d / "indexed_papers.json").read_text())["paper_ids"] == ["a", "c"]
+    assert prune_papers_from_index(d, {"zzz"}) == 0

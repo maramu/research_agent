@@ -2,6 +2,24 @@
 > Histórico append-only (lo más nuevo arriba). Backlog: Mejoras_pendientes.md · Estado/arquitectura: ESTADO.md
 
 ---
+### ✅ 75. Eliminar un artículo ya no re-embebe toda la categoría (2026-10-28)
+
+**Problema.** `delete_papers()` lanzaba `5_build_embeddings.py --force` tras mover un solo paper a
+cuarentena: re-embebía con Ollama (bge-m3) TODOS los chunks de la categoría — minutos u horas en las
+grandes (≈9.500 chunks en `biogas_upgrading`) — para quitar unos pocos vectores. No era necesario: el
+índice es `IndexFlatL2` posicional alineado con `metadata.jsonl`.
+
+**Fix.** `utils/embeddings.py::prune_papers_from_index(out_dir, paper_ids)`: elimina del índice
+(`remove_ids`) y de `metadata.jsonl` las filas de esos papers (mismo orden → siguen alineados), actualiza
+`config.json` (`chunks`) e `indexed_papers.json`, escritura atómica y `verify_index_integrity`. Medido en
+una copia del índice real de `thiosulfate`: 13 vectores quitados en 0,09 s; una búsqueda posterior sigue
+apuntando al chunk correcto. Si el índice no es plano o está desalineado (`ValueError`), `delete_papers()`
+cae al `--force` anterior. **Restaurar** de cuarentena usa ahora el modo incremental (sin `--force`):
+solo embeddea los papers que no están en `indexed_papers.json`, es decir, los restaurados. Test con un
+índice FAISS sintético. Lo que sí sigue tardando algo tras borrar es regenerar `notebooklm_packages/`
+(escritura de texto, segundos).
+
+---
 ### ✅ 74. Autores con nombre y apellido pegados ("EunsungKan") — bug en `4_extract_metadata.py::extract_authors` (2026-10-28)
 
 Martín preguntó por qué los autores de los artículos descargados salían pegados de forma recurrente.
