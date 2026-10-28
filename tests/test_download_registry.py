@@ -279,3 +279,16 @@ class TestUpsertSnoozeSafe:
         assert row["snooze_until"] == future
         assert row["status"] == "pending"
         assert row["reason"] == "nuevo error"
+
+
+def test_registro_compara_doi_sin_distinguir_mayusculas(tmp_path, monkeypatch):
+    from utils import download_registry as dr
+    monkeypatch.setattr(dr, "REGISTRY_PATH", tmp_path / "pendientes.csv")
+    dr.upsert([{"doi": "10.1016/J.Foo.2025.1", "title": "T"}], category="c")
+    # mismo DOI en minúsculas: no duplica
+    assert dr.upsert([{"doi": "10.1016/j.foo.2025.1", "title": "T2"}], category="c") == 0
+    assert len(dr.load()) == 1
+    assert dr.snooze(["10.1016/j.FOO.2025.1"]) == 1
+    assert dr.unsnooze(["10.1016/J.FOO.2025.1"]) == 1
+    dr.mark_downloaded(["10.1016/j.foo.2025.1"])
+    assert dr.load().loc[0, "status"] == "downloaded"
