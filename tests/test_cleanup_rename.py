@@ -269,3 +269,21 @@ def test_purge_quarantine_manifest_borra_solo_dentro_de_cuarentena(tmp_path):
     assert fuera.exists()
     assert not (qroot / "deleted" / "20260101_000000").exists()
     assert qroot.exists()
+
+
+def test_quarantine_quita_references_y_restore_las_devuelve(tmp_path):
+    base = tmp_path / "categorias"; proj = base / "cat"
+    (proj / "metadata").mkdir(parents=True); (proj / "pdfs").mkdir()
+    meta = {"paper_id": "p_uno", "title": "T", "doi": "10.1/x"}
+    (proj / "metadata" / "papers_metadata.jsonl").write_text(json.dumps(meta) + "\n")
+    r1 = json.dumps({"ref_key": "a", "paper_id": "p_uno"})
+    r2 = json.dumps({"ref_key": "b", "paper_id": "p_otro"})
+    refs = proj / "metadata" / "references.jsonl"
+    refs.write_text(r1 + "\n" + r2 + "\n")
+    dest = tmp_path / "q" / "ts"
+    cleanup.quarantine_paper("cat", "p_uno", base, dest)
+    assert refs.read_text().splitlines() == [r2]
+    man = dest / "cat" / "_manifest_p_uno.json"
+    assert json.loads(man.read_text())["refs_lines"] == [r1]
+    cleanup.restore_from_quarantine(man, base)
+    assert set(refs.read_text().splitlines()) == {r1, r2}

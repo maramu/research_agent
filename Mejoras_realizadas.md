@@ -2,6 +2,50 @@
 > Histórico append-only (lo más nuevo arriba). Backlog: Mejoras_pendientes.md · Estado/arquitectura: ESTADO.md
 
 ---
+### ✅ 70. Borrado desde Artículos: PDF huérfano, `references.jsonl` huérfano, vista de cuarentena y filtro "Nombre no canónico" (2026-10-28)
+
+Petición de Martín: al borrar un artículo de `thiosulfate` desde Artículos, el PDF seguía en `pdfs/`.
+
+**70.1 — Causa del PDF huérfano.** El `paper_id` de esos papers estaba truncado respecto al nombre real
+del PDF (`..._Thiobacil_10_108` vs `2004 - Alcántara S - … Thiobacil [10.1080_09593332508618381].pdf`).
+`quarantine_paper()` buscaba el PDF por nombre exacto, por clave difusa (`file_key` igual) y por DOI
+embebido; las tres fallaron (la clave del stem es solo un *prefijo* de la del PDF, y el DOI de la
+metadata era basura de GROBID). El paper se movía a cuarentena sin su PDF, el reproceso lo veía como
+nuevo y "resucitaba" (el mismo síntoma del item 66). **Fix:** `candidate_paths()` añade un fallback
+por prefijo en `pdfs/` (`file_key(pdf).startswith(file_key(stem))`) exigiendo una clave de ≥60
+caracteres (`_PREFIX_MATCH_MIN_KEY`) para no confundir títulos que empiezan igual. Cubre también
+`rename_paper()` (usa `candidate_paths`). Verificado contra el PDF real del NAS y con test de regresión
+con un segundo PDF parecido que NO debe casar.
+
+**70.2 — `references.jsonl` huérfano.** `quarantine_paper()` no tocaba `metadata/references.jsonl`, así
+que cada borrado dejaba filas de referencias bajo un `paper_id` inexistente (68 líneas en `thiosulfate`,
+45 en `biological_gas_odor_treatment`). Ahora las quita (backup `.bak`), las guarda en el manifiesto
+(`refs_lines`) y `restore_from_quarantine()` las devuelve sin duplicar. Limpieza puntual hecha en
+`thiosulfate`; **pendiente** en `biological_gas_odor_treatment` (2 papers en `quarantine/duplicates/`
+de 2026-06-14, sus 45 líneas siguen ahí).
+
+**70.3 — Vista de cuarentena en `11_Articulos.py` (solo privada).** Sección "🗑 Cuarentena" al final del
+editor: lista `quarantine/deleted/` y `quarantine/duplicates/` (lote, origen, categoría, paper_id,
+nº ficheros, si trae PDF, MB), filtrada por la categoría elegida. "♻️ Restaurar" usa
+`restore_from_quarantine()` y re-indexa FAISS de las categorías afectadas; "🔥 Eliminar definitivamente"
+(con confirmación, irreversible) usa la nueva `purge_quarantine_manifest()`, que solo borra rutas
+dentro de `quarantine/` y poda directorios vacíos.
+
+**70.4 — Filtro "Nombre no canónico" + "Renombrar los N mostrados".** Papers procesados con el nombre
+de la descarga de Scopus (`Año - Autor - Título [doi].pdf`, `paper_id` con mayúsculas y/o `_10_NNNN`)
+se localizan con el nuevo valor del radio "Mostrar" y se renombran en bloque reutilizando la vista
+previa + `rename_paper()` del item 68. Aplicado en `thiosulfate` (11 papers, sin colisiones);
+verificada la coherencia posterior (registros, tei/md_clean/chunks/summaries/per_paper, índice FAISS,
+`paper_id` interno de los chunks).
+
+**Limpieza de datos hecha (thiosulfate):** 6 papers eliminados sin rastro (artefactos, cuarentenas,
+logs, referencias, sidecar de validación, informes de `logs/`, re-index FAISS) y
+`notebooklm_packages/` regenerado (`6_make_packages.py --repack-all` + `7_make_master_index.py`).
+**Lección:** tras borrar o renombrar papers, los paquetes NotebookLM hay que regenerarlos (no se
+actualizan solos). Tests: `tests/test_cleanup_rename.py` (+3 casos: prefijo de PDF, purga acotada a
+la cuarentena, ida y vuelta de `refs_lines`).
+
+---
 ### ✅ 68+69. Renombrar ficheros con metadata corregida + 3 filtros nuevos en `11_Articulos.py` (2026-10-27)
 
 Petición de Martín: tras corregir a mano título/DOI/año/autores de toda una categoría en el editor

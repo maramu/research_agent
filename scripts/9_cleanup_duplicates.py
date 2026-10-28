@@ -574,6 +574,33 @@ def quarantine_paper(category: str, paper_id: str, base: Path, dest_root: Path) 
             meta_updated = True
             log.info("Metadata: %d línea(s) quitada(s) de %s", len(removed_lines), meta_path)
 
+    # references.jsonl: quitar las referencias extraídas de este paper (item 70).
+    # Antes quedaban como filas huérfanas bajo un paper_id que ya no existe.
+    # Se guardan en el manifiesto para que restore_from_quarantine() las devuelva.
+    removed_refs: list[str] = []
+    refs_path = project_dir / "metadata" / "references.jsonl"
+    if refs_path.exists():
+        target_key = file_key(paper_id)
+        kept_refs: list[str] = []
+        with refs_path.open(encoding="utf-8") as f:
+            for line in f:
+                s = line.rstrip("\n")
+                if not s.strip():
+                    continue
+                try:
+                    rid = json.loads(s).get("paper_id") or ""
+                except Exception:
+                    kept_refs.append(s); continue
+                if rid and file_key(rid) == target_key:
+                    removed_refs.append(s)
+                else:
+                    kept_refs.append(s)
+        if removed_refs:
+            shutil.copy(refs_path, refs_path.with_name(refs_path.name + ".bak"))
+            refs_path.write_text("\n".join(kept_refs) + ("\n" if kept_refs else ""),
+                                 encoding="utf-8")
+            log.info("References: %d línea(s) quitada(s) de %s", len(removed_refs), refs_path)
+
     # Artefactos estándar (pdf, tei, md_clean, summary, chunks) vía candidate_paths
     paths = list(candidate_paths(project_dir, paper_id))
     # per_paper/<stem>*
@@ -613,13 +640,14 @@ def quarantine_paper(category: str, paper_id: str, base: Path, dest_root: Path) 
             log.info("Cuarentena: %s -> %s", path, target)
 
     # Manifiesto para poder restaurar (ficheros movidos + líneas de metadata retiradas)
-    if moved or removed_lines:
+    if moved or removed_lines or removed_refs:
         dest_dir.mkdir(parents=True, exist_ok=True)
         manifest = dest_dir / f"_manifest_{paper_id}.json"
         manifest.write_text(json.dumps(
             {"category": category, "paper_id": paper_id,
              "moved": [[str(o), str(t)] for o, t in moved],
-             "meta_lines": removed_lines},
+             "meta_lines": removed_lines,
+             "refs_lines": removed_refs},
             indent=2, ensure_ascii=False), encoding="utf-8")
     return moved, meta_updated
 
@@ -707,6 +735,24 @@ def restore_from_quarantine(
         warnings.append(
             "manifiesto antiguo sin meta_lines: regenera con "
             f"4_extract_metadata.py --project {category}")
+
+    # ── References: reañadir las líneas retiradas (sin duplicar) ──────────────
+    refs_lines = data.get("refs_lines", []) or []
+    if refs_lines:
+        refs_path = base / category / "metadata" / "references.jsonl"
+        have: list[str] = []
+        if refs_path.exists():
+            have = [l.rstrip("\n") for l in refs_path.read_text(encoding="utf-8").splitlines()
+                    if l.strip()]
+        have_set = set(have)
+        to_add_refs = [l for l in refs_lines if l not in have_set]
+        if to_add_refs:
+            if refs_path.exists():
+                shutil.copy(refs_path, refs_path.with_name(refs_path.name + ".bak"))
+            else:
+                refs_path.parent.mkdir(parents=True, exist_ok=True)
+            refs_path.write_text("\n".join(have + to_add_refs) + "\n", encoding="utf-8")
+            log.info("References: %d línea(s) restaurada(s) en %s", len(to_add_refs), refs_path)
 
     return restored, meta_updated, warnings
 
