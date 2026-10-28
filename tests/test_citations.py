@@ -148,3 +148,13 @@ class TestBookCitation:
         out = apply_citations("El biorreactor es el corazón del proceso [1].", cmap)
         assert ("(Najafpour (2007), Biochemical Engineering and Biotechnology, "
                 "cap. 6, p. 159-186)") in out
+
+
+def test_find_orphan_citations_y_anotacion():
+    from utils.citations import find_orphan_citations, annotate_orphan_citations
+    cmap = {1: "(A, 2020; 10.1/x)", 2: "(B, 2021; 10.1/y)"}
+    assert find_orphan_citations("Dato [1] y otro [2][5]. Más [7].", cmap) == [5, 7]
+    assert find_orphan_citations("Solo [1] y [2].", cmap) == []
+    ans = annotate_orphan_citations("Dato [1] y [9].", "Dato (A, 2020) y [9].", cmap)
+    assert "Citas sin fragmento de origen:** [9]" in ans
+    assert annotate_orphan_citations("Dato [1].", "Dato (A, 2020).", cmap) == "Dato (A, 2020)."

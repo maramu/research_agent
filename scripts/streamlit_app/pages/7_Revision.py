@@ -21,7 +21,7 @@ for d in (str(STREAMLIT_APP_DIR), str(SCRIPTS_DIR)):
 from utils.export_refs import build_papers_zip, load_papers, to_bibtex
 from utils.constants import CANONICAL_SECTIONS, year_from_paper_id
 from utils.citations import (
-    load_papers_metadata, build_cite_map, apply_citations, CITE_PROMPT_RULES,
+    load_papers_metadata, build_cite_map, apply_citations, annotate_orphan_citations, CITE_PROMPT_RULES,
 )
 from utils.retrieval import (dense_rank, bm25_rank, rrf_fuse,
                              passes_filters, pool_size, looks_spanish)
@@ -442,7 +442,7 @@ except Exception as e:
     st.stop()
 
 raw_md    = "".join(_raw_chunks)
-answer_md = apply_citations(raw_md, cite_map)
+answer_md = annotate_orphan_citations(raw_md, apply_citations(raw_md, cite_map), cite_map)
 out_box.markdown(answer_md)
 
 # Persistir para el botón de guardar

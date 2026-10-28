@@ -301,3 +301,25 @@ def apply_citations(text: str, cite_map: Dict[int, str]) -> str:
         return "(" + "; ".join(keys) + ")"
 
     return _CITE_GROUP.sub(_repl_group, text)
+
+
+def find_orphan_citations(text: str, cite_map: Dict[int, str]) -> list:
+    """Números [N] citados en `text` que NO existen entre los fragmentos enviados
+    al modelo (`cite_map`). Chequeo determinista post-síntesis (item 61a): un
+    modelo puede inventar [12] cuando solo recibió 8 fragmentos. Ignora la
+    sección de Referencias que el modelo añada pese a la instrucción."""
+    body = strip_reference_section(text)
+    cited = {int(n) for n in re.findall(r"\[(\d+)\]", body)}
+    return sorted(n for n in cited if n not in cite_map)
+
+
+def annotate_orphan_citations(raw_text: str, answer_md: str, cite_map: Dict[int, str]) -> str:
+    """Añade al final de `answer_md` un aviso si el texto crudo cita fragmentos
+    inexistentes; si no hay citas huérfanas lo devuelve intacto."""
+    orphans = find_orphan_citations(raw_text, cite_map)
+    if not orphans:
+        return answer_md
+    lista = ", ".join(f"[{n}]" for n in orphans)
+    return (answer_md.rstrip() + f"\n\n> ⚠️ **Citas sin fragmento de origen:** {lista} — "
+            "el modelo citó números que no estaban en el contexto; verifica esas afirmaciones.")
+

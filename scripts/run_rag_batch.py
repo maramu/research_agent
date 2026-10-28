@@ -35,7 +35,7 @@ from dotenv import load_dotenv
 sys.path.insert(0, str(Path(__file__).parent))
 from utils.constants import OLLAMA_MODEL_EMBED
 from utils.citations import (load_papers_metadata, build_cite_map,
-                             apply_citations, CITE_PROMPT_RULES)
+                             apply_citations, annotate_orphan_citations, CITE_PROMPT_RULES)
 from utils.retrieval import (build_bm25, dense_rank, bm25_rank, rrf_fuse,
                              passes_filters, pool_size)
 from utils.export_refs import build_chunks_markdown
@@ -138,7 +138,7 @@ Recuerda: cita con [N] junto a cada dato; sin sección de Referencias."""
     prompt = f"{system_content}\n\nPregunta: {query}\n\nRespuesta:"
     raw = client.generate(model=model, prompt=prompt, stream=False,
                            options={"num_ctx": 16384, "temperature": 0.0})["response"]
-    answer_md = apply_citations(raw, cite_map)
+    answer_md = annotate_orphan_citations(raw, apply_citations(raw, cite_map), cite_map)
     return answer_md
 
 

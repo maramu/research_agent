@@ -38,7 +38,7 @@ from app_utils import (  # noqa: E402
 )
 from utils.export_refs import build_papers_zip, build_chunks_markdown  # noqa: E402
 from utils.citations import (  # noqa: E402
-    load_papers_metadata, build_cite_map, apply_citations, CITE_PROMPT_RULES,
+    load_papers_metadata, build_cite_map, apply_citations, annotate_orphan_citations, CITE_PROMPT_RULES,
 )
 from utils.retrieval import build_bm25  # noqa: E402
 
@@ -339,7 +339,7 @@ def synthesize_answer(provider, model, results, query, papers_meta,
         _render(stream_google_aistudio())
 
     raw_md    = "".join(_raw_chunks)
-    answer_md = apply_citations(raw_md, cite_map)
+    answer_md = annotate_orphan_citations(raw_md, apply_citations(raw_md, cite_map), cite_map)
     out_box.markdown(answer_md)
     return answer_md, usage_capture, prompt
 
