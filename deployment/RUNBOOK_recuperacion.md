@@ -15,10 +15,10 @@ irremplazable son los PDFs, `metadata/papers_metadata.jsonl`, `metadatos/` (p. e
    2026-10-28; `requirements.txt` es la versión no fijada). Si se toca una dependencia, replicar también
    en `.venv/` del repo.
 5. **Ollama.** Tarball oficial de GitHub (no Homebrew ni `install.sh`) → `/usr/local/bin/ollama` y
-   `/usr/local/lib/ollama/`; copiar `deployment/com.martin.ollama.plist` a `~/Library/LaunchAgents/`
-   (`OLLAMA_HOST=127.0.0.1:11435`) y `ollama pull bge-m3` + `ollama pull qwen2.5:14b-instruct`.
-6. **GROBID.** `docker compose -f deployment/grobid-compose.yml up -d` (imagen
-   `grobid/grobid:0.9.0-crf`, solo en `127.0.0.1:8070`).
+   `/usr/local/lib/ollama/`; recrear `~/Library/LaunchAgents/com.martin.ollama.plist` (ver "Ollama — instalación en
+   pciq22" en `ESTADO.md`: `OLLAMA_HOST=127.0.0.1:11435`, `OLLAMA_ORIGINS`, `KeepAlive`) y `ollama pull bge-m3` + `ollama pull qwen2.5:14b-instruct`.
+6. **GROBID.** `docker compose -f ~/grobid-compose.yml up -d` (imagen `grobid/grobid:0.9.0-crf`, plataforma
+   `linux/arm64`, solo en `127.0.0.1:8070`; ver `ESTADO.md`).
 7. **Caddy (acceso remoto con Bearer).** `deployment/Caddyfile.ollama` +
    `deployment/com.research_agent.caddy_ollama.plist`; ver `deployment/README.md`.
 8. **Servicios.** Copiar los plist de `deployment/` a `~/Library/LaunchAgents/` y cargarlos:
@@ -30,6 +30,7 @@ irremplazable son los PDFs, `metadata/papers_metadata.jsonl`, `metadatos/` (p. e
 11. **Reindexar si hace falta.** Para cada categoría: `python3 scripts/5_build_embeddings.py --project <cat> --force`
     y después regenerar `notebooklm_packages/` (`6_make_packages.py --repack-all` + `7_make_master_index.py`).
 
-> Pendiente de versionar: `~/grobid-compose.yml` y `~/Library/LaunchAgents/com.martin.ollama.plist`
-> (no contienen secretos; copiarlos a `deployment/` con `cp`). Hasta entonces los pasos 5 y 6 usan las
-> versiones de la máquina.
+> **Pendiente (item 60b):** versionar `~/grobid-compose.yml` y `~/Library/LaunchAgents/com.martin.ollama.plist`
+> en `deployment/`. Se revisaron el 2026-10-28 y no contienen secretos, pero la copia automática desde el
+> directorio personal fue bloqueada por el clasificador de permisos; hacerla a mano:
+> `cp ~/grobid-compose.yml ~/Library/LaunchAgents/com.martin.ollama.plist /Volumes/Disco/proyectos/research_agent/deployment/`.
