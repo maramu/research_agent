@@ -124,6 +124,8 @@ def _load_index(project: str, phase: str, mtime: float):
             line = line.strip()
             if line:
                 meta.append(json.loads(line))
+    from utils.rag_loader import check_alignment
+    check_alignment(index, meta, str(emb_dir))
     cfg = json.loads(cfg_path.read_text()) if cfg_path.exists() else {}
     return index, meta, cfg
 

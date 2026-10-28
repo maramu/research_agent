@@ -44,6 +44,7 @@ if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
 from utils.constants import OLLAMA_MODEL_EMBED
+from utils.rag_loader import load_index_and_meta, embed_query
 from utils.retrieval import dense_rank, bm25_rank, rrf_fuse, pool_size, build_bm25
 
 DEFAULT_BASE = "/Volumes/research/categorias"
@@ -53,31 +54,6 @@ OLLAMA_HOST  = os.getenv("OLLAMA_HOST", "http://127.0.0.1:11435")
 # ───────────────────────────────────────────────────────────────────────────
 # Loaders (mismos que run_eval.py)
 # ───────────────────────────────────────────────────────────────────────────
-
-def load_index_and_meta(project: str, phase: str, base: Path):
-    emb_dir = base / project / "embeddings" / phase
-    index_path = emb_dir / "index.faiss"
-    meta_path  = emb_dir / "metadata.jsonl"
-    cfg_path   = emb_dir / "config.json"
-    if not (index_path.exists() and meta_path.exists()):
-        raise SystemExit(f"No existe índice FAISS en: {emb_dir}")
-    index = faiss.read_index(str(index_path))
-    meta = []
-    with meta_path.open(encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if line:
-                meta.append(json.loads(line))
-    cfg = {}
-    if cfg_path.exists():
-        cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
-    return index, meta, cfg
-
-
-def embed_query(client, query: str, model: str) -> np.ndarray:
-    resp = client.embeddings(model=model, prompt=query)
-    return np.array(resp["embedding"], dtype="float32")
-
 
 def load_questions(path: Path) -> list[dict]:
     if not path.exists():

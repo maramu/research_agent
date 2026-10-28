@@ -34,6 +34,8 @@ from dotenv import load_dotenv
 
 sys.path.insert(0, str(Path(__file__).parent))
 from utils.constants import OLLAMA_MODEL_EMBED
+from utils.rag_loader import load_metadata, embed_query, check_alignment
+from utils.synthesis import build_system_prompt
 from utils.citations import (load_papers_metadata, build_cite_map,
                              apply_citations, annotate_orphan_citations, CITE_PROMPT_RULES)
 from utils.retrieval import (build_bm25, dense_rank, bm25_rank, rrf_fuse,
@@ -49,26 +51,6 @@ else:
 
 DEFAULT_BASE = "/Volumes/research/categorias"
 EXPORTS_BASE = "/Volumes/research/exports"
-
-
-def load_metadata(emb_dir: Path):
-    """Copiado VERBATIM de 8_query_rag.py."""
-    meta_path = emb_dir / "metadata.jsonl"
-    if not meta_path.exists():
-        raise SystemExit(f"No existe metadata.jsonl en: {emb_dir}")
-    out = []
-    with meta_path.open(encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if line:
-                out.append(json.loads(line))
-    return out
-
-
-def embed_query(client: ollama.Client, q: str, model: str) -> np.ndarray:
-    """Copiado VERBATIM de 8_query_rag.py."""
-    resp = client.embeddings(model=model, prompt=q)
-    return np.array(resp["embedding"], dtype="float32")
 
 
 def build_context_text(chunks):
@@ -121,19 +103,7 @@ def synthesize(client, model, results, query, papers_meta):
     context = build_context_text(m for _, _, m in results)
     cite_map = build_cite_map(results, papers_meta)
 
-    # Plantilla EXACTA de synthesize_answer (2_RAG.py 244-255).
-    system_content = f"""Eres un asistente científico. Responde a la pregunta basándote ÚNICAMENTE en los fragmentos numerados que se proporcionan a continuación.
-
-Reglas:
-- Si los fragmentos no contienen información suficiente para responder, dilo claramente.
-- No inventes datos. No uses conocimiento externo a los fragmentos.
-- Responde en el mismo idioma que la pregunta.
-{CITE_PROMPT_RULES}
-
-Fragmentos:
-{context}
-
-Recuerda: cita con [N] junto a cada dato; sin sección de Referencias."""
+    system_content = build_system_prompt(context)
 
     prompt = f"{system_content}\n\nPregunta: {query}\n\nRespuesta:"
     raw = client.generate(model=model, prompt=prompt, stream=False,
@@ -227,6 +197,7 @@ def run_batch(cfg: dict, base: str = DEFAULT_BASE, progress_cb=None) -> dict:
 
     index = faiss.read_index(str(index_path))
     meta = load_metadata(emb_dir)
+    check_alignment(index, meta, str(emb_dir))
     papers_meta = load_papers_metadata(category, base_path)
 
     bm25 = build_bm25([m.get("text", "") for m in meta]) if cfg["hybrid"] else None
