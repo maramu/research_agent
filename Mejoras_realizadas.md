@@ -21,8 +21,8 @@ con un segundo PDF parecido que NO debe casar.
 que cada borrado dejaba filas de referencias bajo un `paper_id` inexistente (68 líneas en `thiosulfate`,
 45 en `biological_gas_odor_treatment`). Ahora las quita (backup `.bak`), las guarda en el manifiesto
 (`refs_lines`) y `restore_from_quarantine()` las devuelve sin duplicar. Limpieza puntual hecha en
-`thiosulfate`; **pendiente** en `biological_gas_odor_treatment` (2 papers en `quarantine/duplicates/`
-de 2026-06-14, sus 45 líneas siguen ahí).
+`thiosulfate`; también limpiado en `biological_gas_odor_treatment` (45 líneas de 2 papers de
+`quarantine/duplicates/` 2026-06-14, guardadas en sus manifiestos).
 
 **70.3 — Vista de cuarentena en `11_Articulos.py` (solo privada).** Sección "🗑 Cuarentena" al final del
 editor: lista `quarantine/deleted/` y `quarantine/duplicates/` (lote, origen, categoría, paper_id,
