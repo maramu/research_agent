@@ -397,14 +397,31 @@ def screen_new_pdfs_against_corpus(
         normalize_stem(m.name[:-len(".clean.md")])
         for m in (md_dir.glob("*.clean.md") if md_dir.exists() else [])
     }
+    # Un PDF ya procesado puede tener un nombre más largo que su paper_id
+    # (p.ej. "Año - Autor - Título [doi].pdf" vs paper_id truncado
+    # "..._10_108"): normalize_stem no los iguala. Sin este match por prefijo el
+    # propio PDF del corpus se tomaba por "nuevo", su DOI "ya estaba en el corpus"
+    # (el de su propio paper) y se apartaba a cuarentena (item 71).
+    _fk = lambda t: re.sub(r"[^a-z0-9]+", "_", t.lower()).strip("_")  # noqa: E731
+    md_keys = {
+        _fk(m.name[:-len(".clean.md")])
+        for m in (md_dir.glob("*.clean.md") if md_dir.exists() else [])
+    }
+
+    def _is_processed(p: Path) -> bool:
+        if normalize_stem(p.stem) in md_stems:
+            return True
+        k = _fk(p.stem)
+        return any(len(mk) >= 60 and k.startswith(mk) for mk in md_keys)
+
     all_pdfs = sorted(pdfs_dir.glob("*.pdf"))
-    new_pdfs = [p for p in all_pdfs if normalize_stem(p.stem) not in md_stems]
+    new_pdfs = [p for p in all_pdfs if not _is_processed(p)]
     if not new_pdfs:
         return out
 
     corpus_dois = _load_corpus_doi_index()
     existing_hashes = {
-        _pdf_sha256(p) for p in all_pdfs if normalize_stem(p.stem) in md_stems
+        _pdf_sha256(p) for p in all_pdfs if _is_processed(p)
     }
     existing_hashes.discard("")
 

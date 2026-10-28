@@ -287,3 +287,30 @@ def test_quarantine_quita_references_y_restore_las_devuelve(tmp_path):
     assert json.loads(man.read_text())["refs_lines"] == [r1]
     cleanup.restore_from_quarantine(man, base)
     assert set(refs.read_text().splitlines()) == {r1, r2}
+
+
+def test_screen_no_aparta_pdf_ya_procesado_con_nombre_largo(tmp_path, monkeypatch):
+    """Regresión item 71: el PDF de un paper ya procesado (nombre largo con
+    [doi], paper_id truncado) NO debe tomarse por 'nuevo' y salir a cuarentena
+    por 'DOI ya en corpus' (su propio DOI)."""
+    import pipeline
+    cat = "c"
+    base = tmp_path / "categorias"
+    (base / cat / "pdfs").mkdir(parents=True); (base / cat / "md_clean").mkdir()
+    pid = ("2025_Karimi_T_Isolation_and_characterization_of_sulfur_oxidizing_"
+           "bacteria_at_the_Ilam_gas_refinery_in_Iran_10_22104_AET_")
+    (base / cat / "md_clean" / f"{pid}.clean.md").write_text("x")
+    proc = base / cat / "pdfs" / ("2025 - Karimi T - Isolation and characterization of "
+                                  "sulfur-oxidizing bacteria at the Ilam gas refinery in "
+                                  "Iran [10.22104_AET.2025.7467.2081].pdf")
+    nuevo = base / cat / "pdfs" / "nuevo_dup.pdf"
+    proc.write_bytes(b"%PDF-a"); nuevo.write_bytes(b"%PDF-b")
+    monkeypatch.setattr(pipeline, "CATEGORIAS_DIR", base)
+    monkeypatch.setattr(pipeline, "QUARANTINE_DIR", tmp_path / "q")
+    monkeypatch.setattr(pipeline, "_load_corpus_doi_index", lambda: {"10.1/x": f"{cat}/{pid}"})
+    import utils.pdf_utils as pu
+    monkeypatch.setattr(pu, "extract_doi_from_pdf",
+                        lambda p: "10.1/x" if Path(p).name == "nuevo_dup.pdf" else "10.1/x")
+    res = pipeline.screen_new_pdfs_against_corpus(cat)
+    assert proc.exists()                       # el procesado se queda
+    assert [q["file"] for q in res["quarantined"]] == ["nuevo_dup.pdf"]

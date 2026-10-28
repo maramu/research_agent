@@ -2,6 +2,33 @@
 > Histórico append-only (lo más nuevo arriba). Backlog: Mejoras_pendientes.md · Estado/arquitectura: ESTADO.md
 
 ---
+### ✅ 71. `screen_new_pdfs_against_corpus` apartaba a cuarentena el PDF de papers ya procesados (2026-10-28)
+
+Síntoma (Martín): `thiosulfate` tenía 158 PDFs y 161 md_clean.
+
+**Causa.** El cribado de PDFs nuevos (`pipeline.py::screen_new_pdfs_against_corpus`, paso previo del
+pipeline y de la descarga semanal) decide qué PDF es "nuevo" comparando `normalize_stem(pdf)` con los
+stems de `md_clean/`. Con el nombre original de la descarga (`Año - Autor - Título [doi].pdf`) y un
+`paper_id` truncado (`..._10_22104_AET_`) esos stems no coinciden (además `[ ]` sobrevive a
+`normalize_stem`), así que el PDF **del propio paper** se tomaba por nuevo; su DOI figuraba "ya en
+corpus" (el de su propio registro) y se movía a `quarantine/duplicates/<ts>/`. Es la misma familia de
+fallo que el item 70.1 (nombre del PDF más largo que el `paper_id`). En las categorías con descarga
+semanal el PDF se volvía a bajar y a apartar cada semana (Tao, Haddad y Han: 6, 2 y 3 copias en
+cuarentena).
+
+**Fix.** `_is_processed(pdf)`: además del match exacto, un PDF cuya clave (`[^a-z0-9]+`→`_`) empieza
+por la clave de un `md_clean` de ≥60 caracteres se considera ya procesado; se usa también para
+construir `existing_hashes`. Test de regresión en `tests/test_cleanup_rename.py` (falla sin el fix,
+y un duplicado genuino sigue yendo a cuarentena).
+
+**Datos recuperados** (PDF movido de vuelta a `pdfs/` con el nombre de su `paper_id`, DOI verificado):
+`thiosulfate` Straub 2004, Wu 2017, Karimi 2025 (ahora 161/161); `biogas_upgrading_biomethanation`
+Tao 2025 y Haddad 2025 (399/399); `bioplastics_microplastics` Han 2025. Las demás copias repetidas
+siguen en `quarantine/duplicates/` (se pueden purgar desde la sección "🗑 Cuarentena" — ojo, esas
+carpetas tienen `_manifest.csv`, no manifiestos por paper, y la vista no las lista).
+`bioplastics_microplastics` queda con 1 PDF más que md (`s10532-026-10388-6.pdf`, nuevo sin procesar).
+
+---
 ### ✅ 70. Borrado desde Artículos: PDF huérfano, `references.jsonl` huérfano, vista de cuarentena y filtro "Nombre no canónico" (2026-10-28)
 
 Petición de Martín: al borrar un artículo de `thiosulfate` desde Artículos, el PDF seguía en `pdfs/`.
