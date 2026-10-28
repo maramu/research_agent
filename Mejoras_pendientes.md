@@ -13,7 +13,7 @@
 - ~~Timeout job semanal: subir `SCOPUS_TIMEOUT` de 2700 a 5400 (45→90 min)~~ — ✅ **COMPLETADO 2026-06-15** — `run_weekly_scopus.py`: `SCOPUS_TIMEOUT = 5400`; `WEEKLY_CATEGORIES` ampliada con `anoxic_biogas_biodesulfurization`.
 
 ## Orden de prioridad (revisión 2026-07-20 — auditoría externa Kimi K2)
-> Detalle y justificación: `2026-07-20_auditoria_externa.md` (raíz del repo — corregido 2026-07-25;
+> Detalle y justificación: `docs/auditorias/2026-07-20_auditoria_externa.md` (movido de la raíz a `docs/` el 2026-10-28; antes corregido 2026-07-25;
 > el path `docs/auditorias/...` que aparecía aquí antes no existe, el fichero siempre vivió en la
 > raíz, ver también auditoría de chunks más abajo).
 > Items 52–61 nuevos (bloque al final); el resto son anotaciones fechadas dentro de items existentes. El orden 2026-06-25 sigue vigente para lo no tocado aquí.
@@ -1305,7 +1305,7 @@ resumen del script imprime el recuento de truncados. Se hizo en la misma tanda q
 si no habría que reindexar dos veces. NO se persiste en libros: la caché `_vectors/*.npy` reutiliza
 vectores sin flags y no merece la complicación (anotado como residuo menor). Contexto original:
 ahora tiene razón funcional, no de higiene, en vez de solo higiene como cuando se registró
-(`2026-07-20_auditoria_externa.md`, sección "P2 — Truncado reactivo de embeddings sin auditoría +
+(`docs/auditorias/2026-07-20_auditoria_externa.md`, sección "P2 — Truncado reactivo de embeddings sin auditoría +
 divergencia vector↔texto"). 2023_almenglo #34 mide 7993 chars, topa en `MAX_EMBED_CHARS` y es
 candidato casi seguro al truncado reactivo de `embed_texts`: texto con filas ya fusionadas por este
 mismo bug Y vector representando dos tercios de ese texto ya corrupto. Es el caso peor conocido del

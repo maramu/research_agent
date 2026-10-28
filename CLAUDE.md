@@ -17,6 +17,7 @@ Ollama) → RAG y catálogo en Streamlit. Idioma de trabajo: **español**.
 - `ESTADO.md` — arquitectura y estado por script (una fila por script/página; añadir nota fechada).
 - `Mejoras_realizadas.md` — histórico, entrada numerada nueva **arriba** (causa, arreglo, datos tocados).
 - `Mejoras_pendientes.md` — backlog; el bloque más reciente "ACTUALIZACIÓN …" fija el orden vivo.
+- `docs/` — material de referencia congelado (auditorías, rollouts, copias antiguas); índice en `docs/README.md`.
 - Al empezar una sesión: leer `ESTADO.md` y el último bloque de `Mejoras_pendientes.md`; **verificar con
   git/NAS antes de afirmar el estado**.
 

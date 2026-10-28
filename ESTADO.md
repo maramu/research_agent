@@ -33,7 +33,7 @@
 
 | Auditoría | Informe | Acciones derivadas |
 |---|---|---|
-| Externa Kimi K2 (2026-07-20) | `2026-07-20_auditoria_externa.md` (raíz del repo, versionado) | `Mejoras_pendientes.md` items 52–61 |
+| Externa Kimi K2 (2026-07-20) | `docs/auditorias/2026-07-20_auditoria_externa.md` (versionado) | `Mejoras_pendientes.md` items 52–61 |
 | Calidad de chunks vs PDF original (2026-07-25) | `/Volumes/research/metadatos/auditoria_chunks/2026-07-25/informe.md` (NAS, fuera de git; pendiente copiar a la raíz del repo como `2026-07-25_auditoria_chunks.md` desde pciq22 para versionarlo) | `Mejoras_pendientes.md` items 62–64 + anotaciones en items 33/35/37/43 |
 | Rollout del commit `6093f35` (2026-07-25) | `/Volumes/research/metadatos/eval/rollout_6093f35/informe.md` (NAS, fuera de git; mismo patrón que las dos anteriores — pendiente copiar a la raíz del repo desde pciq22 para versionarlo). Junto a él: `antes.json`/`despues.json`, `antes_REDERIVADO.json` y `logs_paso2/` | `Mejoras_pendientes.md` item **65** (vectores fantasma, nuevo) + correcciones de alcance en items 33/55a/55b/63 + nota en el 35 |
 | Test de idioma de consulta (2026-07-27) | `/Volumes/research/metadatos/eval/idioma_20260727/` (NAS, fuera de git; mismo patrón que las anteriores — pendiente copiar a la raíz del repo) | `Mejoras_pendientes.md` items 33 y 37 |
@@ -209,7 +209,7 @@ Borrados en sesión 2026-06-26 (item 46 cerrado):
 > - **ESTADO.md** (este fichero) — estado y arquitectura actuales del proyecto.
 > - **Mejoras_pendientes.md** — backlog vivo + orden de prioridad.
 > - **Mejoras_realizadas.md** — histórico de trabajo completado (append-only, lo más nuevo arriba).
-> - **Mejoras_copia20260612.md** — copia congelada del backlog original (referencia histórica).
+> - **docs/historico/Mejoras_copia20260612.md** — copia congelada del backlog original (referencia histórica).
 
 ```
 research_agent/

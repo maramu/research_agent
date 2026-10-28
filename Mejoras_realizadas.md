@@ -2,6 +2,18 @@
 > Histórico append-only (lo más nuevo arriba). Backlog: Mejoras_pendientes.md · Estado/arquitectura: ESTADO.md
 
 ---
+### ✅ 79. Reorganización de los `.md` de la raíz (2026-10-28)
+
+La raíz acumulaba 12 ficheros `.md`. Se conservan en la raíz solo los vivos (`CLAUDE.md`, `ESTADO.md`,
+`Mejoras_pendientes.md`, `Mejoras_realizadas.md`); lo demás pasa a `docs/` con `git mv` (historial
+conservado): `docs/auditorias/` (auditoría externa Kimi K2 y auditoría de chunks), `docs/rollout-2026-07-25/`
+(línea base e informe del rollout `6093f35`) y `docs/historico/` (copia congelada del backlog de junio y nota
+de la pestaña Pendientes). `copia_git.md` se elimina (obsoleta: citaba un `NOTAS_PENDIENTES.md` inexistente);
+su recordatorio de `git pull` en pciq22 pasa a `deployment/README.md`. Referencias actualizadas en `ESTADO.md` y
+`Mejoras_pendientes.md`; índice en `docs/README.md`. Las menciones históricas de rutas antiguas dentro de las
+entradas ya cerradas se dejan tal cual.
+
+---
 ### ✅ 78. Purga por DOI poda el índice; `Mejoras_pendientes.md` reordenado (2026-10-28)
 
 Al revisar el backlog se vio que `pipeline.purge_paper_by_doi()` quitaba el `paper_id` de

@@ -165,3 +165,14 @@ integrarse pero no hay un bucle de agente en el repo que lo consuma.
   conexiones de red directas, ni siquiera sin el proxy.
 - GROBID (`~/grobid-compose.yml`, fuera del repo) publica el puerto como
   `127.0.0.1:8070:8070` — tampoco alcanzable desde la red.
+
+
+## Actualizar el código en pciq22
+
+```bash
+cd ~/proyectos/research_agent
+git pull
+# si git pull no funciona:
+git fetch origin
+git pull origin main
+```
