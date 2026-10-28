@@ -541,3 +541,17 @@ def test_build_embeddings_poda_ids_en_metadata_ausentes_de_indexed_papers(tmp_pa
                        capture_output=True, text=True, timeout=120)
     assert r.returncode == 0, r.stderr[-400:]
     assert faiss.read_index(str(out / "index.faiss")).ntotal == 2
+
+
+def test_rename_paper_mueve_el_log_y_no_deja_bak_en_chunks(tmp_path):
+    """Item 79: el .log viaja con el paper y chunks/ no se llena de .bak."""
+    base = tmp_path / "categorias"
+    old, new = _REC["paper_id"], "2020_smith_nuevo_nombre"
+    proj = _make_processed_paper(base, "cat", old, _REC)
+    (proj / "logs").mkdir()
+    (proj / "logs" / f"{old}.log").write_text("log")
+    cleanup.rename_paper("cat", old, new, base)
+    assert (proj / "logs" / f"{new}.log").exists() and not (proj / "logs" / f"{old}.log").exists()
+    assert not list((proj / "chunks").glob("*.bak"))
+    assert (proj / "chunks" / f"{new}.chunks.jsonl").exists()
+    assert (proj / "metadata" / "papers_metadata.jsonl.bak").exists()   # los agregados SÍ conservan .bak

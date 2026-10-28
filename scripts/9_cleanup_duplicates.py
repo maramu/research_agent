@@ -997,9 +997,10 @@ def _existing_artifact_paths(project_dir: Path, stem: str) -> list[Path]:
     return paths
 
 
-def _patch_jsonl_field(path: Path, field: str, old_val: str, new_val: str) -> bool:
+def _patch_jsonl_field(path: Path, field: str, old_val: str, new_val: str,
+                       backup: bool = True) -> bool:
     """Reescribe `path` (JSONL) sustituyendo `field` donde valga `old_val`.
-    Backup `.bak` solo si hay cambios. Devuelve True si se modificó algo."""
+    Backup `.bak` solo si hay cambios (y `backup`). Devuelve True si se modificó algo."""
     lines: list[str] = []
     changed = False
     with path.open(encoding="utf-8") as f:
@@ -1020,7 +1021,8 @@ def _patch_jsonl_field(path: Path, field: str, old_val: str, new_val: str) -> bo
                 s = json.dumps(d, ensure_ascii=False)
             lines.append(s)
     if changed:
-        shutil.copy(path, path.with_name(path.name + ".bak"))
+        if backup:
+            shutil.copy(path, path.with_name(path.name + ".bak"))
         path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
     return changed
 
@@ -1142,12 +1144,21 @@ def rename_paper(category: str, old_id: str, new_id: str, base: Path) -> dict:
                 except Exception as e:
                     log.warning("No se pudo parchear %s: %s", target, e)
 
+    # 2b) logs/<old_id>.log (histórico del procesado): renombrar si no choca (item 79a)
+    old_log = project_dir / "logs" / f"{old_id}.log"
+    new_log = project_dir / "logs" / f"{new_id}.log"
+    if old_log.exists() and not new_log.exists():
+        old_log.rename(new_log)
+        files_renamed.append((old_log, new_log))
+        log.info("Renombrado: %s -> %s", old_log, new_log)
+
     # 3) campo interno "paper_id" de cada línea de chunks/<new_id>.*
     chunks_dir = project_dir / "chunks"
     if chunks_dir.exists():
         for ext in (".chunks.jsonl", ".jsonl"):
             cpath = chunks_dir / f"{new_id}{ext}"
-            if cpath.exists() and _patch_jsonl_field(cpath, "paper_id", old_id, new_id):
+            if cpath.exists() and _patch_jsonl_field(cpath, "paper_id", old_id, new_id,
+                                                     backup=False):
                 patched.append(str(cpath))
 
     # 4) papers_metadata.jsonl (paper_id + stable_id + tei_file)
