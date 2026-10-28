@@ -588,7 +588,7 @@ def load_articles(category: str, mtime: float) -> list[dict]:
                 authors = _fmt_authors(authors_raw)
                 first_author = _first_author_surname(authors_raw)
                 refs = d.get("references")
-                n_refs = len(refs) if isinstance(refs, list) else (d.get("n_references") or "")
+                n_refs = len(refs) if isinstance(refs, list) else (d.get("n_references") or None)  # None, no "": columna numérica
                 rows.append({
                     "category":      category,
                     "title":         d.get("title") or "",
