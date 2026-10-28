@@ -2,6 +2,28 @@
 > Histórico append-only (lo más nuevo arriba). Backlog: Mejoras_pendientes.md · Estado/arquitectura: ESTADO.md
 
 ---
+### ✅ 74. Autores con nombre y apellido pegados ("EunsungKan") — bug en `4_extract_metadata.py::extract_authors` (2026-10-28)
+
+Martín preguntó por qué los autores de los artículos descargados salían pegados de forma recurrente.
+
+**Causa (no era Scopus ni el TEI).** El TEI de GROBID trae `<forename>Eunsung</forename><surname>Kan</surname>`
+bien separados. `extract_authors()` tenía tres defectos: (1) la rama de respaldo (cuando el TEI no trae
+`<author>` en `titleStmt`) hacía `"".join(persName.itertext())` → `EunsungKan`, y guardaba `forename/surname`
+vacíos; (2) la rama principal hacía `"".join(forename.split())`, que borraba los espacios *internos*
+("Maria Elena" → `MariaElena`) y solo leía el primer `<forename>` (se perdían los segundos nombres); (3)
+cualquier TEI de un PDF sin bloque `<author>` estándar caía en (1), por eso era recurrente. Alcance real
+medido: 41 de 1.104 registros (3,7 %), sin relación con el origen (26 manuales, 12 Scopus, 3 adhoc).
+
+**Fix.** `_name_part()` (junta solo si todo son letras sueltas tipo "E u n s u n g", que era el motivo
+original del `join`) y `_persname_parts()` (todos los `<forename>` y `<surname>`, separados por espacio),
+usados en las dos ramas, y la de respaldo ahora conserva `forename/surname`. Test de regresión en
+`tests/test_cleanup_rename.py`. **Reparación de datos:** los 41 registros afectados se re-derivaron de su
+TEI con el código nuevo (`papers_metadata.jsonl` + `per_paper/*.metadata.json`, `.bak`); 0 pegados
+restantes; sidecars de validación regenerados. Los `paper_id` no se tocan (los dos de `thiosulfate` con
+`unknownauthor` pueden renombrarse con el botón). Quedan autores mal parseados por otras causas que no
+son de pegado (p. ej. "Kumar Discover", "Algal Research" como autor).
+
+---
 ### ✅ 73. Auditoría de nombres + DOI manual: DOI desde el nombre del fichero, cuarentena del cribado, validación global (2026-10-28)
 
 **73.1 — Helper único de "paper ya procesado".** `utils/pdf_utils.py`: `stem_key`, `md_stem_keys`,

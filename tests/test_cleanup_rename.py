@@ -391,3 +391,28 @@ def test_extract_doi_from_filename():
         == "10.1016/S0014-5793(98)00379-2"
     assert f("2026_zhou_energy_positive_thiosulfate_production.pdf") is None
     assert f("3. Biohydrometallurgical_Processes.pdf") is None
+
+
+def test_extract_authors_no_pega_nombre_y_apellido():
+    """Regresión: la rama de respaldo hacía "".join(persName.itertext()) →
+    'EunsungKan'; y 'Maria Elena' pasaba a 'MariaElena'."""
+    import xml.etree.ElementTree as ET
+    spec = importlib.util.spec_from_file_location(
+        "extract_meta_t", Path(__file__).resolve().parents[1] / "scripts" / "4_extract_metadata.py")
+    mod = importlib.util.module_from_spec(spec); sys.modules["extract_meta_t"] = mod
+    spec.loader.exec_module(mod)
+    ns = {"tei": "http://www.tei-c.org/ns/1.0"}
+    sin_author = ET.fromstring(
+        '<TEI xmlns="http://www.tei-c.org/ns/1.0"><teiHeader><fileDesc><sourceDesc><biblStruct><analytic>'
+        '<persName><forename type="first">Eunsung</forename><surname>Kan</surname></persName>'
+        '<persName><forename type="first">Marc</forename><forename type="middle">A</forename>'
+        '<surname>Deshusses</surname></persName></analytic></biblStruct></sourceDesc></fileDesc>'
+        '</teiHeader></TEI>')
+    got = mod.extract_authors(sin_author, ns)
+    assert [a["full"] for a in got] == ["Eunsung Kan", "Marc A Deshusses"]
+    assert got[0]["surname"] == "Kan" and got[0]["forename"] == "Eunsung"
+    con_author = ET.fromstring(
+        '<TEI xmlns="http://www.tei-c.org/ns/1.0"><teiHeader><fileDesc><titleStmt><author><persName>'
+        '<forename>Maria Elena</forename><surname>Acuña</surname></persName></author></titleStmt>'
+        '</fileDesc></teiHeader></TEI>')
+    assert mod.extract_authors(con_author, ns)[0]["full"] == "Maria Elena Acuña"

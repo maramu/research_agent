@@ -162,24 +162,49 @@ def parse_year(s: Optional[str]) -> Optional[int]:
     return None
 
 
+def _name_part(text: str) -> str:
+    """Normaliza un trozo de nombre. GROBID a veces devuelve el texto con las
+    letras separadas ("E u n s u n g"): ahí SÍ se juntan; en cualquier otro caso
+    se conservan los espacios ("Maria Elena" no puede pasar a "MariaElena")."""
+    toks = norm_ws(text or "").split()
+    if len(toks) > 2 and all(len(t) == 1 for t in toks):
+        return "".join(toks)
+    return " ".join(toks)
+
+
+def _persname_parts(pers: ET.Element, ns: Dict) -> tuple:
+    """(forename, surname) de un <persName> TEI: todos los <forename> (first +
+    middle) separados por espacio, y los <surname> igual."""
+    fn = " ".join(p for p in (_name_part("".join(e.itertext()))
+                              for e in pers.findall(".//tei:forename", ns)) if p)
+    sn = " ".join(p for p in (_name_part("".join(e.itertext()))
+                              for e in pers.findall(".//tei:surname", ns)) if p)
+    return fn, sn
+
+
 def extract_authors(root: ET.Element, ns: Dict) -> List[Dict]:
     authors = []
     for a in root.findall(".//tei:teiHeader/tei:fileDesc/tei:titleStmt/tei:author", ns):
         pers = a.find(".//tei:persName", ns)
         if pers is not None:
-            forename = norm_ws("".join((pers.findtext(".//tei:forename", default="", namespaces=ns) or "").split()))
-            surname  = norm_ws("".join((pers.findtext(".//tei:surname",  default="", namespaces=ns) or "").split()))
+            forename, surname = _persname_parts(pers, ns)
             full = norm_ws(" ".join([forename, surname]).strip())
+            if not full:  # persName sin hijos forename/surname: texto con espacios
+                full = norm_ws(" ".join(pers.itertext()))
         else:
-            full = norm_ws("".join(a.itertext()))
+            full = norm_ws(" ".join(a.itertext()))
             forename, surname = "", ""
         if full:
             authors.append({"full": full, "forename": forename, "surname": surname})
     if not authors:
+        # Antes: "".join(pers.itertext()) → "EunsungKan" (forename y surname sin
+        # espacio). Se reconstruye desde los hijos para conservar la estructura.
         for pers in root.findall(".//tei:teiHeader//tei:persName", ns):
-            txt = norm_ws("".join(pers.itertext()))
-            if txt:
-                authors.append({"full": txt, "forename": "", "surname": ""})
+            forename, surname = _persname_parts(pers, ns)
+            full = norm_ws(" ".join([forename, surname]).strip()) \
+                or norm_ws(" ".join(pers.itertext()))
+            if full:
+                authors.append({"full": full, "forename": forename, "surname": surname})
     seen, dedup = set(), []
     for a in authors:
         k = a.get("full", "")
