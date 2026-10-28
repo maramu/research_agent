@@ -78,7 +78,7 @@ def _purge_ui(doi: str) -> None:
     else:
         st.caption("Sin artefactos en disco: solo el registro de metadata.")
     st.caption("Se eliminará además su línea de papers_metadata.jsonl (con backup .bak) "
-               "y su paper_id de indexed_papers.json.")
+               "y sus vectores del índice FAISS.")
 
     ok = st.checkbox("Entiendo que el borrado es irreversible",
                      key=f"purge_ok_{slug}")
@@ -87,11 +87,6 @@ def _purge_ui(doi: str) -> None:
         res = purge_paper_by_doi(doi, category=prev["category"], apply=True)
         st.success(f"✓ {len(res['removed'])} elemento(s) eliminado(s) de "
                    f"{res['category']}.")
-        st.warning(
-            f"⚠️ Los vectores de este paper **siguen en FAISS** (item 65): "
-            f"reindexa la categoría **{res['category']}** con `--force` desde "
-            f"6_Mantenimiento para que deje de aparecer en las búsquedas."
-        )
         st.session_state.pop(prev_key, None)
 
 

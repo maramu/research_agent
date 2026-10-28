@@ -275,7 +275,18 @@ def main():
     # fichero de chunks. Salvaguarda: si no hay ningún chunk no se poda nada.
     if incremental and indexed_ids:
         present = _chunk_paper_ids(chunks_dir)
-        stale = indexed_ids - present if present else set()
+        # También los ids que estén en metadata.jsonl aunque ya no figuren en
+        # indexed_papers.json (p. ej. tras una purga que solo tocó ese fichero).
+        meta_ids = set()
+        mp = out_dir / "metadata.jsonl"
+        if mp.exists():
+            for ln in mp.read_text(encoding="utf-8").splitlines():
+                try:
+                    meta_ids.add(json.loads(ln).get("paper_id", ""))
+                except Exception:
+                    pass
+        stale = (indexed_ids | meta_ids) - present if present else set()
+        stale.discard("")
         if stale:
             try:
                 n_pruned = prune_papers_from_index(out_dir, stale)

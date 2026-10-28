@@ -517,3 +517,27 @@ def test_embed_texts_servidor_sin_embed_se_desactiva_y_sigue():
     out = E.embed_texts(c, ["a", "bb", "ccc"], "m", truncated_out=tr, batch=8)
     assert [v[0] for v in out] == [1, 2, 3] and E._batch_disabled is True
     E._batch_disabled = False
+
+
+def test_build_embeddings_poda_ids_en_metadata_ausentes_de_indexed_papers(tmp_path):
+    """Tras purge_paper_by_doi el id ya no está en indexed_papers.json pero sus
+    vectores sí en el índice: el modo incremental debe podarlos igualmente."""
+    import subprocess
+    import faiss
+    import numpy as np
+    from utils.embeddings import l2_normalize
+    cat = tmp_path / "cat"; (cat / "chunks").mkdir(parents=True)
+    out = cat / "embeddings" / "all"; out.mkdir(parents=True)
+    X = l2_normalize(np.random.default_rng(2).normal(size=(4, 8)).astype("float32"))
+    idx = faiss.IndexFlatL2(8); idx.add(X); faiss.write_index(idx, str(out / "index.faiss"))
+    (out / "metadata.jsonl").write_text(
+        "\n".join(json.dumps({"paper_id": p, "phase": "cat", "text": "t"})
+                  for p in ["a", "a", "b", "b"]) + "\n")
+    (out / "config.json").write_text(json.dumps({"chunks": 4, "normalized": True}))
+    (out / "indexed_papers.json").write_text(json.dumps({"paper_ids": ["a"], "model": "bge-m3"}))
+    (cat / "chunks" / "a.jsonl").write_text(json.dumps({"paper_id": "a", "phase": "cat", "text": "t"}) + "\n")
+    script = Path(__file__).resolve().parents[1] / "scripts" / "5_build_embeddings.py"
+    r = subprocess.run([sys.executable, str(script), "--project", "cat", "--base", str(tmp_path)],
+                       capture_output=True, text=True, timeout=120)
+    assert r.returncode == 0, r.stderr[-400:]
+    assert faiss.read_index(str(out / "index.faiss")).ntotal == 2

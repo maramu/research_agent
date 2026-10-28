@@ -2,6 +2,18 @@
 > Histórico append-only (lo más nuevo arriba). Backlog: Mejoras_pendientes.md · Estado/arquitectura: ESTADO.md
 
 ---
+### ✅ 78. Purga por DOI poda el índice; `Mejoras_pendientes.md` reordenado (2026-10-28)
+
+Al revisar el backlog se vio que `pipeline.purge_paper_by_doi()` quitaba el `paper_id` de
+`indexed_papers.json` pero dejaba sus vectores en el FAISS (y, al no figurar ya en `indexed_papers.json`,
+la poda incremental del item 76 tampoco los habría visto). Ahora llama a `prune_papers_from_index()` para
+cada índice de la categoría (con aviso y fallback a `--force` si no se puede podar), el aviso fijo de
+`15_Pendientes.py` se retira, y la poda incremental de `5_build_embeddings.py` considera también los ids
+presentes en `metadata.jsonl`. Test de ese caso (ids en metadata ausentes de `indexed_papers.json`).
+`Mejoras_pendientes.md`: nuevo bloque de orden 2026-10-28, items 65 cerrado y 51/18 anotados, y nuevos
+items 78–80 (autores contaminados por editores, higiene tras renombrar, prueba de humo de Streamlit).
+
+---
 ### ✅ 77. Embeddings por lotes y escritura atómica del índice en `5_build_embeddings.py` (2026-10-28)
 
 **77.1 — Embeddings por lotes.** `embed_texts()` (`utils/embeddings.py`) hacía una llamada a Ollama por

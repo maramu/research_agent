@@ -55,6 +55,25 @@
 > Orden vivo: **1) item 37** · 2) item 65 · 3) item 33 fase 2 (tras el 37) · 4) 55b(d), 55c, 54,
 > 57 y el resto · 5) item 64 cuando apetezca.
 
+> **ACTUALIZACIÓN 2026-10-28 (tras los items 70–77 de `Mejoras_realizadas.md`).** El bloque de
+> 2026-07-27 está desfasado. Cerrado desde entonces: **item 65** (poda automática del índice, items 75/76),
+> **item 51** (las 11 categorías con 0 papers marcados en la validación), la parte de UI del **item 18**
+> (vista de cuarentena con restaurar/purgar, incluida la del cribado) y toda la familia "nombre del PDF
+> más largo que el `paper_id`" (items 70, 71, 72, 73). Orden vivo:
+> 1. **Items 27 (copia cifrada del `.env`) y 58 (Bearer de Ollama en HTTP plano)** — baratos y de
+>    riesgo alto: hoy el `.env` es la única copia de todas las claves y el token viaja en claro por el campus.
+> 2. **Item 54** — ingesta semanal robusta (timeout que no mata el proceso, LaunchAgent sin sesión
+>    gráfica, números del email incoherentes). Es la función central del sistema.
+> 3. **Items 60 y 59** — lockfile + runbook de recuperación de pciq22; rotación de logs (el log de
+>    Ollama ya pesa 58 MB). Rápidos.
+> 4. **Item 57** — desduplicar el núcleo RAG (2–3 h) **antes** de usar la batería para investigar.
+> 5. **Item 61(a)** — chequeo determinista de citas `[N]` (gratis).
+> 6. **Item 37 — el golden, EN PARALELO desde ya (no detrás del resto).** Sigue siendo el cuello de
+>    botella de calidad de retrieval y bloquea el item 33 fase 2, pero depende de que Martín etiquete
+>    preguntas (~25 por categoría); lo que puede hacer Claude no debe esperar a eso.
+> 7. **Items 55c/55d**, **78–80 (nuevos, abajo)**, 35 (OCR, solo si hay escaneados), 30 (documentación
+>    para el grupo, solo si se comparte) y el resto de prioridad baja (38, 24, 48, 64).
+
 ## Hallazgos pendientes (revisión 2026-06-12)
 - ~~`detect_affected_categories` compara stems por igualdad exacta sin `_norm` → riesgo de reproceso
   por puntuación/guiones.~~ ✅ RESUELTO 2026-06-13.
@@ -222,6 +241,10 @@ Desde Streamlit: aceptar / rechazar / mover a categoría / borrar.
 ✅ Cuarentena REVERSIBLE para duplicados vía `10_Duplicados.py`/`quarantine_paper()` (2026-06-11) — detalle en Mejoras_realizadas.md.
 
 ✅ **Restauración REAL desde la UI (2026-06-17):** `restore_from_quarantine()` en `9_cleanup_duplicates.py` + sección "♻️ Restaurar de cuarentena" en `10_Duplicados.py`. Cuarentenas nuevas incluyen `meta_lines` en el manifiesto → la metadata se reinerta automáticamente al restaurar (dedup por `file_key`, backup `.bak`). Manifiestos legacy sin `meta_lines` → warning + regeneración manual con `4_extract_metadata.py`. **Pendiente: validar round-trip `✓ meta` con paper de juguete.**
+
+✅ **2026-10-28 (items 70/73):** sección "🗑 Cuarentena" en `11_Articulos.py` — lista `deleted/`,
+`duplicates/` y los PDFs apartados por el cribado (`_manifest.csv`), con restaurar y "eliminar
+definitivamente".
 
 Pendiente: extender la cuarentena al resto de casos dudosos (PDF sin texto, muy corto,
 sin DOI/título fiable, material suplementario) y el OCR del item 35.
@@ -676,6 +699,12 @@ de la lógica de `11_Articulos.py`. Consolidar en un helper compartido (p. ej.
 BAJA prioridad (formateo cosmético de autores).
 
 ### 51. Validación de calidad de metadata — MEDIA prioridad
+
+> **Anotación 2026-10-28:** Niveles 1 y 2 en uso. Tras reparar 41 autores pegados (item 74) y corregir
+> años/autores/títulos desde Crossref, las 11 categorías validan con 0 papers marcados. Dos hallazgos
+> que el validador no cubre y que se resolvieron a mano: el DOI de un capítulo apuntaba a otra obra
+> (`title_mismatch` con Crossref) y una lista de autores contaminada por los editores del volumen (CET,
+> ver item 78).
 
 **Nivel 1 (heurísticas locales, sin red) ✅ COMPLETADO 2026-07-04** —
 `scripts/validate_metadata.py` + `scripts/utils/metadata_validation.py`. Detecta
@@ -1329,7 +1358,15 @@ duro con preview y confirmación). Ambas siguen necesitando el `--force` posteri
 
 Prioridad: BAJA. Ya no bloquea el item 37 ni ningún otro.
 
-### 65. Vectores fantasma: el modo incremental de `5_build_embeddings.py` nunca borra — ALTA prioridad
+### 65. Vectores fantasma: el modo incremental de `5_build_embeddings.py` nunca borra — ✅ CERRADO 2026-10-28 (items 75/76 de `Mejoras_realizadas.md`)
+
+> **CERRADO 2026-10-28.** `utils/embeddings.py::prune_papers_from_index()` quita del FAISS y de
+> `metadata.jsonl` los vectores de unos `paper_id` sin re-embeber (≈0,1 s); `delete_papers()` (Artículos)
+> y `purge_paper_by_doi()` (Pendientes) la llaman directamente, y el modo incremental de
+> `5_build_embeddings.py` poda por sí solo los ids indexados o presentes en `metadata.jsonl` que ya no
+> tienen fichero de chunks (con salvaguarda si no hay ningún chunk). Duplicados e `integrate_adhoc` ya no
+> lanzan `--force`. El aviso fijo de la página de Pendientes tras una purga se ha retirado. El texto de
+> abajo se conserva como histórico del defecto.
 
 > **Nota 2026-07-27 — este item ya NO se justifica como "prerrequisito del item 64"** (la premisa
 > del 64 era falsa y ha bajado a BAJA). Se mantiene en ALTA por sí solo: el defecto es real,
@@ -1403,6 +1440,32 @@ ya construido**: el paper sigue siendo recuperable exactamente igual que el caso
 tras cada purga remitiendo a un `--force` desde `6_Mantenimiento`. Es un parche de proceso, no el
 fix: cuando se implemente la poda del item 65, `purge_paper_by_doi()` debería poder disparar la
 purga del índice directamente en vez de dejar el aviso.
+
+### 78. Aviso de autores contaminados (listas de editores) en el renombrado y la validación — BAJA/MEDIA
+
+Origen (2026-10-28): GROBID tomó como autores de `10.3303/CET25120041` a los cinco editores del
+volumen de *Chemical Engineering Transactions* (How, Andiappan, Ng, Lam, Varbanov) y dejó a los autores
+reales al final; el botón "Renombrar" construyó el nombre con el primer autor (`2025_shen_how_…`) y hubo
+que corregir a mano. Añadir a la vista previa del renombrado (y/o a `validate_metadata.py`) un aviso
+cuando el DOI sea `10.3303/*` o cuando los primeros autores coincidan con una lista de editores
+conocidos, y comparar siempre el primer autor con el de Crossref antes de proponer un nombre. Barato.
+
+### 79. Higiene de ficheros tras renombrar/borrar — BAJA
+
+(a) `rename_paper()` no mueve `logs/<paper_id>.log` (quedan con el id viejo). (b) `rename_paper()` /
+`_patch_jsonl_field` dejan `.bak` sueltos DENTRO de `chunks/` y `metadata/per_paper/` (conviene
+una política: carpeta `.bak/` aparte o rotación). (c) **Auditoría pendiente de `3_process_corpus.py`:**
+su lógica "ya procesado/skipped_exists" se basa en el nombre del PDF; comprobar que no re-procesa un PDF
+cuyo nombre es más largo que el `paper_id` (hoy lo evita el renombrado previo del item 72, pero no
+está verificado que la propia skip-logic sea robusta).
+
+### 80. Prueba de humo de las páginas de Streamlit — MEDIA
+
+Los cambios de interfaz del 2026-10-28 (sección Cuarentena, "Renombrar los N mostrados", regeneración
+de paquetes NotebookLM, restaurar con índice incremental) solo se han probado a nivel de funciones y con
+datos reales, no en pantalla. `streamlit.testing.v1.AppTest` carga las páginas pero se queda en la
+contraseña: preparar un modo de prueba (secreto de test / variable de entorno) para poder ejecutar
+cada página contra un corpus sintético y detectar excepciones de import o de render.
 
 ### Descartado con evidencia 2026-07-25 (auditoría de calidad de chunks)
 

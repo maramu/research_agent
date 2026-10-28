@@ -852,22 +852,21 @@ def purge_paper_by_doi(
             out["removed"].append(f"{meta_path} ({dropped} registro/s)")
             emit(f"  🗑️ {dropped} registro(s) fuera de papers_metadata.jsonl (backup .bak)")
 
-    # indexed_papers.json: quitar el paper_id para que la reindexación lo ignore
+    # Índice de embeddings: podar los vectores del paper (item 76/65) sin re-embeber.
+    # prune_papers_from_index también lo quita de indexed_papers.json y de metadata.jsonl.
     if stem:
+        from utils.embeddings import prune_papers_from_index  # noqa: PLC0415
         for ip in indexed_files:
             try:
-                data = json.loads(ip.read_text(encoding="utf-8"))
-            except Exception:
+                n = prune_papers_from_index(ip.parent, {stem})
+            except Exception as e:  # índice no plano/desalineado, sin faiss…
+                emit(f"  ⚠️ no se pudo podar {ip.parent}: {e}. Reindexa "
+                     f"'{found_cat}' con --force para que desaparezca de las búsquedas.")
                 continue
-            ids = data.get("paper_ids", [])
-            if stem in ids:
-                data["paper_ids"] = [x for x in ids if x != stem]
-                ip.write_text(json.dumps(data, indent=2), encoding="utf-8")
-                out["removed"].append(f"{ip} (paper_id)")
-                emit(f"  🗑️ paper_id fuera de {ip}")
+            if n:
+                out["removed"].append(f"{ip.parent} ({n} vectores)")
+                emit(f"  🗑️ {n} vectores fuera del índice {ip.parent.name}")
 
-    emit(f"  ⚠️ Los vectores de este paper SIGUEN en FAISS: reindexa "
-         f"'{found_cat}' con --force para que desaparezcan de las búsquedas.")
     return out
 
 
