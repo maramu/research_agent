@@ -2,6 +2,20 @@
 > Histórico append-only (lo más nuevo arriba). Backlog: Mejoras_pendientes.md · Estado/arquitectura: ESTADO.md
 
 ---
+### ✅ 80. Revisión de exactitud de `ESTADO.md` (2026-10-28)
+
+Auditoría de `ESTADO.md` (cobertura mecánica: todos los scripts, páginas y utils están descritos; las
+referencias a ficheros del repo existen salvo `config/.env.obsidian`, que no se versiona). Corregido:
+(a) la fila "Repo — ruta por máquina" afirmaba que `/Volumes/Disco` no existe en pciq22, y hoy está montado
+allí; se documentan los dos repos (producción en `/Users/…`, desarrollo en `/Volumes/Disco/…`) y la
+obligación de reiniciar Streamlit; (b) la tabla de auditorías decía "pendiente copiar a la raíz del repo"
+para dos informes que ya están versionados en `docs/`; (c) el árbol "Estructura NAS" no incluía
+`quarantine/`, `thiosulfate/`, los proyectos adhoc ni el contenido de `embeddings/` y `metadata/`;
+(d) el recuento de tests citado era de junio (56) y la suite tiene 329. `CLAUDE.md` tenía el mismo error
+de planteamiento (llamaba "Mac" a pciq22 y decía que Streamlit corre en el NAS): corregido. Pendiente de
+verificar en la propia máquina: que ningún LaunchAgent apunte a rutas de `docs/` o `.md` movidos.
+
+---
 ### ✅ 79. Reorganización de los `.md` de la raíz (2026-10-28)
 
 La raíz acumulaba 12 ficheros `.md`. Se conservan en la raíz solo los vivos (`CLAUDE.md`, `ESTADO.md`,

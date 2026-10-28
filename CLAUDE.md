@@ -4,10 +4,13 @@ Pipeline de papers científicos: Scopus → PDF → GROBID (TEI) → md_clean/ch
 Ollama) → RAG y catálogo en Streamlit. Idioma de trabajo: **español**.
 
 ## Dónde se trabaja (importante)
-- **Los cambios de código se hacen en el NAS:** `/Volumes/Disco/proyectos/research_agent`. La copia del
-  Mac (`/Users/martinramirez/proyectos/research_agent`) es solo para probar: se actualiza con `git pull`.
-- Flujo: editar + tests en el NAS → `git commit` y `git push origin main` desde el NAS → `git pull origin main`
-  en el Mac. Avisar de **reiniciar Streamlit** (no recarga los módulos de `scripts/` ya importados).
+- **Producción = pciq22** (`hostname` pciq22.uca.es; Mac mini en la UCA). Allí corren Streamlit (launchd) y los
+  jobs, con el repo en `/Users/martinramirez/proyectos/research_agent` y los datos en `/Volumes/research/`.
+- **Los cambios de código se hacen en el repo de desarrollo del NAS:** `/Volumes/Disco/proyectos/research_agent`
+  (montado también en pciq22). Flujo: editar + tests allí → `git commit` y `git push origin main` desde allí →
+  `git pull origin main` en el repo de producción de pciq22. Si trabajas desde pciq22, edita en
+  `/Volumes/Disco/...`, no en `/Users/martinramirez/proyectos/research_agent`.
+- Tras cambiar código hay que **reiniciar Streamlit en pciq22** (no recarga los módulos de `scripts/` ya importados).
 - Los **datos no están en git**: `/Volumes/research/` (`categorias/<cat>/{pdfs,tei,md_clean,chunks,summaries,
   metadata,embeddings,notebooklm_packages,logs}`, `metadatos/`, `quarantine/`, `inbox/`).
 - Tests: `python3 -m pytest tests -q` (desde la raíz del repo; no tocan `/Volumes/research`).

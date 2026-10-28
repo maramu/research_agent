@@ -9,7 +9,7 @@
 | Mac mini Pro (UCA) (pciq22.uca.es) | máquina principal — scripts, Streamlit, datos, Ollama, GROBID |
 | Scripts | `/Users/martinramirez/proyectos/research_agent/scripts/` |
 | Config | `/Volumes/Disco/proyectos/research_agent/config/` |
-| **Repo — ruta por máquina** | **pciq22:** `/Users/martinramirez/proyectos/research_agent` (`/Volumes/Disco` **NO existe** en esa máquina — confirmado por la auditoría de chunks 2026-07-25). **Casa:** `/Volumes/Disco/proyectos/research_agent` — esta ruta es **exclusiva** de la máquina de casa, no replicarla al razonar sobre pciq22. Datos (`categorias/`, `metadatos/`) viven en `/Volumes/research/` **solo en pciq22**. |
+| **Repo — ruta por máquina** | **pciq22 (producción):** repo en `/Users/martinramirez/proyectos/research_agent` — de aquí corren Streamlit y los jobs; datos (`categorias/`, `metadatos/`, `quarantine/`) en `/Volumes/research/`, **solo en pciq22**. **Repo de desarrollo:** `/Volumes/Disco/proyectos/research_agent` — es donde se editan los scripts, se hace commit y `git push`; pciq22 recibe los cambios con `git pull`. *Corrección 2026-10-28:* antes se afirmaba que `/Volumes/Disco` no existía en pciq22; hoy SÍ está montado allí (se comprobó con `hostname` = pciq22 y `ls /Volumes`), de modo que desde pciq22 se puede editar el repo de desarrollo y probar contra los datos reales. Tras cambiar código hay que **reiniciar Streamlit en pciq22**. |
 | Venv | `~/venvs/rag_papers` (Python 3.13 via Homebrew /opt/homebrew/bin/python3.13) — **el venv bueno del proyecto**; ver nota abajo |
 | GROBID | Docker (ARM64 nativo), imagen `grobid/grobid:0.9.0-crf`, compose en `~/grobid-compose.yml` |
 | Ollama | Solo loopback (`127.0.0.1:11435`); remoto vía proxy Caddy con Bearer en `http://pciq22.uca.es:11434` — ver [Ollama — instalación en pciq22](#ollama--instalación-en-pciq22) |
@@ -34,9 +34,9 @@
 | Auditoría | Informe | Acciones derivadas |
 |---|---|---|
 | Externa Kimi K2 (2026-07-20) | `docs/auditorias/2026-07-20_auditoria_externa.md` (versionado) | `Mejoras_pendientes.md` items 52–61 |
-| Calidad de chunks vs PDF original (2026-07-25) | `/Volumes/research/metadatos/auditoria_chunks/2026-07-25/informe.md` (NAS, fuera de git; pendiente copiar a la raíz del repo como `2026-07-25_auditoria_chunks.md` desde pciq22 para versionarlo) | `Mejoras_pendientes.md` items 62–64 + anotaciones en items 33/35/37/43 |
-| Rollout del commit `6093f35` (2026-07-25) | `/Volumes/research/metadatos/eval/rollout_6093f35/informe.md` (NAS, fuera de git; mismo patrón que las dos anteriores — pendiente copiar a la raíz del repo desde pciq22 para versionarlo). Junto a él: `antes.json`/`despues.json`, `antes_REDERIVADO.json` y `logs_paso2/` | `Mejoras_pendientes.md` item **65** (vectores fantasma, nuevo) + correcciones de alcance en items 33/55a/55b/63 + nota en el 35 |
-| Test de idioma de consulta (2026-07-27) | `/Volumes/research/metadatos/eval/idioma_20260727/` (NAS, fuera de git; mismo patrón que las anteriores — pendiente copiar a la raíz del repo) | `Mejoras_pendientes.md` items 33 y 37 |
+| Calidad de chunks vs PDF original (2026-07-25) | `docs/auditorias/2026-07-25_auditoria_chunks.md` (versionado; datos de apoyo en `/Volumes/research/metadatos/auditoria_chunks/2026-07-25/`) | `Mejoras_pendientes.md` items 62–64 + anotaciones en items 33/35/37/43 |
+| Rollout del commit `6093f35` (2026-07-25) | `docs/rollout-2026-07-25/2026-07-25_rollout_informe.md` y `…_rollout_baseline.md` (versionados). Datos en `/Volumes/research/metadatos/eval/rollout_6093f35/`: `antes.json`/`despues.json`, `antes_REDERIVADO.json` y `logs_paso2/` | `Mejoras_pendientes.md` item **65** (vectores fantasma, nuevo) + correcciones de alcance en items 33/55a/55b/63 + nota en el 35 |
+| Test de idioma de consulta (2026-07-27) | `/Volumes/research/metadatos/eval/idioma_20260727/` (fuera de git; pendiente copiar a `docs/auditorias/` para versionarlo) | `Mejoras_pendientes.md` items 33 y 37 |
 
 Muestra estratificada de 16 chunks (semilla `20260725`) de `anoxic_biogas_biodesulfurization`
 (1741 chunks, 87 papers), comparada a ciegas contra la página renderizada del PDF original a 150
@@ -177,12 +177,18 @@ Borrados en sesión 2026-06-26 (item 46 cerrado):
 ## Estructura NAS
 
 ```
-/Volumes/research/
+/Volumes/research/                   (solo en pciq22)
 ├── inbox/              ← PDFs nuevos sin procesar (flujo inbox)
 ├── inbox_csv/          ← CSVs de Scopus (manual o via 0_scopus_api.py)
 ├── fallidos/           ← PDFs no clasificables
-├── metadatos/          ← CSVs globales, doi_manual.xlsx, cache
+├── metadatos/          ← CSVs globales, doi_manual.xlsx, cache, eval/
 │   └── rag_usage/      ← registros de uso RAG (rag_usage_YYYY-MM.jsonl)
+├── quarantine/         ← cuarentena reversible (vacía a 2026-10-28):
+│   ├── deleted/<ts>/<cat>/     ← papers eliminados desde Artículos (+ _manifest_<id>.json)
+│   ├── duplicates/<ts>/        ← duplicados (manifiestos por paper) y PDFs apartados por el
+│   │                             cribado (_manifest.csv + <cat>/<pdf>)
+│   ├── orphan_tei/ · old_indexes/
+├── libros_docencia/ · duplicados/ · exports/ · logs/ · notas_rag/
 └── categorias/
     ├── biogas_upgrading_biomethanation/        ← validado pipeline completo
     ├── bioplastics_microplastics/
@@ -191,13 +197,16 @@ Borrados en sesión 2026-06-26 (item 46 cerrado):
     ├── microalgae/
     ├── single_cell_protein/
     ├── advanced_oxidation_processes/
-    └── bioleaching_critical_materials/
+    ├── bioleaching_critical_materials/
+    ├── thiosulfate/                            ← añadida 2026-10-22
+    ├── adhoc_20260521_SpringerBrief/ · adhoc_20260526_1638/   ← proyectos ad-hoc
+    └── <cada categoría>/
         ├── pdfs/
         ├── md_clean/
         ├── summaries/
         ├── chunks/
-        ├── embeddings/
-        ├── metadata/
+        ├── embeddings/        ← all/{index.faiss, metadata.jsonl, config.json, indexed_papers.json}
+        ├── metadata/          ← papers_metadata.jsonl, references.jsonl, per_paper/, validation_<cat>.jsonl
         ├── notebooklm_packages/
         ├── tei/
         └── logs/
@@ -689,7 +698,7 @@ El backlog vivo y el orden de prioridad están en `Mejoras_pendientes.md`. El hi
   Table 2"), inflando el conteo si no se filtra por `<figure`: en `anoxic`, 738 matches totales =
   176 objetos tabla reales + 562 menciones de referencia.
 - `requirements.txt`: dependencias `rank-bm25`, `pytest>=8.0` y `pymupdf` (item 47 — extracción de texto de adjuntos efímeros).
-- **Tests (item 39):** `tests/` con `pytest` (`conftest.py` añade `scripts/` a sys.path; `pytest.ini` en raíz). `normalize_stem` en `utils/pdf_utils.py` unifica el antiguo `_norm` de los 3 ficheros. Regresión de DOI/título/stem: 56 passed, 1 xfailed (xfail strict = bug `_clean_doi`, item 44). Hallazgos abiertos: items 44 (`_clean_doi` recorta sufijos DOI de 3+ letras) y 45 (utilidades de texto duplicadas y divergentes `pdf_utils`↔`1_rename`).
+- **Tests (item 39):** `tests/` con `pytest` (`conftest.py` añade `scripts/` a sys.path; `pytest.ini` en raíz). `normalize_stem` en `utils/pdf_utils.py` unifica el antiguo `_norm` de los 3 ficheros. Regresión de DOI/título/stem: 56 passed, 1 xfailed (histórico 2026-06; **a 2026-10-28 la suite completa tiene 329 tests en 15 ficheros, todos en verde**) (xfail strict = bug `_clean_doi`, item 44). Hallazgos abiertos: items 44 (`_clean_doi` recorta sufijos DOI de 3+ letras) y 45 (utilidades de texto duplicadas y divergentes `pdf_utils`↔`1_rename`).
 - **Rollout item 32 completado (2026-06-11):** las 8 categorías re-troceadas + re-indexadas (`3_process_corpus.py --force-md` + `5_build_embeddings.py --force`); `section_canonical` y `year` poblados en `metadata.jsonl` de todas. Ya no queda el "pendiente: re-trocear el resto".
 - **✅ ROLLOUT items 62/63/55a/55b + `embed_truncated` COMPLETADO (2026-07-25, commit `6093f35`, ejecutado en pciq22).**
   **9/9 índices** normalizados (norma L2 media 1,000 y flag `"normalized": true` en los 9: las 8
