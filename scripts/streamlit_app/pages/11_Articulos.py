@@ -16,6 +16,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -738,7 +739,7 @@ if not PUBLIC:
                 mostrar = st.radio(
                     "Mostrar", ["Todos", "Sin DOI", "Sin año", "Sin autores",
                                "Sin revista", "Sin título", "Nombres juntos",
-                               "Incompletos"],
+                               "Incompletos", "Nombre no canónico"],
                     index=0, key=f"art_edit_show_{sel}",
                 )
 
@@ -773,6 +774,13 @@ if not PUBLIC:
                              if check_glued_authors(_raw.get(r["paper_id"], {})) is not None]
             elif mostrar == "Incompletos":
                 edit_rows = [r for r in edit_rows if _incompleto(r)]
+            elif mostrar == "Nombre no canónico":
+                # Papers procesados con el nombre original de la descarga
+                # ("Año - Autor - Título [doi].pdf" → paper_id con mayúsculas
+                # y/o DOI embebido "..._10_1016_j"), en vez de año_autor_titulo.
+                edit_rows = [r for r in edit_rows
+                             if r["paper_id"] != r["paper_id"].lower()
+                             or re.search(r"_10_\d", r["paper_id"])]
 
             st.caption(f"{len(edit_rows)} artículo(s) en el editor.")
 
@@ -883,6 +891,12 @@ if not PUBLIC:
                                  disabled=not selected_ids):
                         st.session_state[f"rename_candidatos_{sel}"] = build_rename_preview(
                             sel, selected_ids)
+                        st.rerun()
+                    if mostrar == "Nombre no canónico" and st.button(
+                            f"🏷️ Renombrar los {len(edit_rows)} mostrados",
+                            use_container_width=True, disabled=not edit_rows):
+                        st.session_state[f"rename_candidatos_{sel}"] = build_rename_preview(
+                            sel, [r["paper_id"] for r in edit_rows])
                         st.rerun()
 
                 # ── Vista previa + aplicación del renombrado ──
