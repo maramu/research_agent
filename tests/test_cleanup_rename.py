@@ -555,3 +555,39 @@ def test_rename_paper_mueve_el_log_y_no_deja_bak_en_chunks(tmp_path):
     assert not list((proj / "chunks").glob("*.bak"))
     assert (proj / "chunks" / f"{new}.chunks.jsonl").exists()
     assert (proj / "metadata" / "papers_metadata.jsonl.bak").exists()   # los agregados SÍ conservan .bak
+
+
+def test_incremental_no_duplica_vectores_si_indexed_papers_va_atrasado(tmp_path):
+    """Item 55c: si el proceso murió tras reemplazar índice+metadata pero antes de
+    escribir indexed_papers.json, el siguiente incremental no debe re-embeber (ni
+    duplicar) los papers que ya están en metadata.jsonl."""
+    import subprocess
+    import faiss
+    import numpy as np
+    from utils.embeddings import l2_normalize
+    cat = tmp_path / "cat"; (cat / "chunks").mkdir(parents=True)
+    out = cat / "embeddings" / "all"; out.mkdir(parents=True)
+    X = l2_normalize(np.random.default_rng(3).normal(size=(4, 8)).astype("float32"))
+    idx = faiss.IndexFlatL2(8); idx.add(X); faiss.write_index(idx, str(out / "index.faiss"))
+    (out / "metadata.jsonl").write_text(
+        "\n".join(json.dumps({"paper_id": p, "phase": "cat", "text": "t"})
+                  for p in ["a", "a", "b", "b"]) + "\n")
+    (out / "config.json").write_text(json.dumps({"chunks": 4, "normalized": True}))
+    (out / "indexed_papers.json").write_text(json.dumps({"paper_ids": ["a"], "model": "bge-m3"}))  # atrasado
+    for p in ("a", "b"):
+        (cat / "chunks" / f"{p}.jsonl").write_text(json.dumps({"paper_id": p, "phase": "cat", "text": "t"}) + "\n")
+    script = Path(__file__).resolve().parents[1] / "scripts" / "5_build_embeddings.py"
+    r = subprocess.run([sys.executable, str(script), "--project", "cat", "--base", str(tmp_path)],
+                       capture_output=True, text=True, timeout=120)
+    assert r.returncode == 0, r.stderr[-400:]
+    assert "nada nuevo" in r.stdout
+    assert faiss.read_index(str(out / "index.faiss")).ntotal == 4
+
+
+def test_check_index_vs_chunks_detecta_fantasmas(tmp_path):
+    from utils.embeddings import check_index_vs_chunks
+    out = tmp_path / "all"; out.mkdir(); ch = tmp_path / "chunks"; ch.mkdir()
+    (out / "metadata.jsonl").write_text("\n".join(json.dumps({"paper_id": p}) for p in ["a", "b"]) + "\n")
+    (ch / "a.jsonl").write_text("{}\n"); (ch / "c.chunks.jsonl").write_text("{}\n")
+    ph, un = check_index_vs_chunks(out, ch)
+    assert ph == {"b"} and un == {"c"}
