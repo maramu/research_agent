@@ -76,8 +76,7 @@
 
 > **NOCHE 2026-10-28 (rama `noche-20261028`, sin fusionar — ver `docs/noches/2026-10-28_informe.md`).** Resuelto en la rama,
 > a falta de que Martín lo revise y fusione: **78, 79 (a, b y auditoría c), 80, 61 (a, b, c), 55 (b al cargar, c, d), 57, 59(b)
-> sin instalar, 60 (a, d)** y el **código** del 54. Siguen abiertos: 27, 58, 59(a), 54 (parte launchd), **60(b)** (copiar a mano
-> `~/grobid-compose.yml` y el plist de Ollama a `deployment/`), 37 y el resto.
+> sin instalar, 60 (a, d)** y el **código** del 54. Siguen abiertos: 27, 58, 59(a), 54 (parte launchd), **60(b)** (✅ cerrado 2026-10-29: copiados a `deployment/` por Martín), 37 y el resto.
 
 ## Hallazgos pendientes (revisión 2026-06-12)
 - ~~`detect_affected_categories` compara stems por igualdad exacta sin `_norm` → riesgo de reproceso
