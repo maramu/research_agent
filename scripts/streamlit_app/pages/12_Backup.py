@@ -182,5 +182,5 @@ if st.button("📸 Crear instantánea ahora", disabled=not RESEARCH.exists(), ke
 st.caption(
     "Copia cifrada del `.env` (necesita passphrase, solo desde terminal): "
     "`python3 scripts/backup_config.py --encrypt-env` · descifrar: "
-    "`openssl enc -d -aes-256-cbc -pbkdf2 -in env_AAAAMMDD.enc -out .env`"
+    "`python3 scripts/backup_config.py --decrypt-env env_AAAAMMDD.enc --out /ruta/.env`"
 )

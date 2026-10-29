@@ -14,7 +14,8 @@ conserva solo las últimas `--keep` (12 por defecto).
 El `config/.env` (todas las claves) NO se copia salvo con `--encrypt-env`, que lo cifra con
 `openssl enc -aes-256-cbc -pbkdf2` pidiendo la passphrase por terminal (guárdala en un gestor
 externo). Solo para uso interactivo: nunca lo lanza un job.
-    Descifrar: openssl enc -d -aes-256-cbc -pbkdf2 -in env.enc -out .env
+    Descifrar: python3 scripts/backup_config.py --decrypt-env env_AAAAMMDD.enc --out /ruta/.env
+    (o a mano, con LOS MISMOS parámetros: openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 -in env.enc -out .env)
 
 Uso:
     python3 scripts/backup_config.py              # instantánea (si hay cambios)
@@ -100,15 +101,20 @@ def snapshot(sources: dict | None = None, dest_root: Path = DEST_ROOT, keep: int
     return dest
 
 
-def encrypt_env(dest_root: Path = DEST_ROOT, repo: Path = REPO) -> Path:
+_OPENSSL_PARAMS = ["-aes-256-cbc", "-pbkdf2", "-iter", "600000"]
+
+
+def encrypt_env(dest_root: Path = DEST_ROOT, repo: Path = REPO, pass_env: str | None = None) -> Path:
     """Cifra config/.env con passphrase interactiva (openssl). Devuelve el fichero cifrado."""
     env = repo / "config" / ".env"
     if not env.is_file():
         raise SystemExit(f"No existe {env}")
     dest_root.mkdir(parents=True, exist_ok=True)
     out = dest_root / f"env_{datetime.now():%Y%m%d}.enc"
-    r = subprocess.run(["openssl", "enc", "-aes-256-cbc", "-pbkdf2", "-iter", "600000", "-salt",
-                        "-in", str(env), "-out", str(out)])
+    cmd = ["openssl", "enc", *_OPENSSL_PARAMS, "-salt", "-in", str(env), "-out", str(out)]
+    if pass_env:                                   # solo tests/automatización: -pass env:NOMBRE
+        cmd += ["-pass", f"env:{pass_env}"]
+    r = subprocess.run(cmd)
     if r.returncode != 0:
         out.unlink(missing_ok=True)
         raise SystemExit("openssl falló (¿passphrase vacía o no coincide?)")
@@ -116,11 +122,29 @@ def encrypt_env(dest_root: Path = DEST_ROOT, repo: Path = REPO) -> Path:
     return out
 
 
+def decrypt_env(src: Path, dst: Path, pass_env: str | None = None) -> Path:
+    """Descifra un `env_*.enc` creado con `encrypt_env` (mismos parámetros). Pide la passphrase."""
+    src, dst = Path(src), Path(dst)
+    if dst.exists():
+        raise SystemExit(f"{dst} ya existe: no se sobrescribe")
+    cmd = ["openssl", "enc", "-d", *_OPENSSL_PARAMS, "-in", str(src), "-out", str(dst)]
+    if pass_env:
+        cmd += ["-pass", f"env:{pass_env}"]
+    r = subprocess.run(cmd)
+    if r.returncode != 0:
+        dst.unlink(missing_ok=True)
+        raise SystemExit("No se pudo descifrar (¿passphrase incorrecta?)")
+    dst.chmod(0o600)
+    return dst
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Instantáneas versionadas de la configuración (item 27)")
     ap.add_argument("--list", action="store_true", help="lista las instantáneas existentes")
     ap.add_argument("--keep", type=int, default=12, help="instantáneas a conservar (defecto 12)")
     ap.add_argument("--encrypt-env", action="store_true", help="cifra config/.env (pide passphrase)")
+    ap.add_argument("--decrypt-env", metavar="FICHERO.enc", help="descifra una copia del .env (pide passphrase)")
+    ap.add_argument("--out", help="destino de --decrypt-env (no se sobrescribe si existe)")
     args = ap.parse_args()
     if not RESEARCH.exists():
         print("NAS no montado: /Volumes/research")
@@ -132,6 +156,11 @@ def main() -> int:
         return 0
     if args.encrypt_env:
         print(f"Cifrado en {encrypt_env()} — guarda la passphrase en un gestor externo.")
+        return 0
+    if args.decrypt_env:
+        if not args.out:
+            raise SystemExit("--decrypt-env necesita --out")
+        print(f"Descifrado en {decrypt_env(Path(args.decrypt_env), Path(args.out))}")
         return 0
     d = snapshot(keep=args.keep)
     print(f"Instantánea creada: {d}" if d else "Sin cambios desde la última instantánea.")

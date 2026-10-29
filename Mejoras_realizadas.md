@@ -16,7 +16,7 @@ inactividad (`IDLE_TIMEOUTS`: `0_scopus_api` y `3a_download` 30 min, `3_process_
 `pendientes_descarga.csv`, `validation_overrides.csv` y el `papers_metadata.jsonl` de cada categoría (21 ficheros, 3,6 MB); no crea
 una nueva si nada cambió y conserva las 12 últimas. Se ejecuta al empezar el job semanal (no fatal) y desde la página Backup
 (lista + botón). El `.env` NO se copia salvo `--encrypt-env` (openssl AES-256, passphrase interactiva; `gpg`/`age` no están
-instalados). Pendiente de Martín: ejecutar `--encrypt-env` y guardar la passphrase en el gestor.
+instalados; descifrar con `--decrypt-env FICHERO --out RUTA`: **el descifrado manual exige `-iter 600000`**, la primera versión de la documentación lo omitía). Pendiente de Martín: ejecutar `--encrypt-env` y guardar la passphrase en el gestor.
 
 **35 — OCR: auditoría y herramienta, sin adopción automática.** Medido sobre los 1.102 PDFs: ninguno tiene la capa de texto vacía
 (0 con <50 car/pág); los 4 con <100 palabras/página son documentos de figuras/tablas. Se probó el OCR (`tesseract`, 16 páginas, 12 s)

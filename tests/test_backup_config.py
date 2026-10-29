@@ -46,3 +46,18 @@ def test_snapshot_solo_si_hay_cambios_y_rota(tmp_path):
     s3 = bc.snapshot(bc.collect_sources(repo, research), dest, keep=2, now=t0 + timedelta(minutes=3))
     names = [d.name for d in bc.list_snapshots(dest)]
     assert s2 and s3 and len(names) == 2 and s1.name not in names        # solo las 2 últimas
+
+
+def test_cifrar_y_descifrar_el_env_ida_y_vuelta(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"; (repo / "config").mkdir(parents=True)
+    (repo / "config" / ".env").write_text("CLAVE=valor-secreto\n")
+    monkeypatch.setenv("PASS_TEST", "frase de prueba larga")
+    enc = bc.encrypt_env(tmp_path / "bk", repo, pass_env="PASS_TEST")
+    assert enc.exists() and b"valor-secreto" not in enc.read_bytes()
+    out = bc.decrypt_env(enc, tmp_path / "salida.env", pass_env="PASS_TEST")
+    assert out.read_text() == "CLAVE=valor-secreto\n"
+    monkeypatch.setenv("PASS_MALA", "otra frase")
+    import pytest
+    with pytest.raises(SystemExit):
+        bc.decrypt_env(enc, tmp_path / "x.env", pass_env="PASS_MALA")
+    assert not (tmp_path / "x.env").exists()
