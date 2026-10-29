@@ -2,6 +2,19 @@
 > Histórico append-only (lo más nuevo arriba). Backlog: Mejoras_pendientes.md · Estado/arquitectura: ESTADO.md
 
 ---
+### ✅ 83. Item 58 cerrado: Caddy de Ollama con lista de IPs y sin endpoints de administración de modelos (2026-10-29)
+
+Martín: el acceso remoto es solo suyo (puerto de Ollama) y de un compañero (app pública, que no pasa por el puerto 11434), todo por
+VPN; no hay certificado institucional. Decisión: sin TLS (riesgo aceptado) y mitigar el daño de un token interceptado. Cambios en
+`deployment/Caddyfile.ollama`: `@fuera not remote_ip 10.142.0.0/16 127.0.0.1 ::1` → 403 antes de pedir token, y `@destructive`
+(`/api/pull|push|create|copy|delete|blobs`) → 403 aunque el token sea válido; el preflight CORS de Obsidian sigue en 204.
+Probado primero en un Caddy de prueba (puerto 11499, clave ficticia): permitido desde 127.0.0.1 y desde la IP LAN de pciq22
+(`10.142.6.107`), 403 simulando una IP fuera de la lista. Aplicado con `launchctl kickstart -k` de `com.research_agent.caddy_ollama`
+(corte de segundos) y verificado en producción: 401 sin token, 200 con token en `/api/tags` y `/api/embed`, 403 en
+`/api/delete` y `/api/pull`, healthcheck OK. Pendiente solo si se quiere: rotar `OLLAMA_API_KEY` (ha viajado en claro por la LAN
+del campus).
+
+---
 ### ✅ 82. Item 54 cerrado: plist semanal sincronizado y migración a LaunchDaemon descartada (2026-10-29)
 
 Se revisó el estado real de pciq22 antes de tocar launchd: el job `scopus_weekly` (04:00 de los lunes) corrió bien el 12, 19 y 26

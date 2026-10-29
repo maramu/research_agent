@@ -1144,6 +1144,16 @@ distinta). ~2–3 h.
 
 ### 58. TLS / túnel para el Bearer de Ollama — P1 (seguridad)
 
+> **CERRADO 2026-10-29 — sin TLS, por decisión: riesgo aceptado + mitigación.** Todo el uso remoto va por la VPN de la UCA (solo
+> Martín al puerto de Ollama; los compañeros solo a la app pública de Streamlit, que usa Ollama en local) y un certificado
+> institucional no es viable, así que se descartan las opciones (a), (b) y (c). Se mitiga el impacto de un token interceptado:
+> `deployment/Caddyfile.ollama` ahora (1) solo acepta IPs de `10.142.0.0/16` (campus + VPN) y locales (403 al resto, antes
+> incluso de pedir el token) y (2) bloquea con 403 `/api/pull`, `/api/push`, `/api/create`, `/api/copy`, `/api/delete` y
+> `/api/blobs`, así que ni con el token se pueden borrar ni descargar modelos por la red. Verificado antes de aplicar en un
+> Caddy de prueba (clave ficticia, puerto 11499) y después en producción con el token real. **Residual:** el token y las
+> contraseñas de Streamlit (8501/8502) siguen viajando en claro por la LAN del campus cuando se trabaja desde allí; rotar el
+> token es opcional (`deployment/README.md`).
+
 Caddy en `http://pciq22.uca.es:11434` exige Bearer pero el canal es **HTTP plano** → el token
 (`OLLAMA_API_KEY`) circula en claro por la red del campus (interceptable en el segmento). Opciones:
 (a) `tls internal` de Caddy + repartir el cert raíz a los pocos clientes (Obsidian) — la menos

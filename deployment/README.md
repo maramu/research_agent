@@ -86,6 +86,7 @@ GROBID: solo 127.0.0.1:8070, sin proxy (nada remoto lo usa)
 
 ### Qué debe configurar un cliente remoto
 
+- **Filtros (2026-10-29, item 58):** solo `10.142.0.0/16` (UCA + VPN) y local; `/api/pull|push|create|copy|delete|blobs` devuelven 403 aunque el token sea válido (gestionar modelos en local, en pciq22). Sin TLS: se acepta porque todo el uso va por la VPN.
 - **URL**: sin cambios — `http://pciq22.uca.es:11434` (la misma de siempre).
 - **Cabecera obligatoria**: `Authorization: Bearer <token>`. Sin ella, Caddy
   responde `401 Unauthorized` antes de llegar a Ollama.
