@@ -977,6 +977,16 @@ def main():
                     md_warning = "WARNING_short"
                 elif tei_body_words > 0 and md_words < tei_body_words * 0.20:
                     md_warning = "WARNING_ratio"
+                if not md_warning:
+                    # Item 35: capa de texto pobre (posible escaneado). Auditoría 2026-10-29: de 1.102
+                    # PDFs ninguno necesita OCR, pero un PDF escaneado nuevo debe quedar señalado.
+                    try:
+                        import fitz
+                        _pages = fitz.open(pdf).page_count
+                        if _pages and md_words / _pages < 100:
+                            md_warning = "WARNING_low_density"
+                    except Exception:
+                        pass
                 md_path.write_text(md_clean, encoding="utf-8")
                 row["tei_body_words"] = tei_body_words
                 row["md_words"]       = md_words

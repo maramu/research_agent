@@ -591,3 +591,20 @@ def test_check_index_vs_chunks_detecta_fantasmas(tmp_path):
     (ch / "a.jsonl").write_text("{}\n"); (ch / "c.chunks.jsonl").write_text("{}\n")
     ph, un = check_index_vs_chunks(out, ch)
     assert ph == {"b"} and un == {"c"}
+
+
+def test_audit_text_layer_detecta_pdf_con_poco_texto(tmp_path):
+    import fitz
+    spec = importlib.util.spec_from_file_location(
+        "audit_t", Path(__file__).resolve().parents[1] / "scripts" / "audit_text_layer.py")
+    mod = importlib.util.module_from_spec(spec); sys.modules["audit_t"] = mod
+    spec.loader.exec_module(mod)
+    cat = tmp_path / "cat"; (cat / "pdfs").mkdir(parents=True); (cat / "md_clean").mkdir()
+    for pid, pages, words in (("denso", 2, 1200), ("escaneado", 10, 80)):
+        d = fitz.open()
+        for _ in range(pages):
+            d.new_page()
+        d.save(str(cat / "pdfs" / f"{pid}.pdf"))
+        (cat / "md_clean" / f"{pid}.clean.md").write_text("palabra " * words)
+    rows = mod.audit_category(cat, threshold=100)
+    assert [r["paper_id"] for r in rows] == ["escaneado"] and rows[0]["words_per_page"] == 8.0
