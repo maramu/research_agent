@@ -44,7 +44,8 @@ from app_utils import (
 from utils import validation_overrides
 from utils.crossref import fetch_work
 from utils.metadata_validation import (
-    build_validate_cmd, check_glued_authors, issue_is_stale, year_delta_severity,
+    build_validate_cmd, check_editors_as_authors, check_glued_authors, issue_is_stale,
+    year_delta_severity,
 )
 
 # ── Helpers para DOI ──
@@ -488,6 +489,11 @@ def build_rename_preview(category: str, paper_ids: list) -> list:
             candidatos.append({"paper_id": pid, "new_id": "", "status": "omitido",
                                 "motivo": "sin título: no se puede construir un nombre"})
             continue
+        if check_editors_as_authors(rec):
+            candidatos.append({"paper_id": pid, "new_id": "", "status": "omitido",
+                                "motivo": "los primeros autores parecen los editores del "
+                                          "volumen: corrige los autores antes de renombrar"})
+            continue
         new_id = cleanup_mod.build_new_paper_id(rec)
         if new_id == pid:
             candidatos.append({"paper_id": pid, "new_id": new_id, "status": "omitido",
@@ -582,7 +588,7 @@ def load_articles(category: str, mtime: float) -> list[dict]:
                 authors = _fmt_authors(authors_raw)
                 first_author = _first_author_surname(authors_raw)
                 refs = d.get("references")
-                n_refs = len(refs) if isinstance(refs, list) else (d.get("n_references") or "")
+                n_refs = len(refs) if isinstance(refs, list) else (d.get("n_references") or None)  # None, no "": columna numérica
                 rows.append({
                     "category":      category,
                     "title":         d.get("title") or "",

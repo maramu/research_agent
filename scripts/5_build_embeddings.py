@@ -116,7 +116,7 @@ if str(_SCRIPTS_DIR) not in sys.path:
 from utils.constants import OLLAMA_MODEL_EMBED, year_from_paper_id, MAX_EMBED_CHARS  # noqa: E402
 from utils.embeddings import (  # noqa: E402  (núcleo compartido con books/embed.py)
     embed_texts, l2_normalize, assert_index_normalized, verify_index_integrity,
-    prune_papers_from_index,
+    prune_papers_from_index, check_index_vs_chunks,
 )
 
 DEFAULT_BASE       = "/Volumes/research/categorias"
@@ -273,10 +273,11 @@ def main():
     # que un paper borrado o renombrado seguía en el índice hasta el siguiente
     # --force. Ahora se podan sin re-embeber los papers indexados que ya no tienen
     # fichero de chunks. Salvaguarda: si no hay ningún chunk no se poda nada.
-    if incremental and indexed_ids:
-        present = _chunk_paper_ids(chunks_dir)
-        # También los ids que estén en metadata.jsonl aunque ya no figuren en
-        # indexed_papers.json (p. ej. tras una purga que solo tocó ese fichero).
+    if incremental:
+        # Item 55c: la fuente de verdad de "qué está indexado" es metadata.jsonl, que
+        # se escribe atómicamente junto con el índice; indexed_papers.json se escribe
+        # DESPUÉS y un corte entre ambas escrituras lo dejaría atrasado (los vectores
+        # existirían sin registrar y el siguiente run los duplicaría). Se unen ambos.
         meta_ids = set()
         mp = out_dir / "metadata.jsonl"
         if mp.exists():
@@ -285,7 +286,16 @@ def main():
                     meta_ids.add(json.loads(ln).get("paper_id", ""))
                 except Exception:
                     pass
-        stale = (indexed_ids | meta_ids) - present if present else set()
+        meta_ids.discard("")
+        indexed_ids = indexed_ids | meta_ids
+
+    # Item 76: el modo incremental solo crecía, así que un paper borrado o renombrado
+    # seguía en el índice hasta el siguiente --force. Ahora se podan sin re-embeber los
+    # papers indexados que ya no tienen fichero de chunks. Salvaguarda: si no hay
+    # ningún chunk no se poda nada.
+    if incremental and indexed_ids:
+        present = _chunk_paper_ids(chunks_dir)
+        stale = indexed_ids - present if present else set()
         stale.discard("")
         if stale:
             try:
@@ -412,6 +422,15 @@ def main():
     n_meta, mean_norm = verify_index_integrity(out_dir, index)
 
     _save_indexed_papers(out_dir, all_indexed_ids, args.model)
+
+    # Item 55d: coherencia externa con chunks/ (fantasmas = indexado sin chunks).
+    phantoms, unindexed = check_index_vs_chunks(out_dir, chunks_dir)
+    if phantoms:
+        print(f"⚠️ COHERENCIA (55d): {len(phantoms)} paper(s) en el índice sin chunks en disco: "
+              f"{sorted(phantoms)[:5]}{'…' if len(phantoms) > 5 else ''}. "
+              "Se podan en la siguiente ejecución incremental.")
+    if unindexed and args.phase == "all":
+        print(f"ℹ️ {len(unindexed)} paper(s) con chunks aún sin indexar (p. ej. fase filtrada).")
 
     verb = "añadidos al índice" if incremental else "creados"
     print(f"\nChunks {verb} : {len(all_meta)}")

@@ -38,9 +38,11 @@ from app_utils import (  # noqa: E402
 )
 from utils.export_refs import build_papers_zip, build_chunks_markdown  # noqa: E402
 from utils.citations import (  # noqa: E402
-    load_papers_metadata, build_cite_map, apply_citations, CITE_PROMPT_RULES,
+    load_papers_metadata, build_cite_map, apply_citations, annotate_orphan_citations, CITE_PROMPT_RULES,
 )
 from utils.retrieval import build_bm25  # noqa: E402
+from utils.synthesis import build_system_prompt  # noqa: E402
+from utils.rag_loader import embed_query, check_alignment  # noqa: E402,F401  (embed_query se re-exporta: lo importan las páginas)
 
 
 # ---------------------------------------------------------------------------
@@ -67,6 +69,8 @@ def load_index(project: str, phase: str, index_mtime: float):
             line = line.strip()
             if line:
                 meta.append(json.loads(line))
+
+    check_alignment(index, meta, str(emb_dir))
 
     cfg = {}
     if cfg_path.exists():
@@ -135,11 +139,6 @@ def get_google_aistudio_client(api_key: str):
         base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
         api_key=api_key,
     )
-
-
-def embed_query(client, query: str, model: str) -> np.ndarray:
-    resp = client.embeddings(model=model, prompt=query)
-    return np.array(resp["embedding"], dtype="float32")
 
 
 # ---------------------------------------------------------------------------
@@ -339,25 +338,14 @@ def synthesize_answer(provider, model, results, query, papers_meta,
         _render(stream_google_aistudio())
 
     raw_md    = "".join(_raw_chunks)
-    answer_md = apply_citations(raw_md, cite_map)
+    answer_md = annotate_orphan_citations(raw_md, apply_citations(raw_md, cite_map), cite_map)
     out_box.markdown(answer_md)
     return answer_md, usage_capture, prompt
 
 
 def build_default_system(context: str) -> str:
     """Plantilla de sistema por defecto (idéntica a la histórica de 2_RAG)."""
-    return f"""Eres un asistente científico. Responde a la pregunta basándote ÚNICAMENTE en los fragmentos numerados que se proporcionan a continuación.
-
-Reglas:
-- Si los fragmentos no contienen información suficiente para responder, dilo claramente.
-- No inventes datos. No uses conocimiento externo a los fragmentos.
-- Responde en el mismo idioma que la pregunta.
-{CITE_PROMPT_RULES}
-
-Fragmentos:
-{context}
-
-Recuerda: cita con [N] junto a cada dato; sin sección de Referencias."""
+    return build_system_prompt(context)
 
 
 # ---------------------------------------------------------------------------

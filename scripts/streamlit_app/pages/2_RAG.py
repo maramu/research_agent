@@ -48,7 +48,7 @@ from app_utils import (
     record_rag_query, record_rag_query_full, check_password, is_public_app,
 )
 from utils.export_refs import build_papers_zip, build_chunks_markdown
-from utils.constants import CANONICAL_SECTIONS, year_from_paper_id
+from utils.constants import AVG_CHUNK_CHARS, CANONICAL_SECTIONS, year_from_paper_id
 from utils.citations import (
     load_papers_metadata, build_cite_map, apply_citations, CITE_PROMPT_RULES,
     attachment_citation_key,
@@ -527,7 +527,7 @@ def render_premium_block():
     # Pre-estimación de coste (misma lógica heurística que la consulta gratuita).
     if p_model:
         _k_est   = int(p_topk) if is_deepen else len(prev_results)
-        _est_in  = (1200 * _k_est + 500) // 4
+        _est_in  = (AVG_CHUNK_CHARS * _k_est + 500) // 4
         _est_out = p_maxout // 3
         _est     = estimate_cost_usd(p_model, _est_in, _est_out)
         if _est > 0:
@@ -863,7 +863,7 @@ if use_hybrid and bm25 is not None and looks_spanish(query):
 
 # Estimación de coste antes de buscar (basada en k y output esperado)
 if do_synth and synth_model:
-    avg_chunk_chars = 1200  # estimación heurística
+    avg_chunk_chars = AVG_CHUNK_CHARS  # media real medida del corpus (constants.py)
     estimated_prompt_chars = avg_chunk_chars * k + 500  # +500 por prompt fijo
     est_in_tk  = estimated_prompt_chars // 4
     est_out_tk = (max_output_tokens or 500) // 3  # output medio ≈ 1/3 del máximo

@@ -2,6 +2,19 @@
 > Histórico append-only (lo más nuevo arriba). Backlog: Mejoras_pendientes.md · Estado/arquitectura: ESTADO.md
 
 ---
+### ✅ 81. Noche autónoma 2026-10-28 (rama `noche-20261028`, pendiente de fusionar)
+
+Detalle completo y cómo revisar/fusionar en `docs/noches/2026-10-28_informe.md`. Resumen: **78** (detector de autores =
+editores del volumen), **61a/b/c** (aviso de citas huérfanas; DOI sin distinguir mayúsculas en el registro de descargas;
+tamaño medio real de chunk 2.400 car. en la pre-estimación de coste), **79a/b** (el renombrado mueve el `.log`, sin `.bak` en
+`chunks/`), **80** (prueba de humo de las 15 páginas de Streamlit con `AppTest`), **55b/c/d** (alineación índice↔metadata al
+cargar, `indexed_papers.json` atrasado ya no duplica vectores, `check_index_vs_chunks`), **57** (`utils/rag_loader.py` y
+`utils/synthesis.py` únicos; **eval antes/después idéntica byte a byte** en 2 categorías), **54 código** (`cancel_active_steps`:
+el timeout del job semanal mata los subprocesos), **60a/d** (`requirements-lock.txt` + `deployment/RUNBOOK_recuperacion.md`) y
+**59b** (`scripts/healthcheck.py` + plist sin instalar). Suite: 356 tests. Bloqueado: copiar `grobid-compose.yml` y el plist de
+Ollama a `deployment/` (permiso denegado por el clasificador; ver informe).
+
+---
 ### ✅ 80. Revisión de exactitud de `ESTADO.md` (2026-10-28)
 
 Auditoría de `ESTADO.md` (cobertura mecánica: todos los scripts, páginas y utils están descritos; las

@@ -37,3 +37,9 @@ def year_from_paper_id(pid: str):
     """Devuelve el primer año (1900–2039) hallado en el paper_id, o None."""
     m = re.search(r"(19\d{2}|20[0-3]\d)", pid or "")
     return int(m.group(1)) if m else None
+
+# Tamaño medio real de un chunk del corpus (caracteres). Medido 2026-10-28 sobre ~14.000
+# chunks de tres categorías: media 2.330–2.430, mediana ≈2.050, p90 ≈4.800, máx ≈8.000.
+# La pre-estimación de coste de 2_RAG asumía 1.200 (subestimaba el input ~2×).
+AVG_CHUNK_CHARS = 2400
+

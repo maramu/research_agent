@@ -41,6 +41,11 @@ def _norm(doi) -> str:
     return str(doi or "").strip().lower()
 
 
+def _keys(df: pd.DataFrame) -> pd.Series:
+    """Serie con la clave normalizada (minúsculas, sin espacios) del DOI de cada fila."""
+    return df["doi"].astype(str).map(_norm)
+
+
 def load() -> pd.DataFrame:
     """Carga el registro. Devuelve DataFrame vacío si no existe."""
     if REGISTRY_PATH.exists():
@@ -90,7 +95,7 @@ def upsert(rows: List[Dict], category: str = "") -> int:
             "notes":        "",
         }
 
-        mask = df["doi"] == doi
+        mask = _keys(df) == _norm(doi)
         if mask.any():
             existing_status = df.loc[mask, "status"].iloc[0]
             if existing_status not in _RESOLVED:
@@ -111,7 +116,7 @@ def mark_downloaded(dois: List[str]) -> None:
     df = load()
     today = date.today().isoformat()
     for doi in dois:
-        mask = df["doi"] == doi
+        mask = _keys(df) == _norm(doi)
         if mask.any():
             df.loc[mask, "status"] = "downloaded"
             df.loc[mask, "last_checked"] = today
@@ -199,7 +204,7 @@ def snooze(dois: List[str], years: int = 2, note: str = "") -> int:
     if not dois:
         return 0
     df = load()
-    mask = df["doi"].isin(dois)
+    mask = _keys(df).isin({_norm(d) for d in dois})
     affected = int(mask.sum())
     if affected:
         until = (date.today() + timedelta(days=365 * years)).isoformat()
@@ -215,7 +220,7 @@ def unsnooze(dois: List[str]) -> int:
     if not dois:
         return 0
     df = load()
-    mask = df["doi"].isin(dois)
+    mask = _keys(df).isin({_norm(d) for d in dois})
     affected = int(mask.sum())
     if affected:
         df.loc[mask, "snooze_until"] = ""

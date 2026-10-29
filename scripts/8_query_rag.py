@@ -61,6 +61,7 @@ from dotenv import load_dotenv
 sys.path.insert(0, str(Path(__file__).parent))
 from utils.constants import OLLAMA_MODEL_EMBED, year_from_paper_id
 from utils.citations import load_papers_metadata, citation_for_chunk
+from utils.rag_loader import load_metadata, embed_query, check_alignment
 from utils.retrieval import (build_bm25, dense_rank, bm25_rank,
                              rrf_fuse, passes_filters, pool_size)
 
@@ -74,24 +75,6 @@ else:
 DEFAULT_BASE  = "/Volumes/research/categorias"
 DEFAULT_MODEL = OLLAMA_MODEL_EMBED
 DEFAULT_K     = 8
-
-
-def load_metadata(emb_dir: Path) -> List[Dict]:
-    meta_path = emb_dir / "metadata.jsonl"
-    if not meta_path.exists():
-        raise SystemExit(f"No existe metadata.jsonl en: {emb_dir}")
-    out = []
-    with meta_path.open(encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if line:
-                out.append(json.loads(line))
-    return out
-
-
-def embed_query(client: ollama.Client, q: str, model: str) -> np.ndarray:
-    resp = client.embeddings(model=model, prompt=q)
-    return np.array(resp["embedding"], dtype="float32")
 
 
 def main():
@@ -142,6 +125,7 @@ def main():
 
     index = faiss.read_index(str(index_path))
     meta  = load_metadata(emb_dir)
+    check_alignment(index, meta, str(emb_dir))
 
     bm25 = build_bm25([m.get("text", "") for m in meta]) if args.hybrid else None
     if args.hybrid and bm25 is None:

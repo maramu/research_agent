@@ -32,6 +32,8 @@ import re
 import shutil
 import subprocess
 import sys
+import threading
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
@@ -84,6 +86,37 @@ def check_nas() -> None:
 # Ejecución de scripts
 # ---------------------------------------------------------------------------
 
+# Cancelación de pasos en curso (item 54): el timeout de run_weekly_scopus.py solo
+# abandonaba el hilo; los subprocesos seguían vivos y el email contaba PDFs a medias.
+_ACTIVE_PROCS: set = set()
+_CANCEL = threading.Event()
+
+
+def cancel_active_steps(grace: float = 10.0) -> int:
+    """Pide la parada de la ejecución en curso: impide lanzar pasos nuevos y
+    termina (SIGTERM, y SIGKILL tras `grace` s) los subprocesos activos.
+    Devuelve cuántos subprocesos había vivos."""
+    _CANCEL.set()
+    procs = [p for p in list(_ACTIVE_PROCS) if p.poll() is None]
+    for p in procs:
+        try:
+            p.terminate()
+        except OSError:
+            pass
+    deadline = time.monotonic() + grace
+    for p in procs:
+        try:
+            p.wait(timeout=max(0.1, deadline - time.monotonic()))
+        except subprocess.TimeoutExpired:
+            p.kill()
+    return len(procs)
+
+
+def reset_cancel() -> None:
+    """Rearma el flujo tras una cancelación (para tests o reutilizar el proceso)."""
+    _CANCEL.clear()
+
+
 def run_step(
     script: str,
     args: List[str],
@@ -104,6 +137,10 @@ def run_step(
     cmd = [sys.executable, str(SCRIPTS_DIR / script)] + args
     tag = label or script
 
+    if _CANCEL.is_set():
+        log.warning("⏹ %s no se lanza: ejecución cancelada", tag)
+        return {"returncode": -15, "output": ["cancelado"], "script": script, "cancelled": True}
+
     log.info("▶ %s %s", tag, " ".join(args))
 
     try:
@@ -119,15 +156,19 @@ def run_step(
         log.error(msg)
         return {"returncode": -1, "output": [msg], "script": script}
 
+    _ACTIVE_PROCS.add(process)
     output_lines: List[str] = []
-    for line in process.stdout:
-        line = line.rstrip("\n")
-        output_lines.append(line)
-        if on_output:
-            on_output(line)
-        else:
-            print(line)
-    process.wait()
+    try:
+        for line in process.stdout:
+            line = line.rstrip("\n")
+            output_lines.append(line)
+            if on_output:
+                on_output(line)
+            else:
+                print(line)
+        process.wait()
+    finally:
+        _ACTIVE_PROCS.discard(process)
 
     rc = process.returncode
     if rc != 0:

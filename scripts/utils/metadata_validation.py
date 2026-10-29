@@ -49,6 +49,7 @@ ISSUE_CODES = {
     "title_has_journal_prefix": "título empieza por el nombre de la revista",
     "authors_glued":           "autor con camelCase pegado (sin espacios) — informativo",
     "authors_affiliation":     "autor contaminado con afiliación/lugar o dígitos",
+    "authors_editors":         "los primeros autores parecen los editores del volumen (no los autores)",
     "year_implausible":        "año ausente o fuera de [1900, año_actual+1]",
     "doi_malformed":           "DOI presente pero con formato inválido",
     # ── Nivel 2 (contraste con Crossref por DOI) ──
@@ -139,6 +140,27 @@ def check_glued_authors(rec: dict) -> Optional[dict]:
     return None
 
 
+# Apellidos de editores habituales de *Chemical Engineering Transactions* (DOI 10.3303/…):
+# GROBID los toma como autores del artículo cuando figuran en la cabecera (caso Haddad 2025).
+_CET_EDITOR_SURNAMES = {
+    "how", "andiappan", "ng", "lam", "varbanov", "klemeš", "klemes", "walmsley", "tan",
+}
+
+
+def check_editors_as_authors(rec: dict) -> Optional[dict]:
+    """Detecta listas de autores encabezadas por los editores del volumen.
+    ≥3 de los 5 primeros apellidos en la lista de editores CET, o ≥2 si el DOI es 10.3303/…
+    (un único Varbanov/Klemeš entre los primeros, como coautor legítimo, no dispara)."""
+    names = _author_names(rec)[:5]
+    surnames = {n.split()[-1].lower() for n in names if n.split()}
+    hits = len([n for n in names if n.split() and n.split()[-1].lower() in _CET_EDITOR_SURNAMES])
+    is_cet = str(rec.get("doi") or "").lower().startswith("10.3303/")
+    if hits >= 3 or (is_cet and hits >= 2):
+        return {"code": "authors_editors", "field": "authors", "severity": "high",
+                "msg": "los primeros autores parecen los editores del volumen: " + "; ".join(names)}
+    return None
+
+
 def check_authors_affiliation(rec: dict) -> Optional[dict]:
     """Autor con dígitos o tokens de afiliación/lugar (ver AFFILIATION_TOKENS)."""
     bad = [n for n in _author_names(rec)
@@ -181,6 +203,7 @@ _ALL_CHECKS = [
     check_title_starts_with_journal,
     check_glued_authors,
     check_authors_affiliation,
+    check_editors_as_authors,
     check_year,
     check_doi_format,
 ]

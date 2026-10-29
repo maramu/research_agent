@@ -116,11 +116,9 @@ def embed_texts(client, texts: List[str], model: str) -> np.ndarray:
     if not texts:
         return np.empty((0, 0), dtype="float32")
 
-    vectors = []
-    for prompt in texts:
-        resp = client.embeddings(model=model, prompt=prompt)
-        vectors.append(np.array(resp["embedding"], dtype="float32"))
-    return np.vstack(vectors)
+    # Implementación única (lotes + truncado reactivo de contexto): utils.embeddings.embed_texts
+    from utils.embeddings import embed_texts as _embed_texts
+    return np.vstack(_embed_texts(client, texts, model))
 
 
 def rank_attachment(qv: np.ndarray, mat: np.ndarray) -> List[Tuple[int, float]]:

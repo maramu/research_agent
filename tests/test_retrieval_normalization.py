@@ -327,3 +327,28 @@ class TestNormalizationCannotBeBypassed:
             assert "l2_normalize(" in src, f"{rel} no normaliza"
             assert "verify_index_integrity(" in src, f"{rel} no verifica el 55b"
             assert '"normalized": True' in src, f"{rel} no marca config.json"
+
+
+def test_rag_loader_detecta_desalineacion_y_carga_ok(tmp_path):
+    import json
+    import faiss
+    import numpy as np
+    import pytest
+    from utils.rag_loader import check_alignment, load_index_and_meta
+    emb = tmp_path / "cat" / "embeddings" / "all"; emb.mkdir(parents=True)
+    idx = faiss.IndexFlatL2(4); idx.add(np.eye(4, dtype="float32")[:3])
+    faiss.write_index(idx, str(emb / "index.faiss"))
+    (emb / "metadata.jsonl").write_text("\n".join(json.dumps({"paper_id": "p", "n": i}) for i in range(3)) + "\n")
+    index, meta, cfg = load_index_and_meta("cat", "all", tmp_path)
+    assert index.ntotal == 3 and len(meta) == 3 and cfg == {}
+    (emb / "metadata.jsonl").write_text(json.dumps({"paper_id": "p"}) + "\n")      # desalineado
+    with pytest.raises(RuntimeError, match="desalineados"):
+        load_index_and_meta("cat", "all", tmp_path)
+    with pytest.raises(SystemExit):
+        load_index_and_meta("cat", "no_existe", tmp_path)
+
+
+def test_plantilla_de_sintesis_unica():
+    from utils.synthesis import build_system_prompt
+    p = build_system_prompt("[1] sección: x\ntexto")
+    assert "[1] sección: x" in p and "sin sección de Referencias" in p

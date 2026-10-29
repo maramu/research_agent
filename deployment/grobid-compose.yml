@@ -1,0 +1,8 @@
+services:
+  grobid:
+    image: grobid/grobid:0.9.0-crf
+    platform: linux/arm64
+    container_name: grobid
+    ports:
+      - "127.0.0.1:8070:8070"
+    restart: unless-stopped

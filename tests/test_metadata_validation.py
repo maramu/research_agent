@@ -508,3 +508,18 @@ def test_validate_category_crossref_limit(tmp_path):
 
     validate_category_crossref(cat, base, limit=1, fetch=counting_fetch)
     assert calls["n"] == 1
+
+
+def test_check_editors_as_authors_caso_haddad_y_falso_positivo_fozer():
+    from utils.metadata_validation import check_editors_as_authors, validate_record
+    def rec(names, doi=""):
+        return {"doi": doi, "authors": [{"full": n, "forename": "", "surname": ""} for n in names]}
+    cet = rec(["Bing Shen How", "Viknesh Andiappan", "Denny K S Ng", "Hon Loong Lam",
+               "Petar S Varbanov", "Anthony Haddad"], "10.3303/CET25120041")
+    assert check_editors_as_authors(cet)["code"] == "authors_editors"
+    assert any(i["code"] == "authors_editors" for i in validate_record(cet))
+    # coautor legítimo (Fózer 2020): Varbanov y Klemeš entre los 5 primeros, solo 2 coinciden y DOI no es CET
+    fozer = rec(["Dániel Fózer", "Mirco Volanti", "Fabrizio Passarini", "Petar Sabev Varbanov",
+                 "Jiří Jaromír Klemeš"], "10.1016/j.apenergy.2020.115923")
+    assert check_editors_as_authors(fozer) is None
+    assert check_editors_as_authors(rec(["Anthony Haddad", "Khadija Mammadyarova"], "10.3303/CET25120041")) is None

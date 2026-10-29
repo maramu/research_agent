@@ -217,6 +217,30 @@ def embed_texts(client, texts: list, model: str, truncated_out: list | None = No
     return out
 
 
+def check_index_vs_chunks(out_dir, chunks_dir) -> tuple:
+    """Coherencia EXTERNA índice ↔ chunks (item 55d). `verify_index_integrity`
+    solo ve la coherencia interna (ntotal == len(metadata)) y NO detecta vectores
+    fantasma. Devuelve (fantasmas, sin_indexar):
+      · fantasmas   = paper_id en el índice SIN fichero de chunks en disco;
+      · sin_indexar = paper_id con chunks en disco que el índice no contiene.
+    """
+    out_dir, chunks_dir = Path(out_dir), Path(chunks_dir)
+    in_index = set()
+    mp = out_dir / "metadata.jsonl"
+    if mp.exists():
+        for ln in mp.read_text(encoding="utf-8").splitlines():
+            try:
+                in_index.add(json.loads(ln).get("paper_id", ""))
+            except Exception:
+                pass
+    in_index.discard("")
+    on_disk = set()
+    for p in chunks_dir.rglob("*.jsonl"):
+        n = p.name
+        on_disk.add(n[:-len(".chunks.jsonl")] if n.endswith(".chunks.jsonl") else n[:-len(".jsonl")])
+    return in_index - on_disk, on_disk - in_index
+
+
 def prune_papers_from_index(out_dir, paper_ids) -> int:
     """Quita de un índice FAISS (IndexFlat, posicional) los vectores de unos
     paper_id SIN re-embeber nada (item 75). Borrar un paper no necesita
