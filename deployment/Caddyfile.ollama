@@ -4,6 +4,13 @@
 }
 
 :11434 {
+	# Item 58 (2026-10-29): solo red UCA/VPN (10.142.0.0/16) y local. Desde otra IP no se
+	# llega ni a pedir el token. (No hay TLS: se acepta porque todo el uso va por la VPN.)
+	@fuera not remote_ip 10.142.0.0/16 127.0.0.1 ::1
+	handle @fuera {
+		respond "Forbidden" 403
+	}
+
 	# Preflight CORS (OPTIONS): nunca lleva Authorization por diseño del
 	# estándar — se proxea a Ollama sin exigir token para que responda él
 	# el CORS (OLLAMA_ORIGINS). No ejecuta nada ni devuelve datos.
@@ -15,6 +22,15 @@
 	@unauthorized not header Authorization "Bearer {env.OLLAMA_API_KEY}"
 	handle @unauthorized {
 		respond "Unauthorized" 401
+	}
+
+	# Endpoints que modifican o descargan modelos: nunca por la red (se gestionan en
+	# local, en pciq22). Con un token robado no se podrían borrar ni bajar modelos.
+	@destructive {
+		path /api/pull /api/push /api/create /api/copy /api/delete /api/blobs /api/blobs/*
+	}
+	handle @destructive {
+		respond "Forbidden: endpoint de administración de modelos, solo en local" 403
 	}
 
 	handle {
