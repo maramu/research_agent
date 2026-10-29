@@ -78,6 +78,9 @@
 > a falta de que Martín lo revise y fusione: **78, 79 (a, b y auditoría c), 80, 61 (a, b, c), 55 (b al cargar, c, d), 57, 59(b)
 > sin instalar, 60 (a, d)** y el **código** del 54. Siguen abiertos: 27, 58, 59(a), 54 (parte launchd), **60(b)** (✅ cerrado 2026-10-29: copiados a `deployment/` por Martín), 37 y el resto.
 
+> **TARDE 2026-10-29 (rama `tarde-20261029`, sin fusionar):** cerrados **56, 27 (salvo ejecutar `--encrypt-env`), 35 (auditoría: 0 PDFs
+> necesitan OCR) y 39** — ver item 84 de `Mejoras_realizadas.md`.
+
 ## Hallazgos pendientes (revisión 2026-06-12)
 - ~~`detect_affected_categories` compara stems por igualdad exacta sin `_norm` → riesgo de reproceso
   por puntuación/guiones.~~ ✅ RESUELTO 2026-06-13.

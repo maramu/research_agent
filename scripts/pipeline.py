@@ -91,6 +91,15 @@ def check_nas() -> None:
 _ACTIVE_PROCS: set = set()
 _CANCEL = threading.Event()
 
+# Item 56b: segundos sin NINGUNA línea de salida tras los cuales run_step mata el subproceso
+# (GROBID muerto, red colgada...). Solo para pasos de red/procesado cuya salida es regular; el
+# resto (resumen con LLM, embeddings) puede tardar mucho entre líneas y no lleva watchdog.
+IDLE_TIMEOUTS: Dict[str, float] = {
+    "0_scopus_api.py": 1800.0,
+    "3a_download_pdfs.py": 1800.0,
+    "3_process_corpus.py": 3600.0,
+}
+
 
 def cancel_active_steps(grace: float = 10.0) -> int:
     """Pide la parada de la ejecución en curso: impide lanzar pasos nuevos y
@@ -122,6 +131,7 @@ def run_step(
     args: List[str],
     on_output: Optional[Callable[[str], None]] = None,
     label: str = "",
+    idle_timeout: Optional[float] = None,
 ) -> Dict[str, Any]:
     """Ejecuta un script del pipeline como subproceso.
 
@@ -130,6 +140,8 @@ def run_step(
         args:      lista de argumentos CLI
         on_output: callback que recibe cada línea de salida (para Streamlit)
         label:     etiqueta para logs (e.g. "process_corpus [microalgae]")
+        idle_timeout: segundos sin salida tras los que se mata el subproceso; None usa
+                   IDLE_TIMEOUTS[script] (sin watchdog si el script no está ahí)
 
     Returns:
         {"returncode": int, "output": list[str], "script": str}
@@ -158,8 +170,30 @@ def run_step(
 
     _ACTIVE_PROCS.add(process)
     output_lines: List[str] = []
+    state = {"last": time.monotonic(), "timed_out": False}
+    limit = idle_timeout if idle_timeout is not None else IDLE_TIMEOUTS.get(script)
+    stop_watch = threading.Event()
+
+    def _watchdog() -> None:
+        while not stop_watch.wait(min(5.0, max(0.2, (limit or 5.0) / 4))):
+            if process.poll() is not None:
+                return
+            if time.monotonic() - state["last"] > limit:
+                state["timed_out"] = True
+                log.error("⏱ %s sin salida durante %.0f s: se termina el subproceso", tag, limit)
+                try:
+                    process.kill()
+                except OSError:
+                    pass
+                return
+
+    watcher = None
+    if limit:
+        watcher = threading.Thread(target=_watchdog, name=f"watchdog-{tag}", daemon=True)
+        watcher.start()
     try:
         for line in process.stdout:
+            state["last"] = time.monotonic()
             line = line.rstrip("\n")
             output_lines.append(line)
             if on_output:
@@ -168,7 +202,15 @@ def run_step(
                 print(line)
         process.wait()
     finally:
+        stop_watch.set()
         _ACTIVE_PROCS.discard(process)
+    if state["timed_out"]:
+        msg = f"⏱ sin salida durante {limit:.0f} s: proceso terminado por el watchdog"
+        output_lines.append(msg)
+        if on_output:
+            on_output(msg)
+        return {"returncode": process.returncode if process.returncode else -9,
+                "output": output_lines, "script": script, "timed_out": True}
 
     rc = process.returncode
     if rc != 0:
@@ -1246,7 +1288,8 @@ def run_adhoc(
     """Flujo C: carpeta de PDFs → proyecto ad-hoc → procesado completo + RAG.
 
     Crea un proyecto bajo categorias/<name>/, copia los PDFs y ejecuta
-    la cadena de procesado completa. No hace cribado ni renombrado.
+    la cadena de procesado completa. No hace cribado; renombra los PDFs por DOI
+    (1_rename_papers_by_doi.py) antes de procesar.
 
     Args:
         name:       nombre del proyecto ad-hoc (e.g. "revision_metanol")
@@ -1352,9 +1395,22 @@ def run_books(
     Returns:
         {"status": ..., "collection": collection, "steps": {...}}
 
-    NOTA: esqueleto. Sin lógica todavía.
     """
-    raise NotImplementedError
+    check_nas()
+    handler = _make_output_handler(on_output)
+    steps: Dict[str, Any] = {}
+    proc_args = ["--collection", collection]
+    if pdf_dir:
+        proc_args += ["--input-dir", str(pdf_dir)]
+    steps["books/process.py"] = run_step(
+        "books/process.py", proc_args, on_output=handler, label=f"books process [{collection}]")
+    if steps["books/process.py"]["returncode"] != 0:
+        return {"status": "error", "collection": collection, "steps": steps}
+    steps["books/embed.py"] = run_step(
+        "books/embed.py", ["--collection", collection, "--model", OLLAMA_MODEL_EMBED],
+        on_output=handler, label=f"books embed [{collection}]")
+    ok = steps["books/embed.py"]["returncode"] == 0
+    return {"status": "ok" if ok else "error", "collection": collection, "steps": steps}
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1586,16 +1642,26 @@ def promote_adhoc_to_category(
 # Helpers
 # ---------------------------------------------------------------------------
 
+_PIPELINE_FILE_HANDLERS: Dict[str, logging.Handler] = {}
+
+
 def _setup_pipeline_log(flow: str) -> Path:
     """Crea un FileHandler con timestamp para el logger pipeline y devuelve su Path."""
     logs_dir = SCRIPTS_DIR.parent / "logs"
     logs_dir.mkdir(parents=True, exist_ok=True)
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     log_path = logs_dir / f"pipeline_{flow}_{ts}.log"
+    # Item 56a: Streamlit importa este módulo y vive semanas; sin esto cada ejecución añadía
+    # un FileHandler más (logs cruzados + fuga de descriptores). Un handler por flujo.
+    old = _PIPELINE_FILE_HANDLERS.pop(flow, None)
+    if old is not None:
+        log.removeHandler(old)
+        old.close()
     fh = logging.FileHandler(str(log_path), encoding="utf-8")
     fh.setLevel(logging.DEBUG)
     fh.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
     log.addHandler(fh)
+    _PIPELINE_FILE_HANDLERS[flow] = fh
     return log_path
 
 

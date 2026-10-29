@@ -2,6 +2,35 @@
 > Histórico append-only (lo más nuevo arriba). Backlog: Mejoras_pendientes.md · Estado/arquitectura: ESTADO.md
 
 ---
+### ✅ 84. Items 56, 27, 35 y 39 (rama `tarde-20261029`, pendiente de fusionar) (2026-10-29)
+
+**56 — robustez del pipeline.** (a) `_setup_pipeline_log` mantiene un `FileHandler` por flujo y cierra el anterior (antes cada
+ejecución añadía uno: fuga de descriptores y logs cruzados en el Streamlit de larga vida). (b) `run_step` tiene watchdog por
+inactividad (`IDLE_TIMEOUTS`: `0_scopus_api` y `3a_download` 30 min, `3_process_corpus` 60 min sin ninguna línea de salida →
+`kill` y `timed_out` en el resultado); los pasos con LLM/embeddings no lo llevan por su salida irregular. (c) ya hecho en el item 76.
+(d) `run_books` implementado (`books/process.py` → `books/embed.py`, antes `NotImplementedError`), docstrings de `run_adhoc` y
+`8_query_rag.py` corregidos y `5_build_embeddings.py` usa `rec.get("text","")`. Tests con subprocesos reales.
+
+**27 — copias de configuración.** `scripts/backup_config.py`: instantáneas versionadas con `MANIFEST.json` (sha256) en
+`/Volumes/research/metadatos/backups_config/<ts>/` de `config/*.yml|*.example`, `doi_manual.xlsx`, `doi_registry.txt`,
+`pendientes_descarga.csv`, `validation_overrides.csv` y el `papers_metadata.jsonl` de cada categoría (21 ficheros, 3,6 MB); no crea
+una nueva si nada cambió y conserva las 12 últimas. Se ejecuta al empezar el job semanal (no fatal) y desde la página Backup
+(lista + botón). El `.env` NO se copia salvo `--encrypt-env` (openssl AES-256, passphrase interactiva; `gpg`/`age` no están
+instalados). Pendiente de Martín: ejecutar `--encrypt-env` y guardar la passphrase en el gestor.
+
+**35 — OCR: auditoría y herramienta, sin adopción automática.** Medido sobre los 1.102 PDFs: ninguno tiene la capa de texto vacía
+(0 con <50 car/pág); los 4 con <100 palabras/página son documentos de figuras/tablas. Se probó el OCR (`tesseract`, 16 páginas, 12 s)
+sobre el más sospechoso (`1984_xu`, 50 pal/pág): 1.683 palabras con OCR frente a 1.732 de la capa original → **el OCR no aporta
+nada** y no hay PDFs que lo necesiten hoy. Entregado: `scripts/audit_text_layer.py` (informe de palabras/página y `--ocr` que genera
+una copia sin sustituir el original) y `WARNING_low_density` (<100 pal/pág) en el informe de `3_process_corpus.py` para que un
+escaneado futuro quede señalado. `ocrmypdf` no está instalado (no hace falta).
+
+**39 — tests y CI ligero.** Las pruebas de regresión que pedía el item ya existen (362 tests). Nuevo hook versionado
+`.githooks/pre-commit` (sintaxis AST de los `.py` staged + `pytest -x` sin la prueba de humo de Streamlit; `SKIP_TESTS=1` o
+`--no-verify` para saltarlo) y `scripts/install_hooks.sh` (`git config core.hooksPath .githooks`; activado en el repo de desarrollo).
+Probado con 4 escenarios en un repo temporal (sintaxis rota, commit correcto, test roto, `SKIP_TESTS`).
+
+---
 ### ✅ 83. Item 58 cerrado: Caddy de Ollama con lista de IPs y sin endpoints de administración de modelos (2026-10-29)
 
 Martín: el acceso remoto es solo suyo (puerto de Ollama) y de un compañero (app pública, que no pasa por el puerto 11434), todo por
