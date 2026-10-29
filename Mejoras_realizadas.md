@@ -2,6 +2,18 @@
 > Histórico append-only (lo más nuevo arriba). Backlog: Mejoras_pendientes.md · Estado/arquitectura: ESTADO.md
 
 ---
+### ✅ 82. Item 54 cerrado: plist semanal sincronizado y migración a LaunchDaemon descartada (2026-10-29)
+
+Se revisó el estado real de pciq22 antes de tocar launchd: el job `scopus_weekly` (04:00 de los lunes) corrió bien el 12, 19 y 26
+de octubre; `pmset sleep 0` (nunca duerme), sesión de consola abierta desde el 6 de oct., **FileVault activo sin auto-login**. El
+plist instalado solo se diferenciaba del del repo en `WakeOnLaunchDate` (innecesario porque la máquina no duerme y origen del
+fallo de `daily_question` en julio): se instaló la versión del repo (copia de seguridad
+`~/Library/LaunchAgents/com.research_agent.scopus_weekly.plist.bak_20261029`, `bootout`+`bootstrap`, horario 04:00 verificado con
+`launchctl print`) y se corrigió el comentario obsoleto "06:00" del repo. LaunchDaemon descartado: con FileVault nada arranca
+hasta desbloquear el disco y Streamlit y el healthcheck son LaunchAgents, así que migrar solo este job no aporta resiliencia
+real. Riesgo documentado en el backlog: el healthcheck no avisa si nadie inicia sesión tras un reinicio.
+
+---
 ### ✅ 81. Noche autónoma 2026-10-28 (rama `noche-20261028`, pendiente de fusionar)
 
 Detalle completo y cómo revisar/fusionar en `docs/noches/2026-10-28_informe.md`. Resumen: **78** (detector de autores =

@@ -15,7 +15,7 @@
         <string>run_weekly_scopus.py</string>
     </array>
 
-    <!-- Ejecutar cada lunes a las 06:00 -->
+    <!-- Ejecutar cada lunes a las 04:00 -->
     <key>StartCalendarInterval</key>
     <dict>
         <key>Weekday</key>

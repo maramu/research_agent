@@ -1033,6 +1033,16 @@ comportamiento.
 
 ### 54. `run_weekly_scopus`: ingesta semanal robusta — P1
 
+> **ESTADO 2026-10-29 — item cerrado salvo una decisión.** (1) El plist de las 04:00 ya estaba aplicado (el job corrió bien los
+> lunes 12, 19 y 26 de oct.; el último en 23 min, estado ok) y desde hoy el instalado coincide con el del repo, sin
+> `WakeOnLaunchDate`. (3) El timeout ya mata el árbol de subprocesos (`pipeline.cancel_active_steps`, commit de la noche del
+> 2026-10-28). (2) **Migración a LaunchDaemon: NO se hace, por decisión razonada** — pciq22 no duerme (`pmset sleep 0`), así que
+> `WakeOnLaunchDate` sobraba; y con **FileVault activo y sin auto-login** tras un reinicio no arranca nada hasta que alguien
+> desbloquee el disco, y los LaunchAgents de Streamlit dependen igualmente de la sesión: migrar solo el job semanal exigiría
+> `sudo`, ficheros de root y un entorno distinto al de los demás servicios para ganar poco. **Riesgo residual:** el healthcheck
+> (item 59b) también es un LaunchAgent, así que no avisa si nadie ha iniciado sesión tras un reinicio; lo ideal es un
+> vigilante externo (otra máquina que haga `curl` a `:8501` y avise).
+
 Tres grietas apiladas en la función central del sistema:
 1. **Plist 04:00 sin aplicar** (residual del item 49): `git pull` + `cp deployment/... ~/Library/LaunchAgents/` + `launchctl bootout/bootstrap`.
 2. **LaunchAgent con `WakeOnLaunchDate` que se pierde sin sesión gráfica** (mismo fallo del 16/18-jul en `daily_question`) → migrar a **LaunchDaemon** (`UserName` + `HOME`, verificar SMTP en frío como se hizo con `claude`).
