@@ -150,3 +150,37 @@ if st.session_state.get("_backup_running"):
     else:
         st.error(f"rsync terminó con código {rc} — últimas líneas:")
         st.code("\n".join(lines[-15:]), language="text")
+
+
+# ---------------------------------------------------------------------------
+# Instantáneas de configuración (item 27)
+# ---------------------------------------------------------------------------
+st.divider()
+st.subheader("🗂️ Instantáneas de configuración")
+st.caption(
+    "Copias versionadas (las últimas 12) de `config/*.yml`, `doi_manual.xlsx`, `doi_registry.txt`, "
+    "`pendientes_descarga.csv`, `validation_overrides.csv` y el `papers_metadata.jsonl` de cada "
+    "categoría, en `/Volumes/research/metadatos/backups_config/`. Se crea una al empezar cada "
+    "ingesta semanal si algo cambió. El `config/.env` (claves) **no** se copia aquí."
+)
+import backup_config  # noqa: E402
+
+_snaps = backup_config.list_snapshots()
+if _snaps:
+    _rows = []
+    for _d in reversed(_snaps):
+        _m = json.loads((_d / "MANIFEST.json").read_text(encoding="utf-8"))
+        _rows.append({"instantánea": _d.name, "ficheros": len(_m["files"]),
+                      "MB": round(sum(v["bytes"] for v in _m["files"].values()) / 1e6, 2)})
+    st.dataframe(_rows, hide_index=True, use_container_width=True)
+else:
+    st.info("Todavía no hay instantáneas.")
+if st.button("📸 Crear instantánea ahora", disabled=not RESEARCH.exists(), key="btn_cfg_snapshot"):
+    _new = backup_config.snapshot()
+    st.success(f"✓ Creada: {_new.name}" if _new else "Sin cambios desde la última instantánea.")
+    st.rerun()
+st.caption(
+    "Copia cifrada del `.env` (necesita passphrase, solo desde terminal): "
+    "`python3 scripts/backup_config.py --encrypt-env` · descifrar: "
+    "`openssl enc -d -aes-256-cbc -pbkdf2 -in env_AAAAMMDD.enc -out .env`"
+)

@@ -412,6 +412,16 @@ def main(dry_run: bool = False) -> None:
 
     log.info("=== run_weekly_scopus iniciado%s ===", " (dry-run)" if dry_run else "")
 
+    # Instantánea versionada de la configuración y del registro bibliográfico (item 27);
+    # nunca debe impedir la ingesta.
+    if not dry_run:
+        try:
+            import backup_config
+            snap = backup_config.snapshot()
+            log.info("Instantánea de configuración: %s", snap if snap else "sin cambios")
+        except Exception as exc:                      # noqa: BLE001
+            log.warning("No se pudo crear la instantánea de configuración: %s", exc)
+
     # Contar PDFs antes de la ingesta
     pdf_before = {cat: _count_pdfs(cat) for cat in WEEKLY_CATEGORIES}
 
