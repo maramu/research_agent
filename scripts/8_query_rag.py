@@ -11,7 +11,8 @@ Posición en el pipeline:
 
 Flujo de consulta:
     1. Embeddea la query con Ollama (mismo modelo que se usó al indexar)
-    2. Busca los k*5 vecinos más cercanos en FAISS (IndexFlatL2)
+    2. Busca en FAISS un pool de vecinos (utils.retrieval.pool_size: crece si hay filtros) y,
+       con --hybrid, lo fusiona con BM25 por RRF
     3. Filtra por --type y/o --paper si se especifican
     4. Devuelve los top-k resultados con distancia, paper_id, sección y snippet
 
@@ -78,7 +79,7 @@ DEFAULT_K     = 8
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Consulta RAG sobre índice FAISS (Ollama nomic-embed-text)")
+    ap = argparse.ArgumentParser(description="Consulta RAG sobre índice FAISS (Ollama bge-m3)")
     ap.add_argument("query",     help="Pregunta o consulta en texto libre")
     ap.add_argument("--project", required=True, help="Nombre del proyecto (subcarpeta bajo --base)")
     ap.add_argument("--base",    default=DEFAULT_BASE, help=f"Directorio raíz (defecto: {DEFAULT_BASE})")

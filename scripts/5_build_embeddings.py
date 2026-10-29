@@ -348,7 +348,7 @@ def main():
             continue
         paper_id = rec.get("paper_id", "")
         rec["year"] = pid2year.get(paper_id) or year_from_paper_id(paper_id)
-        buf_texts.append(rec["text"])
+        buf_texts.append(rec.get("text", ""))
         buf_meta.append(rec)
 
         if len(buf_texts) >= args.batch_size:
