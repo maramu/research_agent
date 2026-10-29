@@ -14,6 +14,7 @@ Ollama) → RAG y catálogo en Streamlit. Idioma de trabajo: **español**.
 - Los **datos no están en git**: `/Volumes/research/` (`categorias/<cat>/{pdfs,tei,md_clean,chunks,summaries,
   metadata,embeddings,notebooklm_packages,logs}`, `metadatos/`, `quarantine/`, `inbox/`).
 - Tests: `python3 -m pytest tests -q` (desde la raíz del repo; no tocan `/Volumes/research`).
+- Hook de pre-commit (`.githooks/`, activar con `scripts/install_hooks.sh`): sintaxis + tests rápidos; `SKIP_TESTS=1` para saltarlo.
 - Commits: terminar el mensaje con la línea `Co-Authored-By` que indique el entorno.
 
 ## Documentación (mantenerla al día en cada cambio)

@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# pre-commit del proyecto (item 39): sintaxis de los .py staged + tests rápidos.
+# Saltar puntualmente:  SKIP_TESTS=1 git commit ...   (o git commit --no-verify)
+set -u
+cd "$(git rev-parse --show-toplevel)" || exit 1
+
+# 1) Sintaxis (AST) de los ficheros Python que se van a commitear
+staged=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.py$' || true)
+if [ -n "$staged" ]; then
+  # shellcheck disable=SC2086
+  if ! python3 - $staged <<'PY'
+import ast, sys
+bad = 0
+for f in sys.argv[1:]:
+    try:
+        ast.parse(open(f, encoding="utf-8").read(), filename=f)
+    except SyntaxError as e:
+        print(f"✗ {f}:{e.lineno}: {e.msg}"); bad += 1
+sys.exit(1 if bad else 0)
+PY
+  then
+    echo "pre-commit: error de sintaxis en los ficheros anteriores. Commit cancelado."
+    exit 1
+  fi
+fi
+
+# 2) Tests rápidos (sin la prueba de humo de Streamlit, que necesita el corpus montado)
+if [ -z "${SKIP_TESTS:-}" ] && [ -d tests ] && \
+   { [ -n "$staged" ] || git diff --cached --name-only | grep -qE '^tests/'; }; then
+  echo "pre-commit: pytest (rápido)…"
+  out=$(python3 -m pytest tests -q -x --ignore=tests/test_streamlit_smoke.py 2>&1)
+  if [ $? -ne 0 ]; then
+    echo "$out" | tail -15
+    echo "pre-commit: los tests fallan. Commit cancelado (SKIP_TESTS=1 para saltarlo)."
+    exit 1
+  fi
+  echo "$out" | tail -1
+fi
+exit 0
