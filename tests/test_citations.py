@@ -158,3 +158,17 @@ def test_find_orphan_citations_y_anotacion():
     ans = annotate_orphan_citations("Dato [1] y [9].", "Dato (A, 2020) y [9].", cmap)
     assert "Citas sin fragmento de origen:** [9]" in ans
     assert annotate_orphan_citations("Dato [1].", "Dato (A, 2020).", cmap) == "Dato (A, 2020)."
+
+
+def test_pick_google_chat_models_ordena_por_version_y_excluye_no_chat():
+    import sys
+    sys.path.insert(0, "scripts/streamlit_app")
+    from app_utils import pick_google_chat_models
+    ids = ["models/gemini-2.5-flash", "models/gemini-3.8-flash-lite", "models/gemini-3.8-flash",
+           "models/gemini-3.8-flash-image", "models/text-embedding-004", "models/gemini-3.8-pro",
+           "models/gemini-2.0-flash", "models/gemini-2.5-flash-preview-tts", "models/gemma-3-27b-it",
+           "models/gemini-3.8-flash"]                       # duplicado
+    assert pick_google_chat_models(ids) == [
+        "gemini-3.8-flash", "gemini-3.8-flash-lite", "gemini-2.5-flash", "gemini-2.0-flash"]
+    assert pick_google_chat_models([]) == []
+    assert pick_google_chat_models(["models/embedding-001"]) == []

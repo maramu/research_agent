@@ -38,7 +38,7 @@ for d in (str(STREAMLIT_APP_DIR), str(SCRIPTS_DIR)):
 from app_utils import (
     ANTHROPIC_MODELS, OPENAI_MODELS, OLLAMA_MODELS_LLM, OLLAMA_MODEL_EMBED,
     OPENROUTER_MODELS, OPENROUTER_API_KEY,
-    GOOGLE_AISTUDIO_MODELS, check_google_aistudio_api,
+    GOOGLE_AISTUDIO_MODELS, check_google_aistudio_api, list_google_aistudio_models,
     OLLAMA_HOST, ANTHROPIC_API_KEY, OPENAI_API_KEY,
     CATEGORIAS_DIR, NAS_ROOT, LLM_PRICING, LLM_CONTEXT_WINDOWS, project_base,
     check_anthropic_api, check_nas, check_ollama, check_openai_api,
@@ -767,7 +767,16 @@ with st.sidebar:
                     st.error(f"Google AI Studio: {gai_msg}")
                     synth_model = None
                 else:
-                    synth_model = st.selectbox("Modelo", options=GOOGLE_AISTUDIO_MODELS, index=0)
+                    # Lista real de modelos de ESTA key (Google retira modelos a menudo);
+                    # se guarda en la sesión para no llamar a la API en cada rerun.
+                    _cache = st.session_state.get("_gai_models_cache", {})
+                    if _cache.get("key") != _gai_key:
+                        _cache = {"key": _gai_key, "models": list_google_aistudio_models(_gai_key)}
+                        st.session_state["_gai_models_cache"] = _cache
+                    synth_model = st.selectbox(
+                        "Modelo", options=_cache["models"] or GOOGLE_AISTUDIO_MODELS, index=0,
+                        help="Se leen de tu cuenta de Google AI Studio; si un modelo da 404 "
+                             "'no longer available', elige otro de la lista.")
                     st.session_state["_gai_api_key"] = _gai_key
             else:
                 st.info("Introduce tu API key para usar Google AI Studio (gratis).")

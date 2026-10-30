@@ -115,7 +115,10 @@ OPENROUTER_MODELS = [
     "z-ai/glm-5.2",
 ]
 
-GOOGLE_AISTUDIO_MODELS = ["gemini-2.5-flash", "gemini-2.0-flash"]
+# Respaldo si models.list() falla. Google RETIRA modelos con frecuencia (2026-10-30:
+# "gemini-2.5-flash is no longer available to new users" → 404), así que la lista real se
+# pide a la API con la key del usuario (list_google_aistudio_models) y esta solo es el plan B.
+GOOGLE_AISTUDIO_MODELS = ["gemini-3.8-flash", "gemini-2.5-flash"]
 
 # ---------------------------------------------------------------------------
 # Pricing — USD por 1M tokens (input / output)
@@ -161,6 +164,7 @@ LLM_CONTEXT_WINDOWS: Dict[str, int] = {
     # Ollama
     "qwen2.5:14b-instruct": 32_768,
     # Google AI Studio
+    "gemini-3.8-flash": 1_000_000,
     "gemini-2.5-flash": 1_000_000,
     "gemini-2.0-flash": 1_000_000,
 }
@@ -516,6 +520,42 @@ def check_google_aistudio_api(api_key: str) -> Tuple[bool, str]:
         return True, "OK"
     except Exception as e:
         return False, str(e)
+
+
+_GOOGLE_EXCLUDE = ("image", "tts", "live", "audio", "embedding", "aqa", "robotics", "computer-use", "veo", "imagen")
+
+
+def pick_google_chat_models(model_ids: List[str]) -> List[str]:
+    """De los ids que devuelve models.list() de Google AI Studio, deja los modelos 'flash' de
+    texto, sin el prefijo 'models/', del más reciente al más antiguo (la versión, p. ej.
+    'gemini-3.8-flash' > 'gemini-2.5-flash'; a igual versión, la variante base antes que '-lite')."""
+    import re as _re
+    found = []
+    for mid in model_ids:
+        name = mid.split("/", 1)[-1]
+        low = name.lower()
+        if not low.startswith("gemini") or "flash" not in low or any(x in low for x in _GOOGLE_EXCLUDE):
+            continue
+        m = _re.search(r"gemini-(\d+(?:\.\d+)*)", low)
+        version = tuple(int(x) for x in m.group(1).split(".")) if m else (0,)
+        found.append((version, len(name), name))
+    found.sort(key=lambda t: (tuple(-x for x in t[0]), t[1], t[2]))
+    seen, out = set(), []
+    for _, _, name in found:
+        if name not in seen:
+            seen.add(name); out.append(name)
+    return out
+
+
+def list_google_aistudio_models(api_key: str) -> List[str]:
+    """Modelos flash disponibles para ESTA key (vacío si falla; entonces se usa GOOGLE_AISTUDIO_MODELS)."""
+    try:
+        from openai import OpenAI
+        client = OpenAI(base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
+                        api_key=api_key)
+        return pick_google_chat_models([m.id for m in client.models.list()])
+    except Exception:
+        return []
 
 
 # ---------------------------------------------------------------------------

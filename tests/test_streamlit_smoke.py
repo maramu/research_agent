@@ -7,6 +7,7 @@ excepciones. La autenticación se salta rellenando `auth_PRIVATE_APP_PASSWORD` e
 `session_state`, sin tocar código de producción. Las páginas solo LEEN: nadie
 pulsa botones. Se necesita el corpus real (`/Volumes/research`); sin él se omite.
 """
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -16,6 +17,16 @@ import pytest
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 PAGES = sorted((SCRIPTS / "streamlit_app" / "pages").glob("*.py"))
 NAS = Path("/Volumes/research/categorias")
+
+
+def _nas_legible() -> bool:
+    """El corpus debe poder LISTARSE: montado no basta (macOS puede denegar la lectura con
+    'Operation not permitted' a un proceso sin permiso de volúmenes externos)."""
+    try:
+        return bool(os.listdir(NAS))
+    except OSError:
+        return False
+
 
 _RUNNER = """
 import sys, os
@@ -30,7 +41,7 @@ sys.exit(1 if exc else 0)
 """
 
 
-@pytest.mark.skipif(not NAS.exists(), reason="requiere el corpus real en /Volumes/research")
+@pytest.mark.skipif(not _nas_legible(), reason="requiere poder leer el corpus real en /Volumes/research")
 @pytest.mark.parametrize("page", PAGES, ids=lambda p: p.name)
 def test_pagina_renderiza_sin_excepciones(page):
     pytest.importorskip("streamlit.testing.v1")
