@@ -9,7 +9,7 @@ contenedor ni LaunchAgents ni procesos; sin modelos Ollama "hermes") y se confir
 (1,0 GB), `~/hermes-docker`, la imagen `nousresearch/hermes-agent:latest`, `~/.local/bin/hermes`, `~/.local/state/hermes`,
 `~/hermes_keepwarm.sh`, `~/Modelfile.hermes`, `~/Modelfile.qwen3-14b-hermes`, `~/hermes_workspace` y el historial de sesiones de Claude Code de
 `~/hermes-docker`. Intactos: el contenedor GROBID, las notas de `SynologyDrive/…/Hermes` y la guía de la papelera. Verificado: sin restos,
-GROBID en marcha y healthcheck OK. **Revocaciones (Martín, 2026-10-30): hechas Discord, Anthropic, OpenRouter y Notion; falta solo Tavily.** Detalle original — **pendiente de Martín** (borrar archivos no revoca claves): revocar en sus consolas `DISCORD_BOT_TOKEN`,
+GROBID en marcha y healthcheck OK. **Revocaciones (Martín, 2026-10-30): TODAS hechas — Discord, Anthropic, OpenRouter, Notion y Tavily (la de Google ya lo estaba desde julio); no queda ninguna credencial de Hermes viva.** Detalle original (borrar archivos no revoca claves): revocar en sus consolas `DISCORD_BOT_TOKEN`,
 `TAVILY_API_KEY`, `ANTHROPIC_API_KEY` y `OPENROUTER_API_KEY` de Hermes (distintas de las del proyecto, comprobado por comparación sin
 mostrarlas) y, si se concedió, la conexión de Notion.
 
