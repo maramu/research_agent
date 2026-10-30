@@ -2,6 +2,18 @@
 > Histórico append-only (lo más nuevo arriba). Backlog: Mejoras_pendientes.md · Estado/arquitectura: ESTADO.md
 
 ---
+### ✅ 85. Google AI Studio: modelos leídos de la API en vez de una lista fija (2026-10-30)
+
+La app pública (BYOK de Gemini) devolvía 404: `models/gemini-2.5-flash is no longer available to new users` (Google sugiere
+`gemini-3.8-flash`). Causa: `GOOGLE_AISTUDIO_MODELS` estaba escrita a mano en `app_utils.py` y Google retira modelos con frecuencia.
+Cambios: `list_google_aistudio_models(key)` pide `models.list()` con la key del usuario y `pick_google_chat_models()` (función pura,
+con test) deja los modelos `flash` de texto —sin `image`/`tts`/`embedding`/`live`…— ordenados del más reciente al más antiguo;
+`2_RAG.py` los usa en el selector (guardados en la sesión para no llamar a la API en cada rerun) y la constante queda solo como
+respaldo (`gemini-3.8-flash`, `gemini-2.5-flash`). Sin key de Gemini no se pudo probar la llamada real; verificado con tests y
+`py_compile`. Además la prueba de humo de Streamlit se omite si el corpus no es legible (macOS puede dar `Operation not
+permitted` a un proceso sin permiso de volúmenes externos).
+
+---
 ### ✅ 84. Items 56, 27, 35 y 39 (rama `tarde-20261029`, pendiente de fusionar) (2026-10-29)
 
 **56 — robustez del pipeline.** (a) `_setup_pipeline_log` mantiene un `FileHandler` por flujo y cierra el anterior (antes cada
