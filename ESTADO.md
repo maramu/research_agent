@@ -47,7 +47,14 @@ completo en `Mejoras_realizadas.md`.
 
 ### Hermes Agent (productividad personal)
 
-> 🔴 **PAUSADO (2026-07-01) — auditoría de seguridad.** Estado actual: **INERTE /
+> ⚫ **ELIMINADO de pciq22 (2026-10-30), decisión de Martín.** Se borraron `~/.hermes`, la copia
+> `~/.hermes.backup-20260701`, `~/hermes-docker`, la imagen Docker `nousresearch/hermes-agent`, el binario
+> `~/.local/bin/hermes`, los Modelfiles y el script keep-warm. Esta sección y el item 49 de
+> `Mejoras_pendientes.md` se conservan **solo como histórico**; no hay nada que reactivar en esta máquina.
+> Claves que había en su `.env` y deben estar revocadas en sus consolas (no se comparten con el proyecto):
+> `DISCORD_BOT_TOKEN`, `TAVILY_API_KEY`, `ANTHROPIC_API_KEY` y `OPENROUTER_API_KEY` propias de Hermes.
+>
+> (Estado previo) 🔴 **PAUSADO (2026-07-01) — auditoría de seguridad.** Estado actual: **INERTE /
 > sin riesgo activo**. Contenedor parado y eliminado (`docker compose down`),
 > token OAuth de Google revocado, LaunchAgents nativos archivados a `.disabled`.
 > **NO reactivar con la configuración actual** — requisitos de reactivación en

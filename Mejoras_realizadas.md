@@ -2,6 +2,18 @@
 > Histórico append-only (lo más nuevo arriba). Backlog: Mejoras_pendientes.md · Estado/arquitectura: ESTADO.md
 
 ---
+### ✅ 86. Hermes Agent eliminado de pciq22 (2026-10-30)
+
+Por decisión de Martín (estaba pausado desde el 2026-07-01 por la auditoría de seguridad). Antes de borrar se inventarió todo (no había
+contenedor ni LaunchAgents ni procesos; sin modelos Ollama "hermes") y se confirmó la lista. Borrado: `~/.hermes` (1,8 GB), `~/.hermes.backup-20260701`
+(1,0 GB), `~/hermes-docker`, la imagen `nousresearch/hermes-agent:latest`, `~/.local/bin/hermes`, `~/.local/state/hermes`,
+`~/hermes_keepwarm.sh`, `~/Modelfile.hermes`, `~/Modelfile.qwen3-14b-hermes`, `~/hermes_workspace` y el historial de sesiones de Claude Code de
+`~/hermes-docker`. Intactos: el contenedor GROBID, las notas de `SynologyDrive/…/Hermes` y la guía de la papelera. Verificado: sin restos,
+GROBID en marcha y healthcheck OK. **Pendiente de Martín** (borrar archivos no revoca claves): revocar en sus consolas `DISCORD_BOT_TOKEN`,
+`TAVILY_API_KEY`, `ANTHROPIC_API_KEY` y `OPENROUTER_API_KEY` de Hermes (distintas de las del proyecto, comprobado por comparación sin
+mostrarlas) y, si se concedió, la conexión de Notion.
+
+---
 ### ✅ 85. Google AI Studio: modelos leídos de la API en vez de una lista fija (2026-10-30)
 
 La app pública (BYOK de Gemini) devolvía 404: `models/gemini-2.5-flash is no longer available to new users` (Google sugiere

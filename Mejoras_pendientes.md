@@ -811,7 +811,9 @@ de Hermes — modelo local descartado) y `nomic-embed-text` (reemplazado por bge
 Modelos activos en pciq22: `qwen2.5:14b-instruct` (RAG síntesis) + `bge-m3`
 (embeddings). RAM liberada: ~19+ GB.
 
-### 49. Hermes Agent — pendiente residual — BAJA prioridad
+### 49. Hermes Agent — ⚫ ELIMINADO de pciq22 el 2026-10-30 (sin trabajo pendiente; texto conservado como histórico)
+
+> **2026-10-30:** Martín decidió quitar Hermes de este ordenador y se borró todo (ver `ESTADO.md` y item 86 de `Mejoras_realizadas.md`). Las referencias a "reactivación", Discord, MCPs y el checklist de seguridad de más abajo ya no aplican; queda por hacer solo la revocación de claves en las consolas externas.
 
 **Estado 2026-06-25:** infraestructura completa y operativa. Hermes funciona 24/7
 desde Discord con Notion + Google Calendar + Gmail + Tavily, sobre OpenRouter
