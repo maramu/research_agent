@@ -1,0 +1,109 @@
+VIGILANTE EXTERNO DE PCIQ22 - COMANDOS (PC Windows PCIQ74)
+=============================================================
+Tarea programada: vigilante_pciq22 (cada 2 h, cuenta SYSTEM)
+Script:  C:\vigilante_pciq22\vigilante.ps1
+Log:     C:\vigilante_pciq22\vigilante.log
+Estado:  C:\ProgramData\vigilante_pciq22\estado.json
+
+Alerta por correo tras 2 fallos seguidos a martin.ramirez@gm.uca.es
+(smtp.uca.es:25 sin autenticacion). Documentado en Mejoras_realizadas.md, item 87.
+
+
+0) CMD vs POWERSHELL
+-------------------------------------------------------------
+El shell por defecto de la sesion SSH es cmd (prompt "C:\Users\...>").
+Los comandos de abajo van pensados para cmd. Dos opciones:
+
+ a) Seguir en cmd: cada comando de PowerShell va envuelto asi
+        powershell -NoProfile -Command "AQUI_EL_COMANDO"
+
+ b) Abrir PowerShell desde cmd (para pegar varios comandos seguidos):
+        powershell -NoProfile
+    El prompt pasa a "PS C:\...>". En PowerShell se pega SOLO lo que va
+    dentro de las comillas (sin el "powershell -NoProfile -Command").
+    Para volver a cmd:
+        exit
+
+Los comandos de pausar/reanudar/borrar necesitan consola de ADMINISTRADOR.
+Si da "acceso denegado", la sesion no tiene permisos de administrador.
+
+
+1) ESTADO (solo lectura)
+-------------------------------------------------------------
+Ultima y proxima ejecucion (LastTaskResult 0 = bien):
+powershell -NoProfile -Command "Get-ScheduledTaskInfo -TaskName vigilante_pciq22 | Format-List LastRunTime,LastTaskResult,NextRunTime"
+
+La tarea esta activa (Ready/Running; Disabled = pausada):
+powershell -NoProfile -Command "(Get-ScheduledTask -TaskName vigilante_pciq22).State"
+
+Ultimas 20 lineas del log:
+powershell -NoProfile -Command "Get-Content C:\vigilante_pciq22\vigilante.log -Tail 20"
+
+Solo los fallos del log:
+findstr /C:"FALLO" C:\vigilante_pciq22\vigilante.log
+
+Contador de fallos y estado de alerta:
+type C:\ProgramData\vigilante_pciq22\estado.json
+
+
+2) ACCIONES
+-------------------------------------------------------------
+Ejecutar ahora y ver el resultado por pantalla:
+powershell -NoProfile -ExecutionPolicy Bypass -File C:\vigilante_pciq22\vigilante.ps1
+
+Lanzar la tarea programada ahora (escribe en el log):
+schtasks /Run /TN vigilante_pciq22
+
+Pausar el vigilante (p. ej. durante un mantenimiento de pciq22):
+schtasks /Change /TN vigilante_pciq22 /DISABLE
+
+Reanudarlo:
+schtasks /Change /TN vigilante_pciq22 /ENABLE
+
+Reiniciar el contador de fallos (borra el estado):
+del C:\ProgramData\vigilante_pciq22\estado.json
+
+Vaciar el log:
+del C:\vigilante_pciq22\vigilante.log
+
+
+3) COMPROBACIONES DE RED DESDE PCIQ74
+-------------------------------------------------------------
+Streamlit privado (debe dar 200):
+powershell -NoProfile -Command "(Invoke-WebRequest http://pciq22.uca.es:8501/_stcore/health -UseBasicParsing).StatusCode"
+
+Streamlit publico (debe dar 200):
+powershell -NoProfile -Command "(Invoke-WebRequest http://pciq22.uca.es:8502/_stcore/health -UseBasicParsing).StatusCode"
+
+Proxy de Ollama (debe dar 401 sin token; eso es lo correcto):
+curl.exe -s -o NUL -w "%{http_code}" http://pciq22.uca.es:11434/api/version
+
+SMTP alcanzable (TcpTestSucceeded : True):
+powershell -NoProfile -Command "Test-NetConnection smtp.uca.es -Port 25 | Select TcpTestSucceeded"
+
+Version de PowerShell (5.1 en este equipo):
+powershell -NoProfile -Command "$PSVersionTable.PSVersion.ToString()"
+
+
+4) CORREO DE PRUEBA
+-------------------------------------------------------------
+powershell -NoProfile -Command "Send-MailMessage -From vigilante-pciq74@uca.es -To martin.ramirez@gm.uca.es -Subject 'Prueba vigilante' -Body 'ok' -SmtpServer smtp.uca.es -Port 25"
+
+
+5) SIMULAR UNA CAIDA (prueba de alerta)
+-------------------------------------------------------------
+Usa un host falso y un estado aparte, sin tocar el real. Ejecutar la 2.a linea
+DOS veces: a la segunda llega el correo "pciq22 CAIDO". Hacerlo en PowerShell (opcion b).
+
+(Get-Content C:\vigilante_pciq22\vigilante.ps1) -replace 'pciq22\.uca\.es','pciq22-no-existe.uca.es' -replace 'vigilante_pciq22\\estado','vigilante_pciq22\prueba' | Set-Content -Encoding ASCII C:\vigilante_pciq22\prueba.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File C:\vigilante_pciq22\prueba.ps1
+
+Limpiar la prueba:
+Remove-Item C:\vigilante_pciq22\prueba.ps1, $env:ProgramData\vigilante_pciq22\prueba.json
+
+
+6) DESINSTALAR (solo si hace falta)
+-------------------------------------------------------------
+schtasks /Delete /TN vigilante_pciq22 /F
+rmdir /S /Q C:\vigilante_pciq22
+rmdir /S /Q C:\ProgramData\vigilante_pciq22

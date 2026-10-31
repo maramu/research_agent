@@ -22,6 +22,7 @@ Ollama) → RAG y catálogo en Streamlit. Idioma de trabajo: **español**.
 - `Mejoras_realizadas.md` — histórico, entrada numerada nueva **arriba** (causa, arreglo, datos tocados).
 - `Mejoras_pendientes.md` — backlog; el bloque más reciente "ACTUALIZACIÓN …" fija el orden vivo.
 - `docs/` — material de referencia congelado (auditorías, rollouts, copias antiguas); índice en `docs/README.md`.
+- `snippets/` — comandos de uso habitual para pegar en terminal/Termius (pciq22 y vigilante de Windows); sin secretos. Mantenerlos al día si cambian rutas, etiquetas de launchd u opciones de scripts.
 - Al empezar una sesión: leer `ESTADO.md` y el último bloque de `Mejoras_pendientes.md`; **verificar con
   git/NAS antes de afirmar el estado**.
 

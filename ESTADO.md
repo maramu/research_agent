@@ -285,6 +285,7 @@ research_agent/
 │           └── 15_Pendientes.py      ← posponer / VETAR DOIs pendientes + purga dura del corpus (solo privada)
 ├── tools/                            ← tools de tool-calling, independientes de scripts/utils/
 │   └── obsidian.py                   ← 4 tools Obsidian (lectura libre, escritura solo en 00_Inbox)
+├── snippets/                   # comandos habituales (Termius): pciq22_comandos.txt, vigilante_windows.txt
 ├── deployment/
 │   ├── com.research_agent.streamlit.plist        ← LaunchAgent Streamlit privado (8501)
 │   ├── com.research_agent.streamlit_public.plist ← LaunchAgent Streamlit público (8502)

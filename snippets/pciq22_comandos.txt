@@ -1,0 +1,136 @@
+RESEARCH_AGENT - COMANDOS HABITUALES EN PCIQ22 (zsh)
+=====================================================
+Verificado el 2026-10-31 en pciq22: etiquetas de launchd, rutas de logs, puertos,
+y opciones (--help) de cada script. Lo que NO se ha ejecutado de verdad (solo
+comprobado su --help) lleva la marca [no ejecutado].
+
+Categorias (CANONICAL_CATEGORIES): biological_gas_odor_treatment,
+anoxic_biogas_biodesulfurization, bioplastics_microplastics,
+biogas_upgrading_biomethanation, microalgae, single_cell_protein,
+advanced_oxidation_processes, bioleaching_critical_materials, thiosulfate
+En los comandos de abajo, CAT = nombre de la categoria (el --project de los scripts).
+
+
+1) REPO Y DESPLIEGUE
+-------------------------------------------------------------
+Los cambios de codigo se hacen en el NAS (/Volumes/Disco/proyectos/research_agent),
+commit + push alli, y aqui solo:
+
+cd ~/proyectos/research_agent && git pull origin main
+
+Estado y ultimos commits:
+cd ~/proyectos/research_agent && git status -sb && git log --oneline -5
+
+Tests:
+cd ~/proyectos/research_agent && python3 -m pytest tests -q
+
+Tras cambiar codigo hay que reiniciar Streamlit (ver seccion 2).
+
+
+2) SERVICIOS (launchd)
+-------------------------------------------------------------
+Reiniciar Streamlit privado (:8501):
+launchctl kickstart -k gui/$(id -u)/com.research_agent.streamlit
+
+Reiniciar Streamlit publico (:8502):
+launchctl kickstart -k gui/$(id -u)/com.research_agent.streamlit_public
+
+Reiniciar el proxy Caddy de Ollama (:11434):
+launchctl kickstart -k gui/$(id -u)/com.research_agent.caddy_ollama
+
+Reiniciar Ollama (:11435):
+launchctl kickstart -k gui/$(id -u)/com.martin.ollama
+
+Lanzar ya el healthcheck (sin -k: no mata si esta corriendo):
+launchctl kickstart gui/$(id -u)/com.research_agent.healthcheck
+
+OJO: NO hacer kickstart de com.research_agent.scopus_weekly salvo que se quiera ejecutar
+la ingesta real de Scopus (descarga PDFs y envia el correo). Para probar usar --dry-run (seccion 5).
+
+Servicios cargados y su ultimo codigo de salida (2.a columna; 0 = bien):
+launchctl list | grep -E "research_agent|ollama"
+  (Nota: com.ollama.ollama y homebrew.mxcl.ollama aparecen con 78: son de la
+   instalacion anterior de Ollama, no se usan; el vigente es com.martin.ollama.)
+
+Otros jobs: com.research_agent.daily_question (lanza ~/claude-scheduled/scheduled-claude.sh).
+
+
+3) COMPROBACIONES DE ESTADO
+-------------------------------------------------------------
+Healthcheck completo sin enviar correo:
+cd ~/proyectos/research_agent && python3 scripts/healthcheck.py --dry-run
+
+Una a una:
+curl -s http://127.0.0.1:8501/_stcore/health
+curl -s http://127.0.0.1:8502/_stcore/health
+curl -s http://127.0.0.1:11435/api/version
+curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:11434/api/version
+curl -s http://127.0.0.1:8070/api/isalive
+  (esperado: ok / ok / {"version":...} / 401 / true)
+
+GROBID (contenedor Docker):
+docker ps
+docker restart grobid
+
+Datos montados y categorias:
+ls /Volumes/research/categorias
+
+Espacio y memoria:
+df -h /Volumes/research ~
+vm_stat | head -5
+
+
+4) LOGS
+-------------------------------------------------------------
+Directorio: ~/Library/Logs/research_agent/
+  streamlit.log / .err.log   streamlit_public.log / .err.log
+  caddy_ollama.log / .err.log   healthcheck.log / .err
+  scopus_weekly.log / .err.log  daily_question.log / .err.log
+Ollama: ~/ollama.launchd.log  y  ~/ollama.launchd.err
+
+Ultimas lineas:
+tail -50 ~/Library/Logs/research_agent/streamlit.err.log
+tail -50 ~/Library/Logs/research_agent/scopus_weekly.log
+tail -50 ~/ollama.launchd.err
+
+Seguir en directo:
+tail -f ~/Library/Logs/research_agent/streamlit.err.log
+
+Todos los .err con contenido:
+find ~/Library/Logs/research_agent -name "*.err*" -size +0 -ls
+
+
+5) PIPELINE Y MANTENIMIENTO
+-------------------------------------------------------------
+(Los scripts estan en ~/proyectos/research_agent/scripts; para ejecutar desde la
+raiz del repo anteponer scripts/.)
+
+Reindexar una categoria (incremental, anade nuevos y poda borrados):
+cd ~/proyectos/research_agent && python3 scripts/5_build_embeddings.py --project CAT       [no ejecutado]
+  (--force reconstruye el indice entero; usar solo si esta desalineado)
+
+Regenerar paquetes NotebookLM de una categoria + indice maestro:
+cd ~/proyectos/research_agent && python3 scripts/6_make_packages.py --project CAT --repack-all && python3 scripts/7_make_master_index.py --project CAT       [no ejecutado]
+
+Validar metadatos (local; --crossref contrasta con Crossref por DOI):
+cd ~/proyectos/research_agent && python3 scripts/validate_metadata.py --category CAT
+cd ~/proyectos/research_agent && python3 scripts/validate_metadata.py --all
+cd ~/proyectos/research_agent && python3 scripts/validate_metadata.py --all --crossref --limit 50
+
+Scopus semanal (--dry-run imprime el HTML sin lanzar Scopus ni enviar correo):
+cd ~/proyectos/research_agent && python3 scripts/run_weekly_scopus.py --dry-run
+
+Copias de seguridad de la configuracion:
+cd ~/proyectos/research_agent && python3 scripts/backup_config.py
+cd ~/proyectos/research_agent && python3 scripts/backup_config.py --list
+cd ~/proyectos/research_agent && python3 scripts/backup_config.py --encrypt-env
+cd ~/proyectos/research_agent && python3 scripts/backup_config.py --decrypt-env FICHERO.enc --out /ruta/destino
+  (la frase de cifrado va en KeePassXC)
+
+Para procesar PDFs nuevos o borrar articulos se usa Streamlit (la pestana Articulos es 11_Articulos.py).
+
+
+6) GIT EN EL NAS (cuando se edita alli)
+-------------------------------------------------------------
+cd /Volumes/Disco/proyectos/research_agent && git status -sb
+cd /Volumes/Disco/proyectos/research_agent && git add -A && git commit -m "mensaje" && git push origin main
