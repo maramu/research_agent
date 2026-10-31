@@ -1174,7 +1174,7 @@ VPN. Relacionado: `PasswordAuthentication no` en pciq22 (ya en el checklist del 
   creciendo** — incluir en la rotación. (Corrección de runbook: NO está en
   `~/.ollama/logs/server.log`, que está vacío; usar `~/ollama.launchd.err` para cualquier `grep` de
   diagnóstico de Ollama, p. ej. truncados del item 52.)
-- (b) **Healthcheck** barato (launchd): `curl -fsS` a `:8501`, `:8502`, `:11434` (con token) y
+- (b) ✅ **CERRADO 2026-10-31** (local instalado + vigilante externo en PCIQ74, item 87). **Healthcheck** barato (launchd): `curl -fsS` a `:8501`, `:8502`, `:11434` (con token) y
   GROBID `/api/isalive`; email solo si falla (reutiliza el SMTP de `run_weekly_scopus.py`). Cierra el
   hueco "me entero por el usuario". ~50 líneas.
 

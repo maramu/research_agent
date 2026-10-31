@@ -2,6 +2,18 @@
 > Histórico append-only (lo más nuevo arriba). Backlog: Mejoras_pendientes.md · Estado/arquitectura: ESTADO.md
 
 ---
+### ✅ 87. Vigilante externo de pciq22 instalado en PCIQ74 (2026-10-31)
+
+**Hueco:** el healthcheck local (item 59b) es un LaunchAgent: si pciq22 se reinicia y nadie inicia sesión (FileVault), no corre ni avisa.
+**Arreglo:** `deployment/vigilante_windows/vigilante.ps1` (+ README) en el PC Windows del laboratorio (PCIQ74, `10.142.6.17`).
+Tarea programada `vigilante_pciq22` (cuenta SYSTEM, cada 2 h, `StartWhenAvailable`) que comprueba desde fuera `pciq22.uca.es`:
+Streamlit `:8501` y `:8502` (200) y el proxy de Ollama `:11434` (401 sin token: así **no se guarda ningún secreto** en Windows).
+Correo por `smtp.uca.es:25` sin autenticación a martin.ramirez@gm.uca.es: alerta tras **2 fallos seguidos**, aviso de recuperación y recordatorio cada 24 h si sigue caído; nunca un correo por ejecución.
+**Instalación (la hizo Martín pegando comandos):** script en `C:\vigilante_pciq22\vigilante.ps1`, log en `vigilante.log` (mismo directorio), estado en `C:\ProgramData\vigilante_pciq22\estado.json`.
+**Verificado 2026-10-31:** ejecución normal = `OK`; prueba con host falso = alerta a la 2.ª ejecución y correo recibido; primera ejecución programada `LastTaskResult 0` y `OK` en el log.
+**Límites:** no comprueba Ollama tras el proxy (haría falta el token en Windows; lo cubre el healthcheck local); detección de caída en 2–4 h; si PCIQ74 está apagado tampoco avisa. Tras una caída real queda sin probar el correo de recuperación.
+
+---
 ### ✅ 86. Hermes Agent eliminado de pciq22 (2026-10-30)
 
 Por decisión de Martín (estaba pausado desde el 2026-07-01 por la auditoría de seguridad). Antes de borrar se inventarió todo (no había
