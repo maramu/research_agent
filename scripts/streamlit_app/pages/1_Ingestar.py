@@ -908,17 +908,21 @@ with tab_csv:
             _csv_name = st.text_input(
                 "Nombre del proyecto",
                 value=project_name_from_filename(_csv_fname),
-                help="Se creará en categorias/<nombre>/ (minúsculas, dígitos, '_' y '-').",
+                help="Se creará en categorias/<nombre>/; se pasa a minúsculas y se sustituyen símbolos por '_'.",
                 key=f"csv_name_{_csv_fname}",
             )
             _csv_max = st.number_input(
                 "Limitar a N artículos (0 = todos; útil para probar)",
                 min_value=0, value=0, step=5, key="csv_max",
             )
+            # Se normaliza (VOSC → vosc, espacios → _) en vez de rechazar
+            _csv_slug = project_name_from_filename(_csv_name)
+            if _csv_slug != _csv_name.strip():
+                st.caption(f"Se usará el nombre normalizado: `{_csv_slug}`")
             if st.button("▶ Crear proyecto y descargar", type="primary", key="btn_csv_run"):
-                if not re.fullmatch(r"[a-z0-9_-]+", _csv_name.strip()):
-                    st.error("Nombre inválido: solo minúsculas, dígitos, '_' y '-'.")
-                elif _csv_name.strip() in CANONICAL_CATEGORIES:
+                if not _csv_name.strip():
+                    st.error("Falta el nombre del proyecto.")
+                elif _csv_slug in CANONICAL_CATEGORIES:
                     st.error("Ese nombre es una categoría canónica; usa otro.")
                 else:
                     _CSV_DIR.mkdir(parents=True, exist_ok=True)
@@ -927,14 +931,14 @@ with tab_csv:
                         _saved.write_bytes(_csv_bytes)
                     _res = execute_with_live_output(
                         run_csv_adhoc, "CSV → ad-hoc",
-                        name=_csv_name.strip(), csv_path=str(_saved),
+                        name=_csv_slug, csv_path=str(_saved),
                         max_articles=int(_csv_max) or None,
                     )
                     if _res:
                         with st.expander("📊 Resumen detallado", expanded=True):
                             st.json(_res)
                         if _res.get("status") == "ok":
-                            st.session_state["csv_last_project"] = _csv_name.strip()
+                            st.session_state["csv_last_project"] = _csv_slug
                             st.success(
                                 f"Proyecto **{_res['project']}**: {_res['pdfs_total']} PDFs "
                                 f"({_res.get('missing_pdfs', 0)} DOIs sin PDF). "
