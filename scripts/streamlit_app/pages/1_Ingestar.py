@@ -67,6 +67,7 @@ from pipeline import (  # noqa: F401
     process_category,
     promote_adhoc_to_category,
     run_adhoc,
+    run_csv_adhoc,
     run_inbox,
     run_inbox_process,
     run_inbox_screen,
@@ -236,8 +237,9 @@ if _LOG_ACTIVE.exists():
 # Tabs por flujo
 # ---------------------------------------------------------------------------
 
-tab_scopus, tab_inbox, tab_pending, tab_adhoc = st.tabs([
+tab_scopus, tab_csv, tab_inbox, tab_pending, tab_adhoc = st.tabs([
     "🌐 Scopus",
+    "📄 CSV",
     "📂 Inbox",
     "⏳ Pendientes",
     "🧪 Ad-hoc",
@@ -683,6 +685,121 @@ with tab_pending:
                         st.warning("Algunas categorías terminaron con errores. Revisa el log superior.")
 
 
+def render_integrar_adhoc(kp: str, default_src: str | None = None) -> None:
+    """Sección «Integrar proyecto ad-hoc» (compartida por las pestañas Ad-hoc y CSV)."""
+    st.divider()
+    st.subheader("🔗 Integrar proyecto ad-hoc")
+
+    _all_cats   = list_existing_categories()
+    _adhoc_opts = [c for c in _all_cats if c not in CANONICAL_CATEGORIES]
+
+    if not _adhoc_opts:
+        st.info("No hay proyectos ad-hoc disponibles en el NAS.")
+    else:
+        _adhoc_src = st.selectbox(
+            "Proyecto ad-hoc origen",
+            options=_adhoc_opts,
+            index=_adhoc_opts.index(default_src) if default_src in _adhoc_opts else 0,
+            key=f"integrate_adhoc_src{kp}",
+        )
+
+        _destino = st.radio(
+            "Destino",
+            ["Categoría existente", "Nueva categoría"],
+            horizontal=True,
+            key=f"integrate_destino{kp}",
+        )
+
+        if _destino == "Categoría existente":
+            st.markdown(
+                "Copia los artefactos del proyecto ad-hoc a una categoría canónica "
+                "y re-indexa FAISS. Los ficheros ya existentes en el destino se saltan."
+            )
+            _adhoc_dst = st.selectbox(
+                "Categoría destino",
+                options=CANONICAL_CATEGORIES,
+                key=f"integrate_adhoc_dst{kp}",
+            )
+            _delete_src = st.checkbox(
+                "Borrar proyecto ad-hoc tras la integración",
+                value=False,
+                key=f"integrate_adhoc_delete{kp}",
+            )
+
+            if st.button("▶ Integrar", type="primary", key=f"btn_integrate_adhoc{kp}"):
+                _int_result = execute_with_live_output(
+                    integrate_adhoc, "Integrar ad-hoc",
+                    adhoc_name=_adhoc_src,
+                    target_category=_adhoc_dst,
+                    delete_source=_delete_src,
+                )
+                if _int_result:
+                    with st.expander("📊 Resumen detallado", expanded=True):
+                        st.json(_int_result)
+                    if _int_result.get("status") == "ok":
+                        st.success(
+                            f"**{_adhoc_src}** integrado en **{_adhoc_dst}** — "
+                            f"{_int_result['copied_pdfs']} PDFs nuevos, "
+                            f"{_int_result['skipped_pdfs']} ya existían."
+                        )
+                    else:
+                        st.error(
+                            f"Error en la integración: {_int_result.get('message', 'ver log')}"
+                        )
+
+        else:  # Nueva categoría
+            st.markdown(
+                "Crea una **nueva categoría canónica** a partir del proyecto ad-hoc. "
+                "Se copian todos los artefactos (incluidos los índices FAISS) y se "
+                "registran las keywords en `config/keywords.yml`."
+            )
+            _new_name = st.text_input(
+                "Nombre de la nueva categoría",
+                value="",
+                placeholder="p.ej. anaerobic_digestion_sludge",
+                help="Solo letras minúsculas, dígitos y '_'. No debe existir ya.",
+                key=f"promote_new_name{kp}",
+            )
+            _new_keywords_raw = st.text_area(
+                "Keywords (una por línea)",
+                value="",
+                height=140,
+                placeholder="anaerobic digestion\nbiogas\nsludge treatment",
+                key=f"promote_keywords{kp}",
+            )
+            _delete_src_promote = st.checkbox(
+                "Borrar proyecto ad-hoc tras la promoción",
+                value=False,
+                key=f"promote_delete_src{kp}",
+            )
+
+            if st.button("▶ Promover a nueva categoría", type="primary", key=f"btn_promote_adhoc{kp}"):
+                _new_kws = [k.strip() for k in _new_keywords_raw.splitlines() if k.strip()]
+                if not _new_name.strip():
+                    st.error("Indica el nombre de la nueva categoría.")
+                else:
+                    _promo_result = execute_with_live_output(
+                        promote_adhoc_to_category, "Promover ad-hoc",
+                        adhoc_name=_adhoc_src,
+                        new_name=_new_name.strip(),
+                        keywords=_new_kws,
+                        delete_source=_delete_src_promote,
+                    )
+                    if _promo_result:
+                        with st.expander("📊 Resumen detallado", expanded=True):
+                            st.json(_promo_result)
+                        if _promo_result.get("status") == "ok":
+                            st.success(
+                                f"Nueva categoría **{_promo_result['new_category']}** creada "
+                                f"con {_promo_result['copied_pdfs']} PDFs y "
+                                f"{_promo_result['keywords_added']} keywords."
+                            )
+                        else:
+                            st.error(
+                                f"Error: {_promo_result.get('message', 'ver log')}"
+                            )
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # FLUJO D — Ad-hoc
 # ─────────────────────────────────────────────────────────────────────────────
@@ -742,115 +859,88 @@ with tab_adhoc:
                         f"Ve a 🔍 RAG para hacer consultas."
                     )
 
-    # ── Integrar / Promover ad-hoc ────────────────────────────────────────
+    render_integrar_adhoc("")
 
-    st.divider()
-    st.subheader("🔗 Integrar proyecto ad-hoc")
 
-    _all_cats   = list_existing_categories()
-    _adhoc_opts = [c for c in _all_cats if c not in CANONICAL_CATEGORIES]
+# ─────────────────────────────────────────────────────────────────────────────
+# FLUJO C2 — CSV de Scopus cribado → proyecto ad-hoc
+# ─────────────────────────────────────────────────────────────────────────────
 
-    if not _adhoc_opts:
-        st.info("No hay proyectos ad-hoc disponibles en el NAS.")
-    else:
-        _adhoc_src = st.selectbox(
-            "Proyecto ad-hoc origen",
-            options=_adhoc_opts,
-            key="integrate_adhoc_src",
-        )
+with tab_csv:
+    from utils.csv_ingest import normalize_screened_csv, project_name_from_filename
 
-        _destino = st.radio(
-            "Destino",
-            ["Categoría existente", "Nueva categoría"],
-            horizontal=True,
-            key="integrate_destino",
-        )
+    _CSV_DIR = NAS_ROOT / "inbox" / "csv"
 
-        if _destino == "Categoría existente":
-            st.markdown(
-                "Copia los artefactos del proyecto ad-hoc a una categoría canónica "
-                "y re-indexa FAISS. Los ficheros ya existentes en el destino se saltan."
+    st.markdown(
+        "Arrastra un **CSV de Scopus ya cribado** por ti. Se crea un proyecto ad-hoc con el "
+        "nombre del CSV, se descargan los PDFs de sus DOIs a `categorias/<nombre>/pdfs/` y se "
+        "procesa la cadena completa. Después puedes **integrarlo** en una categoría (abajo). "
+        "Los DOIs que ya están en el corpus no se vuelven a descargar: se copia su PDF desde su categoría (duplicado a propósito)."
+    )
+
+    _up = st.file_uploader("CSV de Scopus (cribado)", type=["csv"], key="csv_upload")
+    _existing = sorted(p.name for p in _CSV_DIR.glob("*.csv")) if _CSV_DIR.exists() else []
+    _pick = st.selectbox(
+        "…o elige uno ya subido a `inbox/csv/`", options=["—"] + _existing, key="csv_pick",
+    )
+
+    _csv_bytes, _csv_fname = None, None
+    if _up is not None:
+        _csv_bytes, _csv_fname = _up.getvalue(), _up.name
+    elif _pick != "—":
+        _csv_bytes, _csv_fname = (_CSV_DIR / _pick).read_bytes(), _pick
+
+    if _csv_bytes is not None:
+        try:
+            _df, _rep = normalize_screened_csv(_csv_bytes)
+        except Exception as e:  # noqa: BLE001
+            st.error(f"No se pudo leer el CSV: {e}")
+        else:
+            st.caption(
+                f"✓ {_rep.n_rows} filas → **{_rep.n_valid} DOIs únicos válidos**. "
+                f"Columnas reconocidas: "
+                + ", ".join(f"{k}←`{v}`" for k, v in _rep.mapped.items())
             )
-            _adhoc_dst = st.selectbox(
-                "Categoría destino",
-                options=CANONICAL_CATEGORIES,
-                key="integrate_adhoc_dst",
-            )
-            _delete_src = st.checkbox(
-                "Borrar proyecto ad-hoc tras la integración",
-                value=False,
-                key="integrate_adhoc_delete",
-            )
+            for _w in _rep.warnings:
+                st.warning(_w)
+            st.dataframe(_df.head(15), use_container_width=True, hide_index=True)
 
-            if st.button("▶ Integrar", type="primary", key="btn_integrate_adhoc"):
-                _int_result = execute_with_live_output(
-                    integrate_adhoc, "Integrar ad-hoc",
-                    adhoc_name=_adhoc_src,
-                    target_category=_adhoc_dst,
-                    delete_source=_delete_src,
-                )
-                if _int_result:
-                    with st.expander("📊 Resumen detallado", expanded=True):
-                        st.json(_int_result)
-                    if _int_result.get("status") == "ok":
-                        st.success(
-                            f"**{_adhoc_src}** integrado en **{_adhoc_dst}** — "
-                            f"{_int_result['copied_pdfs']} PDFs nuevos, "
-                            f"{_int_result['skipped_pdfs']} ya existían."
-                        )
-                    else:
-                        st.error(
-                            f"Error en la integración: {_int_result.get('message', 'ver log')}"
-                        )
-
-        else:  # Nueva categoría
-            st.markdown(
-                "Crea una **nueva categoría canónica** a partir del proyecto ad-hoc. "
-                "Se copian todos los artefactos (incluidos los índices FAISS) y se "
-                "registran las keywords en `config/keywords.yml`."
+            _csv_name = st.text_input(
+                "Nombre del proyecto",
+                value=project_name_from_filename(_csv_fname),
+                help="Se creará en categorias/<nombre>/ (minúsculas, dígitos, '_' y '-').",
+                key=f"csv_name_{_csv_fname}",
             )
-            _new_name = st.text_input(
-                "Nombre de la nueva categoría",
-                value="",
-                placeholder="p.ej. anaerobic_digestion_sludge",
-                help="Solo letras minúsculas, dígitos y '_'. No debe existir ya.",
-                key="promote_new_name",
+            _csv_max = st.number_input(
+                "Limitar a N artículos (0 = todos; útil para probar)",
+                min_value=0, value=0, step=5, key="csv_max",
             )
-            _new_keywords_raw = st.text_area(
-                "Keywords (una por línea)",
-                value="",
-                height=140,
-                placeholder="anaerobic digestion\nbiogas\nsludge treatment",
-                key="promote_keywords",
-            )
-            _delete_src_promote = st.checkbox(
-                "Borrar proyecto ad-hoc tras la promoción",
-                value=False,
-                key="promote_delete_src",
-            )
-
-            if st.button("▶ Promover a nueva categoría", type="primary", key="btn_promote_adhoc"):
-                _new_kws = [k.strip() for k in _new_keywords_raw.splitlines() if k.strip()]
-                if not _new_name.strip():
-                    st.error("Indica el nombre de la nueva categoría.")
+            if st.button("▶ Crear proyecto y descargar", type="primary", key="btn_csv_run"):
+                if not re.fullmatch(r"[a-z0-9_-]+", _csv_name.strip()):
+                    st.error("Nombre inválido: solo minúsculas, dígitos, '_' y '-'.")
+                elif _csv_name.strip() in CANONICAL_CATEGORIES:
+                    st.error("Ese nombre es una categoría canónica; usa otro.")
                 else:
-                    _promo_result = execute_with_live_output(
-                        promote_adhoc_to_category, "Promover ad-hoc",
-                        adhoc_name=_adhoc_src,
-                        new_name=_new_name.strip(),
-                        keywords=_new_kws,
-                        delete_source=_delete_src_promote,
+                    _CSV_DIR.mkdir(parents=True, exist_ok=True)
+                    _saved = _CSV_DIR / _csv_fname
+                    if not _saved.exists():
+                        _saved.write_bytes(_csv_bytes)
+                    _res = execute_with_live_output(
+                        run_csv_adhoc, "CSV → ad-hoc",
+                        name=_csv_name.strip(), csv_path=str(_saved),
+                        max_articles=int(_csv_max) or None,
                     )
-                    if _promo_result:
+                    if _res:
                         with st.expander("📊 Resumen detallado", expanded=True):
-                            st.json(_promo_result)
-                        if _promo_result.get("status") == "ok":
+                            st.json(_res)
+                        if _res.get("status") == "ok":
+                            st.session_state["csv_last_project"] = _csv_name.strip()
                             st.success(
-                                f"Nueva categoría **{_promo_result['new_category']}** creada "
-                                f"con {_promo_result['copied_pdfs']} PDFs y "
-                                f"{_promo_result['keywords_added']} keywords."
+                                f"Proyecto **{_res['project']}**: {_res['pdfs_total']} PDFs "
+                                f"({_res.get('missing_pdfs', 0)} DOIs sin PDF). "
+                                "Ya puedes consultarlo en 🔍 RAG o integrarlo abajo."
                             )
                         else:
-                            st.error(
-                                f"Error: {_promo_result.get('message', 'ver log')}"
-                            )
+                            st.error(_res.get("message") or f"Falló en {_res.get('stage', 'el procesado')}; revisa el log.")
+
+    render_integrar_adhoc("_csv", default_src=st.session_state.get("csv_last_project"))

@@ -1365,6 +1365,140 @@ def run_adhoc(
     return summary
 
 
+def _copy_corpus_pdfs(
+    dois: List[str],
+    dest_dir: Path,
+    on_output: Optional[Callable[[str], None]] = None,
+) -> Dict[str, Any]:
+    """Copia a ``dest_dir`` los PDFs de ``dois`` que YA están en el corpus.
+
+    Duplica a propósito (decisión de Martín para proyectos ad-hoc desde CSV): así el
+    proyecto contiene toda la selección. Busca el PDF en ``categorias/<cat>/pdfs/``
+    emparejando por stem/prefijo (``is_processed_stem``), nunca por DOI del texto.
+    No sobrescribe. Devuelve {"copied", "existing", "not_found": [doi, ...]}.
+    """
+    from utils.pdf_utils import stem_key, is_processed_stem
+
+    emit = on_output or (lambda _l: None)
+    idx = _load_corpus_doi_index()
+    listing: Dict[str, List[Path]] = {}
+    copied = existing = 0
+    not_found: List[str] = []
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    for doi in dois:
+        loc = idx.get(_norm_doi_key(doi))
+        if not loc or "/" not in loc:
+            continue                      # no está en el corpus: lo descargará 3a
+        cat, pid = loc.split("/", 1)
+        if cat not in listing:
+            pdf_dir = CATEGORIAS_DIR / cat / "pdfs"
+            listing[cat] = sorted(pdf_dir.glob("*.pdf")) if pdf_dir.is_dir() else []
+        keys = {stem_key(pid)}
+        match = next((f for f in listing[cat] if is_processed_stem(f.stem, keys)), None)
+        if match is None:
+            not_found.append(doi)
+            continue
+        dst = dest_dir / match.name
+        if dst.exists():
+            existing += 1
+        else:
+            shutil.copy(match, dst)
+            copied += 1
+    emit(f"PDFs ya en el corpus copiados al proyecto: {copied} (ya presentes: {existing}, "
+         f"sin PDF localizable: {len(not_found)})")
+    return {"copied": copied, "existing": existing, "not_found": not_found}
+
+
+def run_csv_adhoc(
+    name: str,
+    csv_path: str,
+    on_output: Optional[Callable[[str], None]] = None,
+    max_articles: Optional[int] = None,
+) -> Dict[str, Any]:
+    """Flujo C2: CSV de Scopus cribado → proyecto ad-hoc → descarga → procesado.
+
+    El CSV (exportación de Scopus ya filtrada por el investigador; acepta cabeceras
+    en inglés o español, ver ``utils.csv_ingest``) se normaliza, se guarda en
+    ``categorias/<name>/source/`` y sus DOIs se descargan a
+    ``categorias/<name>/pdfs/`` con ``3a_download_pdfs.py``. Después se renombra por
+    DOI (el CSV es la fuente primaria) y se ejecuta la cadena de procesado. El
+    resultado es un proyecto ad-hoc normal: se integra luego con ``integrate_adhoc``
+    o ``promote_adhoc_to_category``.
+
+    Los DOIs que ya están en el corpus NO se descargan de nuevo (``SKIPPED_CORPUS`` en 3a):
+    su PDF se DUPLICA desde la categoría de origen (``_copy_corpus_pdfs``).
+
+    Returns:
+        {"status": "ok"|"error", "project": name, "csv": {...}, "pdfs_total": N, "steps": {...}}
+    """
+    from utils.csv_ingest import normalize_screened_csv
+
+    if not re.fullmatch(r"[a-z0-9_-]+", name):
+        raise ValueError(f"Nombre de proyecto inválido '{name}': solo minúsculas, dígitos, '_' y '-'")
+    if name in _CANONICAL_CATEGORIES:
+        raise ValueError(f"'{name}' es una categoría canónica; elige otro nombre para el proyecto ad-hoc")
+    check_nas()
+    handler = _make_output_handler(on_output)
+
+    df, rep = normalize_screened_csv(str(csv_path))
+    handler(f"CSV: {rep.n_rows} filas → {rep.n_valid} DOIs únicos válidos")
+    for w in rep.warnings:
+        handler(f"⚠️ {w}")
+    if rep.n_valid == 0:
+        return {"status": "error", "project": name, "message": "El CSV no contiene DOIs válidos"}
+
+    project_dir = ensure_project_dirs(name)
+    src_dir = project_dir / "source"
+    src_dir.mkdir(exist_ok=True)
+    shutil.copy(csv_path, src_dir / Path(csv_path).name)
+    norm_csv = src_dir / f"{name}_normalizado.csv"
+    df.to_csv(norm_csv, index=False, encoding="utf-8-sig")
+    pdfs_dir = project_dir / "pdfs"
+
+    try:
+        n_dois = build_doi_registry_from_nas()
+        handler(f"✓ Registro DOIs actualizado: {n_dois} DOIs conocidos")
+    except Exception as e:  # noqa: BLE001
+        log.warning("No se pudo actualizar doi_registry.txt: %s", e)
+
+    # DOIs ya en el corpus: 3a los salta (SKIPPED_CORPUS); se duplican aquí desde su categoría
+    corpus_copy = _copy_corpus_pdfs(list(df["DOI"]), pdfs_dir, on_output=handler)
+
+    dl_args = ["--csv", str(norm_csv), "--out-dir", str(pdfs_dir), "--category", name]
+    if max_articles:
+        dl_args += ["--max", str(max_articles)]
+    dl = run_step("3a_download_pdfs.py", dl_args, on_output=handler, label=f"download [{name}]")
+    if dl["returncode"] != 0:
+        return {"status": "error", "project": name, "stage": "download", "details": dl}
+
+    rename = run_step(
+        "1_rename_papers_by_doi.py",
+        ["--folder", str(pdfs_dir), "--apply", "--doi-csv", str(norm_csv)],
+        on_output=handler, label=f"rename [{name}]",
+    )
+    if rename["returncode"] != 0:
+        log.warning("run_csv_adhoc: renombrado falló — continuando con nombres originales")
+
+    n_pdfs = len(list(pdfs_dir.glob("*.pdf")))
+    if n_pdfs == 0:
+        return {"status": "error", "project": name, "stage": "download",
+                "message": "No se descargó ningún PDF (todos en corpus o sin acceso)"}
+
+    proc = process_category(name, on_output=handler, screen_duplicates=False)
+    return {
+        "status": proc["status"],
+        "project": name,
+        "csv": {"rows": rep.n_rows, "valid_dois": rep.n_valid, "no_doi": rep.n_no_doi,
+                "duplicates": rep.n_duplicates, "warnings": rep.warnings},
+        "pdfs_total": n_pdfs,
+        "missing_pdfs": rep.n_valid - n_pdfs,
+        "corpus_copied": corpus_copy["copied"],
+        "corpus_not_found": corpus_copy["not_found"],
+        "steps": proc["steps"],
+        "query_cmd": f'python 8_query_rag.py --project {name} "tu pregunta aquí"',
+    }
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # FLUJO F — Libros de docencia (item 31)
 # ═══════════════════════════════════════════════════════════════════════════

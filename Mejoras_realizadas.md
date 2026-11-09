@@ -2,6 +2,17 @@
 > Histórico append-only (lo más nuevo arriba). Backlog: Mejoras_pendientes.md · Estado/arquitectura: ESTADO.md
 
 ---
+### ✅ 88. Pestaña «CSV» en Ingestar: CSV de Scopus cribado → proyecto ad-hoc (2026-11-09)
+
+**Necesidad:** ingestar la selección que el investigador ya cribó en Scopus (p. ej. `inbox/csv/Seleccion_RAG_VOSC_60.csv`, 60 DOIs) sin pasar por queries ni cribado.
+**Arreglo:**
+- `utils/csv_ingest.py` (nuevo, funciones puras): `project_name_from_filename` (`Seleccion_RAG_VOSC_60.csv` → `seleccion_rag_vosc_60`) y `normalize_screened_csv` (acepta exportación Scopus en inglés o cabeceras en español `titulo/anio/autores/revista`; separador autodetectado; limpia DOIs, descarta filas sin DOI y duplicados; conserva columnas extra).
+- `pipeline.run_csv_adhoc(name, csv_path, on_output, max_articles)`: guarda el CSV original y el normalizado en `categorias/<nombre>/source/`, actualiza `doi_registry`, `3a_download_pdfs.py --category <nombre>`, renombra por DOI (`--doi-csv`, el CSV es la fuente primaria) y `process_category(screen_duplicates=False)`. Rechaza nombres de categorías canónicas.
+- `1_Ingestar.py`: nueva pestaña **📄 CSV** (arrastrar CSV o elegir uno de `inbox/csv/`, vista previa, nombre editable, límite N para probar). La sección «Integrar proyecto ad-hoc» pasó a la función `render_integrar_adhoc(kp, default_src)` y se muestra tanto en Ad-hoc como en CSV (en CSV preselecciona el proyecto recién creado). La integración reutiliza `integrate_adhoc` / `promote_adhoc_to_category` sin cambios.
+**Datos tocados:** ninguno (no se ejecutó la descarga real). Tests: `tests/test_csv_ingest.py` (4); suite completa 368 OK; smoke de páginas OK (la pestaña CSV solo se renderiza, no se pulsó ningún botón).
+**Duplicados (decisión de Martín):** los DOIs ya presentes en el corpus no se descargan (`SKIPPED_CORPUS`) pero su PDF se **copia** al proyecto (`_copy_corpus_pdfs`, emparejado por stem/prefijo) y se reprocesa allí; la limpieza se hará al integrar/fusionar. **Límites:** los fallos de descarga caen en `pendientes_descarga.csv` con categoría = nombre del proyecto. Tras desplegar, reiniciar Streamlit en pciq22.
+
+---
 ### ✅ 87. Vigilante externo de pciq22 instalado en PCIQ74 (2026-10-31)
 
 **Hueco:** el healthcheck local (item 59b) es un LaunchAgent: si pciq22 se reinicia y nadie inicia sesión (FileVault), no corre ni avisa.
