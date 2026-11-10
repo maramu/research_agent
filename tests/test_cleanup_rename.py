@@ -647,3 +647,20 @@ def test_3a_skip_scope_category_solo_cuenta_la_propia_categoria(tmp_path, monkey
     mgr = m.DownloadManager.__new__(m.DownloadManager)
     mgr.cfg = type("C", (), {"category": "a", "output_dir": out})()
     assert mgr._category_dois() == {"10.1016/x.1"}
+
+
+def test_duplicados_solo_dentro_de_la_misma_categoria(tmp_path):
+    """Título/hash repetidos en categorías distintas NO son duplicado; en la misma, sí."""
+    import json
+    base = tmp_path
+    for cat in ("a", "b"):
+        (base / cat / "pdfs").mkdir(parents=True); (base / cat / "metadata").mkdir()
+    rec = lambda pid: json.dumps({"paper_id": pid, "title": "A fairly long shared title", "doi": "10.1/x"}) + "\n"
+    (base / "a" / "metadata" / "papers_metadata.jsonl").write_text(rec("p1"))
+    (base / "b" / "metadata" / "papers_metadata.jsonl").write_text(rec("p1") + rec("p1_2"))
+    for cat, n in (("a", "x.pdf"), ("b", "x.pdf"), ("b", "y.pdf")):
+        (base / cat / "pdfs" / n).write_bytes(b"%PDF-same")
+    t = cleanup.detect_title_duplicates(["a", "b"], base)
+    h = cleanup.detect_hash_duplicates(["a", "b"], base)
+    assert len(t) == 1 and {p["category"] for p in t[0]["papers"]} == {"b"}
+    assert len(h) == 1 and {p["category"] for p in h[0]["papers"]} == {"b"}

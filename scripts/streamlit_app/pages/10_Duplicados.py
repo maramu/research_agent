@@ -2,7 +2,8 @@
 """
 10_Duplicados.py — Revisión manual de duplicados (solo app privada).
 
-Detecta duplicados por TÍTULO y por HASH del PDF reutilizando la lógica de
+Detecta duplicados por TÍTULO y por HASH del PDF DENTRO de cada categoría (el mismo
+paper en varias categorías no cuenta) reutilizando la lógica de
 9_cleanup_duplicates.py. Permite elegir manualmente qué candidato conservar,
 descargar cada PDF, mover los demás a CUARENTENA (reversible, no borrado duro)
 y re-indexar las categorías afectadas.
@@ -53,8 +54,10 @@ if "dup_nonce" not in st.session_state:
 
 @st.cache_data(show_spinner="Escaneando duplicados…")
 def scan(nonce: int):
-    cats = list(cleanup.CATEGORIES)
     base = CATEGORIAS_DIR
+    # Todas las categorías y proyectos ad-hoc del NAS (antes solo 8 fijas: vosc no se veía).
+    # Solo se buscan duplicados DENTRO de cada categoría; el mismo paper en varias es válido.
+    cats = sorted(d.name for d in base.iterdir() if d.is_dir()) if base.exists() else []
     return (cleanup.detect_title_duplicates(cats, base),
             cleanup.detect_hash_duplicates(cats, base))
 

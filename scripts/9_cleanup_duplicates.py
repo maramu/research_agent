@@ -345,7 +345,13 @@ def choose_keep_cross(records: list[PaperRecord]) -> tuple[PaperRecord, str]:
     return keep, "sin categoría específica obvia; primera por orden alfabético de categoría"
 
 
-def decide_duplicates(registry: dict[str, list[PaperRecord]]) -> list[DuplicateDecision]:
+def decide_duplicates(
+    registry: dict[str, list[PaperRecord]],
+    cross_category: bool = False,
+) -> list[DuplicateDecision]:
+    """Decisiones de duplicado por DOI. Por defecto SOLO intra-categoría: el mismo paper
+    puede estar en varias categorías. ``cross_category=True`` restaura el comportamiento
+    antiguo (elegir una categoría ganadora y eliminar el paper de las demás)."""
     decisions: list[DuplicateDecision] = []
     for doi, records in sorted(registry.items()):
         if len(records) < 2:
@@ -381,7 +387,7 @@ def decide_duplicates(registry: dict[str, list[PaperRecord]]) -> list[DuplicateD
                 keep, _ = choose_keep_intra(group)
                 category_representatives.append(keep)
 
-        if len(category_representatives) < 2:
+        if not cross_category or len(category_representatives) < 2:
             continue
         keep_cross, reason = choose_keep_cross(category_representatives)
         for remove in sorted(
@@ -1353,7 +1359,9 @@ def pdf_sha256(pdf_path: Path) -> Optional[str]:
 
 
 def detect_title_duplicates(cats: list[str], base: Path) -> list[dict]:
-    groups: dict[str, list[dict]] = defaultdict(list)
+    # Se agrupa por (categoría, título): el mismo paper puede estar en varias categorías,
+    # solo cuenta como duplicado si se repite dentro de la MISMA.
+    groups: dict[tuple[str, str], list[dict]] = defaultdict(list)
     for category in cats:
         meta_path = base / category / "metadata" / "papers_metadata.jsonl"
         if not meta_path.exists():
@@ -1373,7 +1381,7 @@ def detect_title_duplicates(cats: list[str], base: Path) -> list[dict]:
                     if len(norm) < 10:
                         continue
                     stem, _ = infer_stem(data)
-                    groups[norm].append({
+                    groups[(category, norm)].append({
                         "category": category,
                         "paper_id": stem or "",
                         "doi":      normalize_doi(data.get("doi") or ""),
@@ -1383,7 +1391,7 @@ def detect_title_duplicates(cats: list[str], base: Path) -> list[dict]:
         except Exception:
             continue
     result: list[dict] = []
-    for norm, papers in sorted(groups.items()):
+    for (_cat, norm), papers in sorted(groups.items()):
         if len(papers) < 2:
             continue
         distinct_dois = {p["doi"] for p in papers if p.get("doi")}
@@ -1397,7 +1405,7 @@ def detect_title_duplicates(cats: list[str], base: Path) -> list[dict]:
 
 
 def detect_hash_duplicates(cats: list[str], base: Path) -> list[dict]:
-    groups: dict[str, list[dict]] = defaultdict(list)
+    groups: dict[tuple[str, str], list[dict]] = defaultdict(list)   # (categoría, sha256)
     for category in cats:
         pdfs_dir = base / category / "pdfs"
         if not pdfs_dir.exists():
@@ -1408,14 +1416,14 @@ def detect_hash_duplicates(cats: list[str], base: Path) -> list[dict]:
             sha = pdf_sha256(pdf)
             if sha is None:
                 continue
-            groups[sha].append({
+            groups[(category, sha)].append({
                 "category": category,
                 "paper_id": pdf.stem,
                 "pdf_path": str(pdf),
             })
     return [
         {"match_type": "hash", "sha256": sha, "papers": papers}
-        for sha, papers in sorted(groups.items())
+        for (_cat, sha), papers in sorted(groups.items())
         if len(papers) >= 2
     ]
 
