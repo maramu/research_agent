@@ -307,7 +307,7 @@ def test_screen_no_aparta_pdf_ya_procesado_con_nombre_largo(tmp_path, monkeypatc
     proc.write_bytes(b"%PDF-a"); nuevo.write_bytes(b"%PDF-b")
     monkeypatch.setattr(pipeline, "CATEGORIAS_DIR", base)
     monkeypatch.setattr(pipeline, "QUARANTINE_DIR", tmp_path / "q")
-    monkeypatch.setattr(pipeline, "_load_corpus_doi_index", lambda: {"10.1/x": f"{cat}/{pid}"})
+    monkeypatch.setattr(pipeline, "_load_corpus_doi_index", lambda category=None: {"10.1/x": f"{cat}/{pid}"})
     import utils.pdf_utils as pu
     monkeypatch.setattr(pu, "extract_doi_from_pdf",
                         lambda p: "10.1/x" if Path(p).name == "nuevo_dup.pdf" else "10.1/x")
@@ -608,3 +608,26 @@ def test_audit_text_layer_detecta_pdf_con_poco_texto(tmp_path):
         (cat / "md_clean" / f"{pid}.clean.md").write_text("palabra " * words)
     rows = mod.audit_category(cat, threshold=100)
     assert [r["paper_id"] for r in rows] == ["escaneado"] and rows[0]["words_per_page"] == 8.0
+
+
+def test_screen_permite_mismo_paper_en_otra_categoria(tmp_path, monkeypatch):
+    """El DOI ya presente en OTRA categoría no motiva cuarentena (solo la misma)."""
+    import pipeline
+    base = tmp_path / "categorias"
+    (base / "vosc" / "pdfs").mkdir(parents=True); (base / "vosc" / "md_clean").mkdir()
+    nuevo = base / "vosc" / "pdfs" / "nuevo.pdf"; nuevo.write_bytes(b"%PDF-b")
+    monkeypatch.setattr(pipeline, "CATEGORIAS_DIR", base)
+    monkeypatch.setattr(pipeline, "QUARANTINE_DIR", tmp_path / "q")
+    monkeypatch.setattr(pipeline, "KNOWN_DOIS_FILE", tmp_path / "reg.txt")
+    (tmp_path / "reg.txt").write_text("10.1/x\totra_cat/p.pdf\n")
+    monkeypatch.setattr(pipeline, "_iter_papers_metadata",
+                        lambda base=None: iter([("otra_cat", {"doi": "10.1/x", "paper_id": "p"})]))
+    import utils.pdf_utils as pu
+    monkeypatch.setattr(pu, "extract_doi_from_pdf", lambda p: "10.1/x")
+    res = pipeline.screen_new_pdfs_against_corpus("vosc")
+    assert res["quarantined"] == [] and nuevo.exists()
+    monkeypatch.setattr(pipeline, "_iter_papers_metadata",
+                        lambda base=None: iter([("vosc", {"doi": "10.1/x", "paper_id": "p"})]))
+    (tmp_path / "reg.txt").write_text("")
+    res = pipeline.screen_new_pdfs_against_corpus("vosc")
+    assert [q["file"] for q in res["quarantined"]] == ["nuevo.pdf"]

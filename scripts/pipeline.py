@@ -434,11 +434,16 @@ def _iter_papers_metadata(base: Path = CATEGORIAS_DIR):
                 log.debug("No se pudo leer %s: %s", jf, e)
 
 
-def _load_corpus_doi_index() -> Dict[str, str]:
+def _load_corpus_doi_index(category: Optional[str] = None) -> Dict[str, str]:
     """doi(normalizado) -> 'cat/paper_id' de papers YA procesados. Primaria:
-    papers_metadata.jsonl (DOI autoritativo del TEI). Respaldo: doi_registry.txt."""
+    papers_metadata.jsonl (DOI autoritativo del TEI). Respaldo: doi_registry.txt.
+
+    Con ``category``, solo se consideran los papers de ESA categoría: un mismo paper
+    puede estar en varias categorías/proyectos, pero no dos veces en la misma."""
     idx: Dict[str, str] = {}
     for cat, rec in _iter_papers_metadata():
+        if category is not None and cat != category:
+            continue
         doi = _norm_doi_key(rec.get("doi"))
         if doi:
             pid = rec.get("paper_id") or rec.get("stable_id") or rec.get("source_pdf") or ""
@@ -448,8 +453,11 @@ def _load_corpus_doi_index() -> Dict[str, str]:
             for line in KNOWN_DOIS_FILE.read_text(encoding="utf-8").splitlines():
                 parts = line.strip().split("\t", 1)
                 key = _norm_doi_key(parts[0]) if parts else ""
+                loc = parts[1] if len(parts) > 1 else "?"
+                if category is not None and not loc.startswith(f"{category}/"):
+                    continue
                 if key:
-                    idx.setdefault(key, parts[1] if len(parts) > 1 else "?")
+                    idx.setdefault(key, loc)
         except Exception:
             pass
     return idx
@@ -472,7 +480,8 @@ def screen_new_pdfs_against_corpus(
     on_output: Optional[Callable[[str], None]] = None,
 ) -> Dict[str, Any]:
     """Aparta a cuarentena los PDFs NUEVOS de categorias/<cat>/pdfs/ cuyo DOI (o
-    hash idéntico) ya está en el corpus. No toca PDFs ya procesados ni borra nada:
+    hash idéntico) ya está en la MISMA categoría (no en otras: se permite el mismo
+    paper en varias categorías). No toca PDFs ya procesados ni borra nada:
     mueve a quarantine/duplicates/<ts>/<cat>/. Reversible.
     Returns: {"quarantined": [...], "kept": [...], "no_doi": [...]}"""
     from utils.pdf_utils import extract_doi_from_pdf, normalize_stem  # noqa: PLC0415
@@ -508,7 +517,8 @@ def screen_new_pdfs_against_corpus(
     if not new_pdfs:
         return out
 
-    corpus_dois = _load_corpus_doi_index()
+    # Solo duplicado DENTRO de la categoría: el mismo paper puede estar en varias
+    corpus_dois = _load_corpus_doi_index(category)
     existing_hashes = {
         _pdf_sha256(p) for p in all_pdfs if _is_processed(p)
     }
@@ -525,7 +535,7 @@ def screen_new_pdfs_against_corpus(
         h = _pdf_sha256(pdf)
         reason = None
         if doi and doi in corpus_dois:
-            reason = f"DOI ya en corpus ({corpus_dois[doi]})"
+            reason = f"DOI ya en la categoría ({corpus_dois[doi]})"
         elif h and h in existing_hashes:
             reason = "PDF idéntico ya en la categoría (hash)"
         elif doi and doi in seen_new:

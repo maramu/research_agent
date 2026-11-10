@@ -42,3 +42,17 @@ class TestSanitizeFilename:
         result = sanitize_filename("a" * 200 + ".pdf", max_len=50)
         assert len(result) <= 50
         assert result.endswith(".pdf")
+
+
+def test_rename_no_crea_sufijo_2_si_es_el_mismo_paper(tmp_path):
+    """Un PDF cuyo nombre canónico ya existe con contenido idéntico es un duplicado
+    intra-categoría: no debe generar `_2`."""
+    import importlib.util
+    from pathlib import Path
+    spec = importlib.util.spec_from_file_location(
+        "rename_mod", Path(__file__).resolve().parents[1] / "scripts" / "1_rename_papers_by_doi.py")
+    m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+    a = tmp_path / "a.pdf"; b = tmp_path / "b.pdf"; c = tmp_path / "c.pdf"
+    a.write_bytes(b"%PDF-1"); b.write_bytes(b"%PDF-1"); c.write_bytes(b"%PDF-2")
+    assert m.find_same_paper_in_folder(a, b, "10.1/x") == "PDF idéntico ya en la categoría"
+    assert m.find_same_paper_in_folder(tmp_path / "no.pdf", b, "10.1/x") is None

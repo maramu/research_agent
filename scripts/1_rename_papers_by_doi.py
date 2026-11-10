@@ -526,6 +526,60 @@ def move_to_failed(pdf_path: Path, failed_folder: Path) -> Path:
 # PROCESADO
 # ============================================================
 
+def find_same_paper_in_folder(target: Path, new_pdf: Path, new_doi: str) -> Optional[str]:
+    """Si ``target`` (nombre canónico ya ocupado en la carpeta) es el MISMO paper que
+    ``new_pdf``, devuelve el motivo; si no, None.
+
+    Mismo paper = contenido idéntico (hash) o mismo DOI. Evita el sufijo ``_2``: en una
+    misma categoría no debe haber dos copias del mismo paper (en categorías distintas sí).
+    """
+    import hashlib
+
+    if not target.exists() or target == new_pdf:
+        return None
+
+    def _sha(p: Path) -> str:
+        h = hashlib.sha256()
+        with p.open("rb") as f:
+            for b in iter(lambda: f.read(1 << 20), b""):
+                h.update(b)
+        return h.hexdigest()
+
+    try:
+        if _sha(target) == _sha(new_pdf):
+            return "PDF idéntico ya en la categoría"
+        other = normalize_doi(extract_doi_from_pdf(target) or "")
+        if other and new_doi and other == normalize_doi(new_doi):
+            return "mismo DOI ya en la categoría"
+    except Exception:
+        return None
+    return None
+
+
+def move_duplicate_to_quarantine(pdf_path: Path, reason: str, kept: str) -> Path:
+    """Aparta un duplicado intra-categoría a quarantine/duplicates/<ts>/<cat>/ (reversible,
+    con _manifest.csv igual que screen_new_pdfs_against_corpus)."""
+    import shutil
+    from datetime import datetime
+
+    cat = pdf_path.parent.parent.name if pdf_path.parent.name == "pdfs" else pdf_path.parent.name
+    root = Path("/Volumes/research/quarantine/duplicates")
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    qdir = root / ts / cat
+    qdir.mkdir(parents=True, exist_ok=True)
+    dest = unique_path(qdir / pdf_path.name)
+    original = str(pdf_path)
+    shutil.move(str(pdf_path), str(dest))
+    manifest = root / ts / "_manifest.csv"
+    new = not manifest.exists()
+    with manifest.open("a", encoding="utf-8", newline="") as f:
+        w = csv.writer(f)
+        if new:
+            w.writerow(["category", "filename", "reason", "original_path"])
+        w.writerow([cat, pdf_path.name, f"{reason} ({kept})", original])
+    return dest
+
+
 def process_pdf(
     pdf_path: Path,
     email: str,
@@ -625,7 +679,18 @@ def process_pdf(
         result["title"] = title
 
         new_name = build_new_filename(metadata, max_words=max_words)
-        target = unique_path(pdf_path.with_name(new_name))
+        target = pdf_path.with_name(new_name)
+        same = find_same_paper_in_folder(target, pdf_path, doi)
+        if same:
+            result["archivo_resultado"] = target.name
+            if apply_changes:
+                move_duplicate_to_quarantine(pdf_path, same, target.name)
+                result["estado"] = "DUPLICADO_EN_CATEGORIA"
+            else:
+                result["estado"] = "PREVIEW_DUPLICADO_EN_CATEGORIA"
+            log.info("Duplicado intra-categoría '%s' = '%s' (%s)", original, target.name, same)
+            return result
+        target = unique_path(target)
 
         if apply_changes:
             pdf_path.rename(target)

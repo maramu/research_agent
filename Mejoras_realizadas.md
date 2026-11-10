@@ -2,6 +2,17 @@
 > Histórico append-only (lo más nuevo arriba). Backlog: Mejoras_pendientes.md · Estado/arquitectura: ESTADO.md
 
 ---
+### ✅ 89. Duplicados: mismo paper en varias categorías sí, dos veces en la misma no (2026-11-10)
+
+**Síntoma (proyecto `vosc`):** 18 PDFs con sufijo `_2` (mismo paper dos veces en la categoría) y un PDF a cuarentena con «DOI ya en corpus (adhoc_20260521_SpringerBrief/…)».
+**Causas:**
+1. `1_rename_papers_by_doi.py` resolvía la colisión de nombre canónico con `unique_path` (`_2`, `_3`…) aunque el PDF fuera el mismo paper. Aquí: el flujo CSV ya había dejado 18 PDFs y luego se copiaron a mano los 60 PDFs de la selección (`01_Lin2018.pdf`…) y se pulsó «Renombrar por DOI» → los 18 repetidos salieron como `_2` (16 con bytes distintos, 2 idénticos) y se procesaron como papers independientes (18 `md_clean` `_2`).
+2. `pipeline.screen_new_pdfs_against_corpus` comparaba el DOI con el corpus **completo**, así que un PDF cuyo DOI estaba en otra categoría/proyecto se apartaba.
+**Arreglo:** (1) `find_same_paper_in_folder` + `move_duplicate_to_quarantine`: si el nombre canónico ya existe y es el mismo contenido (hash) o el mismo DOI, el PDF nuevo va a `quarantine/duplicates/<ts>/<cat>/` con manifiesto (estado `DUPLICADO_EN_CATEGORIA`) en vez de `_2`; si es otro paper con el mismo nombre, se mantiene `_2`. (2) `_load_corpus_doi_index(category=None)` filtra por categoría y el cribado solo cuenta duplicados de la **misma** categoría (motivo «DOI ya en la categoría»).
+**Tests:** `test_screen_permite_mismo_paper_en_otra_categoria`, `test_rename_no_crea_sufijo_2…` (370 OK).
+**Pendiente / no tocado:** los 18 `_2` ya existentes en `vosc` y el PDF en cuarentena (`quarantine/duplicates/20261110_114658`) siguen como estaban (borrar/restaurar solo si Martín lo pide). `3a_download_pdfs.py` sigue saltando DOIs presentes en cualquier categoría (`SKIPPED_CORPUS`); el flujo CSV los copia, pero el flujo Scopus a una categoría no añadiría un paper que solo esté en otra. `9_cleanup_duplicates` (página Duplicados) no se ha revisado.
+
+---
 ### ✅ 88. Pestaña «CSV» en Ingestar: CSV de Scopus cribado → proyecto ad-hoc (2026-11-09)
 
 **Necesidad:** ingestar la selección que el investigador ya cribó en Scopus (p. ej. `inbox/csv/Seleccion_RAG_VOSC_60.csv`, 60 DOIs) sin pasar por queries ni cribado.
