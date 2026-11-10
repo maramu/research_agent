@@ -1092,7 +1092,8 @@ def run_scopus(
         # Descargar directamente a categorias/<cat>/pdfs/
         dl_result = run_step(
             "3a_download_pdfs.py",
-            ["--csv", str(csv_path), "--out-dir", str(pdfs_dir), "--category", cat],
+            ["--csv", str(csv_path), "--out-dir", str(pdfs_dir), "--category", cat,
+             "--skip-scope", "category"],
             on_output=handler,
             label=f"download [{cat}]",
         )
@@ -1394,6 +1395,7 @@ def _copy_corpus_pdfs(
     listing: Dict[str, List[Path]] = {}
     copied = existing = 0
     not_found: List[str] = []
+    done: List[str] = []
     dest_dir.mkdir(parents=True, exist_ok=True)
     for doi in dois:
         loc = idx.get(_norm_doi_key(doi))
@@ -1408,6 +1410,7 @@ def _copy_corpus_pdfs(
         if match is None:
             not_found.append(doi)
             continue
+        done.append(_norm_doi_key(doi))
         dst = dest_dir / match.name
         if dst.exists():
             existing += 1
@@ -1416,7 +1419,7 @@ def _copy_corpus_pdfs(
             copied += 1
     emit(f"PDFs ya en el corpus copiados al proyecto: {copied} (ya presentes: {existing}, "
          f"sin PDF localizable: {len(not_found)})")
-    return {"copied": copied, "existing": existing, "not_found": not_found}
+    return {"copied": copied, "existing": existing, "not_found": not_found, "dois": done}
 
 
 def run_csv_adhoc(
@@ -1435,8 +1438,8 @@ def run_csv_adhoc(
     resultado es un proyecto ad-hoc normal: se integra luego con ``integrate_adhoc``
     o ``promote_adhoc_to_category``.
 
-    Los DOIs que ya están en el corpus NO se descargan de nuevo (``SKIPPED_CORPUS`` en 3a):
-    su PDF se DUPLICA desde la categoría de origen (``_copy_corpus_pdfs``).
+    Los DOIs que ya están en otras categorías NO se descargan: su PDF se DUPLICA desde la
+    categoría de origen (``_copy_corpus_pdfs``); 3a solo salta los de esta categoría.
 
     Returns:
         {"status": "ok"|"error", "project": name, "csv": {...}, "pdfs_total": N, "steps": {...}}
@@ -1474,7 +1477,16 @@ def run_csv_adhoc(
     # DOIs ya en el corpus: 3a los salta (SKIPPED_CORPUS); se duplican aquí desde su categoría
     corpus_copy = _copy_corpus_pdfs(list(df["DOI"]), pdfs_dir, on_output=handler)
 
-    dl_args = ["--csv", str(norm_csv), "--out-dir", str(pdfs_dir), "--category", name]
+    # 3a solo salta DOIs ya presentes en ESTA categoría; los copiados se excluyen del CSV
+    # de descarga para no bajarlos otra vez.
+    copied_dois = set(corpus_copy.get("dois", []))
+    dl_csv = norm_csv
+    if copied_dois:
+        dl_csv = src_dir / f"{name}_descarga.csv"
+        df[~df["DOI"].map(_norm_doi_key).isin(copied_dois)].to_csv(
+            dl_csv, index=False, encoding="utf-8-sig")
+    dl_args = ["--csv", str(dl_csv), "--out-dir", str(pdfs_dir), "--category", name,
+               "--skip-scope", "category"]
     if max_articles:
         dl_args += ["--max", str(max_articles)]
     dl = run_step("3a_download_pdfs.py", dl_args, on_output=handler, label=f"download [{name}]")

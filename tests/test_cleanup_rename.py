@@ -631,3 +631,19 @@ def test_screen_permite_mismo_paper_en_otra_categoria(tmp_path, monkeypatch):
     (tmp_path / "reg.txt").write_text("")
     res = pipeline.screen_new_pdfs_against_corpus("vosc")
     assert [q["file"] for q in res["quarantined"]] == ["nuevo.pdf"]
+
+
+def test_3a_skip_scope_category_solo_cuenta_la_propia_categoria(tmp_path, monkeypatch):
+    """Descarga Scopus: un DOI presente solo en OTRA categoría se descarga igualmente."""
+    import importlib.util, json, sys as _sys
+    spec = importlib.util.spec_from_file_location(
+        "dl3a", Path(__file__).resolve().parents[1] / "scripts" / "3a_download_pdfs.py")
+    m = importlib.util.module_from_spec(spec); _sys.modules["dl3a"] = m; spec.loader.exec_module(m)
+    monkeypatch.setattr(m, "NAS_ROOT", tmp_path)
+    for cat, doi in (("a", "10.1016/x.1"), ("b", "10.1016/y.2")):
+        d = tmp_path / "categorias" / cat / "metadata"; d.mkdir(parents=True)
+        (d / "papers_metadata.jsonl").write_text(json.dumps({"doi": doi}) + "\n")
+    out = tmp_path / "categorias" / "a" / "pdfs"; out.mkdir()
+    mgr = m.DownloadManager.__new__(m.DownloadManager)
+    mgr.cfg = type("C", (), {"category": "a", "output_dir": out})()
+    assert mgr._category_dois() == {"10.1016/x.1"}

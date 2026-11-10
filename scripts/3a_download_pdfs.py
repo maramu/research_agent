@@ -256,6 +256,7 @@ class Config:
 
     dry_run: bool = False
     category: str = ""
+    skip_scope: str = "corpus"   # "corpus": salta DOIs de cualquier categoría; "category": solo de --category
     use_cache: bool = True
     no_elsevier_api: bool = False
 
@@ -1485,6 +1486,30 @@ class DownloadManager:
 
         return res
 
+    def _category_dois(self) -> set:
+        """DOIs ya presentes en la categoría destino: papers_metadata.jsonl + DOI
+        embebido en el nombre de los PDFs de la carpeta de salida."""
+        import json as _json
+        dois: set = set()
+        meta = NAS_ROOT / "categorias" / self.cfg.category / "metadata" / "papers_metadata.jsonl"
+        if meta.exists():
+            for ln in meta.read_text(encoding="utf-8").splitlines():
+                try:
+                    d = normalize_doi(clean_text(_json.loads(ln).get("doi", "")))
+                except Exception:
+                    continue
+                if d:
+                    dois.add(d.lower())
+        try:
+            from utils.pdf_utils import extract_doi_from_filename
+            for f in Path(self.cfg.output_dir).glob("*.pdf"):
+                d = extract_doi_from_filename(f.name)
+                if d:
+                    dois.add(d.lower())
+        except Exception:
+            pass
+        return dois
+
     def run(self, df: pd.DataFrame) -> Tuple[List[DownloadResult], pd.DataFrame]:
         doi_col     = detect_column(df, ["DOI"])
         title_col   = detect_column(df, ["Title", "Article title", "Document title"])
@@ -1507,19 +1532,24 @@ class DownloadManager:
 
         results: List[DownloadResult] = []
 
-        # Leer doi_registry.txt una sola vez al inicio del lote
-        _REGISTRY_TXT = NAS_ROOT / "metadatos" / "doi_registry.txt"
+        # DOIs ya conocidos, una sola vez al inicio del lote
         known_corpus_dois: set = set()
-        if _REGISTRY_TXT.exists():
-            try:
-                with open(_REGISTRY_TXT, encoding="utf-8") as _rf:
-                    for _line in _rf:
-                        _d = _line.strip().split("\t")[0].lower()
-                        if _d:
-                            known_corpus_dois.add(_d)
-                log.info("doi_registry.txt: %d DOIs conocidos cargados", len(known_corpus_dois))
-            except Exception as _re:
-                log.warning("No se pudo leer doi_registry.txt: %s", _re)
+        if self.cfg.skip_scope == "category" and self.cfg.category:
+            known_corpus_dois = self._category_dois()
+            log.info("Categoría '%s': %d DOIs ya presentes (solo esta categoría cuenta)",
+                     self.cfg.category, len(known_corpus_dois))
+        else:
+            _REGISTRY_TXT = NAS_ROOT / "metadatos" / "doi_registry.txt"
+            if _REGISTRY_TXT.exists():
+                try:
+                    with open(_REGISTRY_TXT, encoding="utf-8") as _rf:
+                        for _line in _rf:
+                            _d = _line.strip().split("\t")[0].lower()
+                            if _d:
+                                known_corpus_dois.add(_d)
+                    log.info("doi_registry.txt: %d DOIs conocidos cargados", len(known_corpus_dois))
+                except Exception as _re:
+                    log.warning("No se pudo leer doi_registry.txt: %s", _re)
 
         # DOIs vetados (status='blocked' en el registro) — también una sola vez
         blocked: set = set()
@@ -1825,6 +1855,12 @@ def parse_args() -> argparse.Namespace:
         "--category", default="",
         help="Categoría del pipeline (para registro de pendientes)",
     )
+    parser.add_argument(
+        "--skip-scope", choices=["corpus", "category"], default="corpus",
+        help=("Qué DOIs ya conocidos se saltan: 'corpus' (defecto; cualquier categoría) o "
+              "'category' (solo los de --category: el mismo paper puede estar en varias "
+              "categorías, pero no dos veces en la misma)"),
+    )
     return parser.parse_args()
 
 
@@ -1864,6 +1900,7 @@ def main() -> None:
         max_articles              = args.max,
         dry_run                   = args.dry_run,
         category                  = args.category,
+        skip_scope                = args.skip_scope,
         use_cache                 = not args.no_cache,
         cache_max_age_days        = args.cache_age,
         max_seconds_per_article   = args.max_seconds_per_article,
