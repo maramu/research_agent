@@ -664,3 +664,11 @@ def test_duplicados_solo_dentro_de_la_misma_categoria(tmp_path):
     h = cleanup.detect_hash_duplicates(["a", "b"], base)
     assert len(t) == 1 and {p["category"] for p in t[0]["papers"]} == {"b"}
     assert len(h) == 1 and {p["category"] for p in h[0]["papers"]} == {"b"}
+
+
+def test_category_dirs_por_defecto_recorre_todas(tmp_path):
+    for c in ("microalgae", "vosc"):
+        (tmp_path / c).mkdir()
+    (tmp_path / "fichero.txt").write_text("x")
+    assert cleanup.category_dirs(tmp_path, None) == ["microalgae", "vosc"]
+    assert cleanup.category_dirs(tmp_path, ["vosc"]) == ["vosc"]

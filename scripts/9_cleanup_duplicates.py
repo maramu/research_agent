@@ -254,8 +254,13 @@ def _is_clean_stem(stem: str) -> bool:
 
 
 def category_dirs(base: Path, selected: Optional[list[str]]) -> list[str]:
-    cats = selected or CATEGORIES
-    return sorted(dict.fromkeys(cats))
+    """Categorías a revisar: las indicadas o, por defecto, TODAS las carpetas de ``base``
+    (categorías canónicas y proyectos ad-hoc)."""
+    if selected:
+        return sorted(dict.fromkeys(selected))
+    if base.exists():
+        return sorted(d.name for d in base.iterdir() if d.is_dir())
+    return sorted(CATEGORIES)
 
 
 def read_metadata(category: str, base: Path) -> list[PaperRecord]:
@@ -1493,7 +1498,7 @@ def parse_args() -> argparse.Namespace:
     mode.add_argument("--preview", action="store_true", help="Solo informar, no modificar nada (defecto)")
     mode.add_argument("--apply", action="store_true", help="Ejecutar la limpieza")
     ap.add_argument("--dry-run", action="store_true", help="Alias de --preview")
-    ap.add_argument("--category", action="append", choices=CATEGORIES, help="Limitar a una categoría (repetible)")
+    ap.add_argument("--category", action="append", help="Limitar a una categoría o proyecto (repetible); por defecto, todas")
     ap.add_argument("--doi", help="Resolver un DOI concreto manualmente")
     ap.add_argument("--base", default=str(DEFAULT_BASE), help=f"Directorio base (defecto: {DEFAULT_BASE})")
     return ap.parse_args()

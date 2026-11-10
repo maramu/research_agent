@@ -53,16 +53,20 @@ if "dup_nonce" not in st.session_state:
 
 
 @st.cache_data(show_spinner="Escaneando duplicados…")
-def scan(nonce: int):
-    base = CATEGORIAS_DIR
-    # Todas las categorías y proyectos ad-hoc del NAS (antes solo 8 fijas: vosc no se veía).
+def scan(nonce: int, cats: tuple):
     # Solo se buscan duplicados DENTRO de cada categoría; el mismo paper en varias es válido.
-    cats = sorted(d.name for d in base.iterdir() if d.is_dir()) if base.exists() else []
-    return (cleanup.detect_title_duplicates(cats, base),
-            cleanup.detect_hash_duplicates(cats, base))
+    base = CATEGORIAS_DIR
+    return (cleanup.detect_title_duplicates(list(cats), base),
+            cleanup.detect_hash_duplicates(list(cats), base))
 
 
-title_dups, hash_dups = scan(st.session_state.dup_nonce)
+_all_cats = cleanup.category_dirs(CATEGORIAS_DIR, None)   # canónicas + ad-hoc
+_sel_cats = st.multiselect(
+    "Categorías / proyectos a revisar", options=_all_cats, default=_all_cats,
+    help="Por defecto todas. Los duplicados se buscan dentro de cada categoría.",
+    key="dup_cats",
+)
+title_dups, hash_dups = scan(st.session_state.dup_nonce, tuple(_sel_cats))
 
 if st.button("🔄 Re-escanear"):
     st.session_state.dup_nonce += 1
