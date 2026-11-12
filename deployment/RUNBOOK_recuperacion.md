@@ -12,8 +12,7 @@ irremplazable son los PDFs, `metadata/papers_metadata.jsonl`, `metadatos/` (p. e
 3. **Secretos.** Re-emitir `config/.env` desde el gestor de contraseñas (no está en git ni en el rsync).
 4. **Python.** `/opt/homebrew/bin/python3.13 -m venv ~/venvs/rag_papers` y
    `~/venvs/rag_papers/bin/pip install -r requirements-lock.txt` (versiones exactas de producción a
-   2026-10-28; `requirements.txt` es la versión no fijada). Si se toca una dependencia, replicar también
-   en `.venv/` del repo.
+   2026-10-28; `requirements.txt` es la versión no fijada).
 5. **Ollama.** Tarball oficial de GitHub (no Homebrew ni `install.sh`) → `/usr/local/bin/ollama` y
    `/usr/local/lib/ollama/`; copiar `deployment/com.martin.ollama.plist` a `~/Library/LaunchAgents/`
    (`OLLAMA_HOST=127.0.0.1:11435`, `OLLAMA_ORIGINS`, `KeepAlive`; detalles en "Ollama — instalación en pciq22" de `ESTADO.md`) y `ollama pull bge-m3` + `ollama pull qwen2.5:14b-instruct`.

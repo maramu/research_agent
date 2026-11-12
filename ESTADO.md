@@ -20,14 +20,11 @@
 > LaunchAgents de Streamlit (privado/público) — cualquier cambio en
 > dependencias de producción va ahí.
 >
-> **`.venv/` del repo (`research_agent/.venv/`) — recreado 2026-07-12.**
-> Apuntaba a `python3.14` de Homebrew (symlinks rotos, ya desinstalado);
-> recreado con `python3.13 -m venv .venv` (mismo Python que
-> `~/venvs/rag_papers`) + `pip install -r requirements.txt`, sin errores.
-> Es el venv para trabajo **ad-hoc en terminal** (`pytest`,
-> `validate_metadata.py`, scripts sueltos) — NO lo usa ningún LaunchAgent;
-> si se toca una dependencia de producción, replicar también en
-> `~/venvs/rag_papers`.
+> **Sin `.venv/` en el repo (eliminado 2026-11-12).** Todo (LaunchAgents y
+> trabajo ad-hoc en terminal: `pytest`, `validate_metadata.py`, scripts
+> sueltos) usa un único venv, `~/venvs/rag_papers`, con las mismas 116
+> dependencias que tenía el `.venv` del repo. Ya no hay que replicar cambios
+> en dos sitios.
 
 ### Auditorías externas / de calidad
 
